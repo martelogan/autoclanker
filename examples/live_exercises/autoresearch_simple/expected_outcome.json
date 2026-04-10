@@ -1,0 +1,27 @@
+{
+  "baseline": {
+    "train.depth": "depth_8",
+    "train.window_pattern": "window_SSSL",
+    "batch.total": "batch_2_19",
+    "optim.matrix_lr": "lr_0_04",
+    "schedule.warmup_ratio": "warmup_0_0"
+  },
+  "improved": {
+    "train.depth": "depth_10",
+    "train.window_pattern": "window_SSSL",
+    "batch.total": "batch_2_18",
+    "optim.matrix_lr": "lr_0_03",
+    "schedule.warmup_ratio": "warmup_0_1"
+  },
+  "failure_candidate": {
+    "train.depth": "depth_10",
+    "train.window_pattern": "window_L",
+    "batch.total": "batch_2_20",
+    "optim.matrix_lr": "lr_0_05",
+    "schedule.warmup_ratio": "warmup_0_0"
+  },
+  "expectation": {
+    "delta_perf_at_least": 0.015,
+    "failure_status": "oom"
+  }
+}

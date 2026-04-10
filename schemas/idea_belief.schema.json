@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autoclanker.dev/schemas/idea_belief.schema.json",
+  "title": "autoclanker beginner idea input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ideas"],
+  "properties": {
+    "session_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["era_id"],
+      "properties": {
+        "era_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hardware_profile_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "budget_profile_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "author": {
+          "type": "string",
+          "minLength": 1
+        },
+        "user_profile": {
+          "type": "string",
+          "enum": ["basic", "expert"]
+        }
+      }
+    },
+    "ideas": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["idea"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "idea": {
+                "type": "string",
+                "minLength": 1
+              },
+              "confidence": {
+                "type": "integer",
+                "enum": [1, 2, 3, 4]
+              },
+              "target": {
+                "type": "string",
+                "minLength": 3
+              },
+              "option": {
+                "type": "string",
+                "minLength": 3
+              },
+              "members": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 4,
+                "items": {
+                  "type": "string",
+                  "minLength": 3
+                }
+              },
+              "options": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 4,
+                "items": {
+                  "type": "string",
+                  "minLength": 3
+                }
+              },
+              "effect": {
+                "type": "string",
+                "enum": ["help", "hurt"]
+              },
+              "relation": {
+                "type": "string",
+                "enum": ["synergy", "conflict", "dependency", "exclusion"]
+              },
+              "scope": {
+                "type": "string",
+                "enum": ["prompt", "gene", "patch", "constraint", "other"]
+              },
+              "evidence_sources": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "intuition",
+                    "prior_run",
+                    "paper",
+                    "code_inspection",
+                    "benchmark",
+                    "other"
+                  ]
+                }
+              },
+              "risks": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "compile_fail",
+                    "runtime_fail",
+                    "oom",
+                    "timeout",
+                    "metric_instability"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

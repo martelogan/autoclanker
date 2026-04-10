@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/schemas/eval_result.schema.json",
+  "title": "BayesLayerEvalResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "era_id",
+    "candidate_id",
+    "intended_genotype",
+    "realized_genotype",
+    "patch_hash",
+    "status",
+    "seed",
+    "runtime_sec",
+    "peak_vram_mb",
+    "raw_metrics",
+    "delta_perf",
+    "utility",
+    "replication_index"
+  ],
+  "properties": {
+    "era_id": { "type": "string", "minLength": 1 },
+    "candidate_id": { "type": "string", "minLength": 1 },
+    "intended_genotype": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/GeneStateRef" }
+    },
+    "realized_genotype": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/GeneStateRef" }
+    },
+    "patch_hash": { "type": "string", "minLength": 1 },
+    "status": {
+      "type": "string",
+      "enum": ["valid", "compile_fail", "runtime_fail", "oom", "timeout"]
+    },
+    "seed": { "type": "integer", "minimum": 0 },
+    "runtime_sec": { "type": "number", "minimum": 0 },
+    "peak_vram_mb": { "type": "number", "minimum": 0 },
+    "raw_metrics": {
+      "type": "object",
+      "additionalProperties": {
+        "type": ["number", "integer", "string", "boolean", "null"]
+      }
+    },
+    "delta_perf": { "type": "number" },
+    "utility": { "type": "number" },
+    "replication_index": { "type": "integer", "minimum": 0 },
+    "stdout_digest": { "type": "string" },
+    "stderr_digest": { "type": "string" },
+    "artifact_paths": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "failure_metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "GeneStateRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gene_id", "state_id"],
+      "properties": {
+        "gene_id": { "type": "string", "minLength": 1 },
+        "state_id": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

@@ -1,0 +1,51 @@
+session_context:
+  session_id: exercise_cevolve_synergy
+  era_id: era_live_cevolve
+  author: live_exercise@example.com
+  user_profile: expert
+beliefs:
+- id: ce1
+  kind: idea
+  confidence_level: 3
+  evidence_sources:
+  - benchmark
+  gene:
+    gene_id: sort.threshold
+    state_id: threshold_32
+  effect_strength: 3
+  rationale: The workload mix tends to favor the medium insertion threshold.
+- id: ce2
+  kind: idea
+  confidence_level: 2
+  evidence_sources:
+  - benchmark
+  gene:
+    gene_id: sort.partition
+    state_id: partition_hoare
+  effect_strength: 2
+  rationale: Hoare partitioning is usually better on the deterministic target.
+- id: ce3
+  kind: relation
+  confidence_level: 4
+  evidence_sources:
+  - benchmark
+  members:
+  - gene_id: sort.threshold
+    state_id: threshold_32
+  - gene_id: sort.partition
+    state_id: partition_hoare
+  relation: synergy
+  strength: 3
+  joint_effect_strength: 3
+  rationale: These two changes interact much more strongly together than separately.
+- id: ce4
+  kind: constraint
+  confidence_level: 2
+  evidence_sources:
+  - benchmark
+  constraint_type: soft_avoid
+  severity: 2
+  scope:
+  - gene_id: sort.pivot
+    state_id: pivot_random
+  rationale: Random pivots consistently hurt this workload mix.

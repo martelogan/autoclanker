@@ -1,0 +1,114 @@
+beliefs:
+  effect_strength_to_prior_mean:
+    '-3': -1.5
+    '-2': -1.0
+    '-1': -0.4
+    '0': 0.0
+    '1': 0.4
+    '2': 1.0
+    '3': 1.5
+  confidence_level_to_variance_scale:
+    '1': 2.5
+    '2': 1.8
+    '3': 1.2
+    '4': 0.8
+  relation_strength_to_pair_mean:
+    '1': 0.25
+    '2': 0.6
+    '3': 1.0
+  prior_decay:
+    per_eval_multiplier: 0.92
+    cross_era_main_effect_transfer: 0.35
+    cross_era_pair_effect_transfer: 0.2
+  preview_required: true
+objective:
+  utility:
+    lambda_sparsity: 0.1
+    lambda_vram: 0.01
+    soft_vram_limit_mb: 24000
+  surrogate:
+    kind: bayesian_linear_interaction
+    include_active_gene_count: true
+    include_metadata_features: true
+    max_pair_features: 200
+feasibility:
+  surrogate:
+    kind: bayesian_logistic
+    enable_failure_modes:
+    - compile_fail
+    - runtime_fail
+    - oom
+    - timeout
+vram:
+  enabled: true
+  surrogate:
+    kind: bayesian_linear
+candidate_pool:
+  mix:
+    posterior_guided_ga: 0.5
+    local_bayesian_neighbors: 0.2
+    uncertainty_probes: 0.2
+    random_novelty: 0.1
+  diversity:
+    enabled: true
+    min_hamming_distance: 1
+acquisition:
+  kind: constrained_thompson_sampling
+  score_formula: p_valid_times_sampled_utility
+query_policy:
+  enabled: true
+  max_queries_per_era: 5
+  min_expected_value_of_information: 0.1
+  allowed_query_types:
+  - effect_sign
+  - risk_triage
+  - relation_check
+  - pairwise_preference
+commit:
+  posterior_gain_probability_threshold: 0.9
+  min_valid_probability: 0.8
+  epsilon_commit_floor: 0.25
+replication:
+  enabled: true
+  fraction: 0.1
+  always_consider:
+  - baseline
+  - incumbent
+  - near_commit
+integration:
+  emit_schema_validated_eval_results: true
+  preserve_intended_and_realized_genotypes: true
+  aggregate_by_patch_hash: true
+  builtin_adapters:
+  - fixture
+  - autoresearch
+  - cevolve
+interface:
+  primary_surface: cli
+  default_belief_file_format: yaml
+  default_user_profile: basic
+  preview_required: true
+  stdout_format: json
+  quiet_machine_readable_commands: true
+session_store:
+  kind: filesystem
+  default_root: .autoclanker
+  allow_external_session_roots: true
+  artifact_filenames:
+    manifest: session_manifest.yaml
+    beliefs: beliefs.yaml
+    surface_snapshot: surface_snapshot.json
+    surface_overlay: surface_overlay.json
+    canonicalization_summary: canonicalization_summary.json
+    compiled_preview: compiled_preview.json
+    compiled_priors: compiled_priors.json
+    observations: observations.jsonl
+    posterior_summary: posterior_summary.json
+    query: query.json
+    commit_decision: commit_decision.json
+    influence_summary: influence_summary.json
+graph:
+  user_visible_by_default: false
+  auto_derive_from_data: true
+  allow_graph_directives: true
+  default_screening_mode: auto

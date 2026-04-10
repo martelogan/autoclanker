@@ -1,0 +1,891 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/schemas/human_belief.schema.json",
+  "title": "HumanBeliefBatch",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "session_context",
+    "beliefs"
+  ],
+  "properties": {
+    "session_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "era_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hardware_profile_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "budget_profile_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "author": {
+          "type": "string",
+          "minLength": 1
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "user_profile": {
+          "type": "string",
+          "enum": [
+            "basic",
+            "expert"
+          ]
+        }
+      }
+    },
+    "beliefs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/ProposalBelief"
+          },
+          {
+            "$ref": "#/$defs/IdeaBelief"
+          },
+          {
+            "$ref": "#/$defs/RelationBelief"
+          },
+          {
+            "$ref": "#/$defs/PreferenceBelief"
+          },
+          {
+            "$ref": "#/$defs/ConstraintBelief"
+          },
+          {
+            "$ref": "#/$defs/ExpertPriorBelief"
+          },
+          {
+            "$ref": "#/$defs/GraphDirectiveBelief"
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "GeneStateRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gene_id",
+        "state_id"
+      ],
+      "properties": {
+        "gene_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "RiskVector": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "compile_fail": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "runtime_fail": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "oom": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "metric_instability": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        }
+      },
+      "default": {}
+    },
+    "CandidatePattern": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "members"
+      ],
+      "properties": {
+        "members": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/GeneStateRef"
+          }
+        }
+      }
+    },
+    "MainEffectTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_kind",
+        "gene"
+      ],
+      "properties": {
+        "target_kind": {
+          "const": "main_effect"
+        },
+        "gene": {
+          "$ref": "#/$defs/GeneStateRef"
+        }
+      }
+    },
+    "PairEffectTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_kind",
+        "members"
+      ],
+      "properties": {
+        "target_kind": {
+          "const": "pair_effect"
+        },
+        "members": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/GeneStateRef"
+          }
+        }
+      }
+    },
+    "FeasibilityTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_kind",
+        "gene",
+        "failure_mode"
+      ],
+      "properties": {
+        "target_kind": {
+          "const": "feasibility_logit"
+        },
+        "gene": {
+          "$ref": "#/$defs/GeneStateRef"
+        },
+        "failure_mode": {
+          "type": "string",
+          "enum": [
+            "valid_run",
+            "compile_fail",
+            "runtime_fail",
+            "oom",
+            "timeout",
+            "metric_instability"
+          ]
+        }
+      }
+    },
+    "VramTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_kind",
+        "gene"
+      ],
+      "properties": {
+        "target_kind": {
+          "const": "vram_effect"
+        },
+        "gene": {
+          "$ref": "#/$defs/GeneStateRef"
+        }
+      }
+    },
+    "ExpertTarget": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/MainEffectTarget"
+        },
+        {
+          "$ref": "#/$defs/PairEffectTarget"
+        },
+        {
+          "$ref": "#/$defs/FeasibilityTarget"
+        },
+        {
+          "$ref": "#/$defs/VramTarget"
+        }
+      ]
+    },
+    "DecayOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "per_eval_multiplier": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "cross_era_transfer": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "ProposalBelief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "confidence_level",
+        "proposal_text"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "proposal"
+        },
+        "confidence_level": {
+          "type": "integer",
+          "enum": [
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        "evidence_sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "intuition",
+              "prior_run",
+              "paper",
+              "code_inspection",
+              "benchmark",
+              "other"
+            ]
+          },
+          "default": []
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hardware_profile_id": {
+              "type": "string"
+            },
+            "budget_profile_id": {
+              "type": "string"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "rationale": {
+          "type": "string",
+          "default": ""
+        },
+        "proposal_text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "suggested_scope": {
+          "type": "string",
+          "enum": [
+            "prompt",
+            "gene",
+            "patch",
+            "constraint",
+            "other"
+          ]
+        },
+        "risk_hints": {
+          "$ref": "#/$defs/RiskVector"
+        }
+      }
+    },
+    "IdeaBelief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "confidence_level",
+        "gene",
+        "effect_strength"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "idea"
+        },
+        "confidence_level": {
+          "type": "integer",
+          "enum": [
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        "evidence_sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "intuition",
+              "prior_run",
+              "paper",
+              "code_inspection",
+              "benchmark",
+              "other"
+            ]
+          },
+          "default": []
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hardware_profile_id": {
+              "type": "string"
+            },
+            "budget_profile_id": {
+              "type": "string"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "rationale": {
+          "type": "string",
+          "default": ""
+        },
+        "gene": {
+          "$ref": "#/$defs/GeneStateRef"
+        },
+        "effect_strength": {
+          "type": "integer",
+          "enum": [
+            -3,
+            -2,
+            -1,
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "risk": {
+          "$ref": "#/$defs/RiskVector"
+        },
+        "complexity_delta": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        }
+      }
+    },
+    "RelationBelief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "confidence_level",
+        "members",
+        "relation",
+        "strength"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "relation"
+        },
+        "confidence_level": {
+          "type": "integer",
+          "enum": [
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        "evidence_sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "intuition",
+              "prior_run",
+              "paper",
+              "code_inspection",
+              "benchmark",
+              "other"
+            ]
+          },
+          "default": []
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hardware_profile_id": {
+              "type": "string"
+            },
+            "budget_profile_id": {
+              "type": "string"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "rationale": {
+          "type": "string",
+          "default": ""
+        },
+        "members": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/GeneStateRef"
+          }
+        },
+        "relation": {
+          "type": "string",
+          "enum": [
+            "synergy",
+            "conflict",
+            "dependency",
+            "exclusion"
+          ]
+        },
+        "strength": {
+          "type": "integer",
+          "enum": [
+            1,
+            2,
+            3
+          ]
+        },
+        "joint_effect_strength": {
+          "type": "integer",
+          "enum": [
+            -3,
+            -2,
+            -1,
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      }
+    },
+    "PreferenceBelief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "confidence_level",
+        "left_pattern",
+        "right_pattern",
+        "preference",
+        "strength"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "preference"
+        },
+        "confidence_level": {
+          "type": "integer",
+          "enum": [
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        "evidence_sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "intuition",
+              "prior_run",
+              "paper",
+              "code_inspection",
+              "benchmark",
+              "other"
+            ]
+          },
+          "default": []
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hardware_profile_id": {
+              "type": "string"
+            },
+            "budget_profile_id": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "rationale": {
+          "type": "string",
+          "default": ""
+        },
+        "left_pattern": {
+          "$ref": "#/$defs/CandidatePattern"
+        },
+        "right_pattern": {
+          "$ref": "#/$defs/CandidatePattern"
+        },
+        "preference": {
+          "type": "string",
+          "enum": [
+            "left",
+            "right",
+            "tie"
+          ]
+        },
+        "strength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        }
+      }
+    },
+    "ConstraintBelief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "confidence_level",
+        "constraint_type",
+        "severity",
+        "scope"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "constraint"
+        },
+        "confidence_level": {
+          "type": "integer",
+          "enum": [
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        "evidence_sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "intuition",
+              "prior_run",
+              "paper",
+              "code_inspection",
+              "benchmark",
+              "other"
+            ]
+          },
+          "default": []
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hardware_profile_id": {
+              "type": "string"
+            },
+            "budget_profile_id": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "rationale": {
+          "type": "string",
+          "default": ""
+        },
+        "constraint_type": {
+          "type": "string",
+          "enum": [
+            "hard_exclude",
+            "soft_avoid",
+            "require",
+            "budget_cap"
+          ]
+        },
+        "severity": {
+          "type": "integer",
+          "enum": [
+            1,
+            2,
+            3
+          ]
+        },
+        "scope": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/GeneStateRef"
+          }
+        }
+      }
+    },
+    "ExpertPriorBelief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "confidence_level",
+        "target",
+        "prior_family",
+        "mean",
+        "scale"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "expert_prior"
+        },
+        "confidence_level": {
+          "type": "integer",
+          "enum": [
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        "evidence_sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "intuition",
+              "prior_run",
+              "paper",
+              "code_inspection",
+              "benchmark",
+              "other"
+            ]
+          },
+          "default": []
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hardware_profile_id": {
+              "type": "string"
+            },
+            "budget_profile_id": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "rationale": {
+          "type": "string",
+          "default": ""
+        },
+        "target": {
+          "$ref": "#/$defs/ExpertTarget"
+        },
+        "prior_family": {
+          "type": "string",
+          "enum": [
+            "normal",
+            "logit_normal"
+          ]
+        },
+        "mean": {
+          "type": "number"
+        },
+        "scale": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "observation_weight": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "decay_override": {
+          "$ref": "#/$defs/DecayOverride"
+        }
+      }
+    },
+    "GraphDirectiveBelief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "confidence_level",
+        "members",
+        "directive",
+        "strength"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "graph_directive"
+        },
+        "confidence_level": {
+          "type": "integer",
+          "enum": [
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        "evidence_sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "intuition",
+              "prior_run",
+              "paper",
+              "code_inspection",
+              "benchmark",
+              "other"
+            ]
+          },
+          "default": []
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "members": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/GeneStateRef"
+          }
+        },
+        "directive": {
+          "type": "string",
+          "enum": [
+            "screen_include",
+            "screen_exclude",
+            "linkage_positive",
+            "linkage_negative"
+          ]
+        },
+        "strength": {
+          "type": "integer",
+          "enum": [
+            1,
+            2,
+            3
+          ]
+        },
+        "rationale": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

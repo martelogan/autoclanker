@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/schemas/compiled_prior_preview.schema.json",
+  "title": "CompiledPriorPreview",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "era_id",
+    "belief_previews"
+  ],
+  "properties": {
+    "era_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "belief_previews": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "belief_id",
+          "compile_status",
+          "compiled_items",
+          "warnings"
+        ],
+        "properties": {
+          "belief_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "compile_status": {
+            "type": "string",
+            "enum": [
+              "compiled",
+              "metadata_only",
+              "rejected"
+            ]
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "influence_summary": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "compiled_items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target_kind",
+                "target_ref",
+                "prior_family",
+                "mean",
+                "scale"
+              ],
+              "properties": {
+                "target_kind": {
+                  "type": "string",
+                  "enum": [
+                    "main_effect",
+                    "pair_effect",
+                    "feasibility_logit",
+                    "vram_effect",
+                    "mask",
+                    "preference_pseudo_observation",
+                    "screening_hint",
+                    "linkage_hint"
+                  ]
+                },
+                "target_ref": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "prior_family": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "mean": {
+                  "type": "number"
+                },
+                "scale": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "observation_weight": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "decay": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "per_eval_multiplier": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1
+                    },
+                    "cross_era_transfer": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
+                  }
+                },
+                "notes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

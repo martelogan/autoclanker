@@ -1,0 +1,8 @@
+adapter:
+  kind: autoresearch
+  mode: auto
+  repo_path: ../../../.local/real-upstreams/autoresearch
+  session_root: .autoclanker-exercises
+  allow_missing: false
+  metadata:
+    adapter_module: autoclanker.bayes_layer.live_upstreams

@@ -1,0 +1,10 @@
+{
+  "baseline_variant": "baseline.py",
+  "observed_best_variant": "local_observed_best.py",
+  "belief_guided_variant": "belief_guided.py",
+  "risky_variant": "risky_oom.py",
+  "expectation": {
+    "belief_guided_utility_gain_over_local_best": 0.25,
+    "risky_status": "oom"
+  }
+}

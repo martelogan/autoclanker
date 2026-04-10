@@ -1,0 +1,123 @@
+{
+  "session_context": {
+    "session_id": "demo_expert",
+    "era_id": "era_003",
+    "hardware_profile_id": "a100_80gb",
+    "budget_profile_id": "5min_eval",
+    "author": "bo_power_user@example.com",
+    "user_profile": "expert"
+  },
+  "beliefs": [
+    {
+      "id": "e1",
+      "kind": "expert_prior",
+      "confidence_level": 4,
+      "evidence_sources": [
+        "paper",
+        "prior_run"
+      ],
+      "target": {
+        "target_kind": "main_effect",
+        "gene": {
+          "gene_id": "parser.matcher",
+          "state_id": "matcher_compiled"
+        }
+      },
+      "prior_family": "normal",
+      "mean": 0.85,
+      "scale": 0.35,
+      "observation_weight": 1.5,
+      "rationale": "Direct utility prior for compiled regex matching in era-normalized units."
+    },
+    {
+      "id": "e2",
+      "kind": "expert_prior",
+      "confidence_level": 3,
+      "evidence_sources": [
+        "prior_run"
+      ],
+      "target": {
+        "target_kind": "pair_effect",
+        "members": [
+          {
+            "gene_id": "parser.matcher",
+            "state_id": "matcher_compiled"
+          },
+          {
+            "gene_id": "parser.plan",
+            "state_id": "plan_context_pair"
+          }
+        ]
+      },
+      "prior_family": "normal",
+      "mean": 0.6,
+      "scale": 0.4,
+      "decay_override": {
+        "per_eval_multiplier": 0.95,
+        "cross_era_transfer": 0.25
+      }
+    },
+    {
+      "id": "e3",
+      "kind": "expert_prior",
+      "confidence_level": 2,
+      "evidence_sources": [
+        "benchmark"
+      ],
+      "target": {
+        "target_kind": "feasibility_logit",
+        "gene": {
+          "gene_id": "capture.window",
+          "state_id": "window_wide"
+        },
+        "failure_mode": "oom"
+      },
+      "prior_family": "logit_normal",
+      "mean": 1.1,
+      "scale": 0.5,
+      "rationale": "Positive logit prior increases expected OOM risk."
+    },
+    {
+      "id": "e4",
+      "kind": "graph_directive",
+      "confidence_level": 4,
+      "evidence_sources": [
+        "prior_run"
+      ],
+      "members": [
+        {
+          "gene_id": "parser.matcher",
+          "state_id": "matcher_compiled"
+        },
+        {
+          "gene_id": "parser.plan",
+          "state_id": "plan_context_pair"
+        }
+      ],
+      "directive": "screen_include",
+      "strength": 3,
+      "rationale": "Always model this pair explicitly; it has repeatedly mattered in past parser runs."
+    },
+    {
+      "id": "e5",
+      "kind": "graph_directive",
+      "confidence_level": 3,
+      "evidence_sources": [
+        "code_inspection"
+      ],
+      "members": [
+        {
+          "gene_id": "capture.window",
+          "state_id": "window_wide"
+        },
+        {
+          "gene_id": "io.chunk",
+          "state_id": "chunk_large"
+        }
+      ],
+      "directive": "linkage_negative",
+      "strength": 2,
+      "rationale": "This pair tends to create unstable memory pressure and should not be favored together."
+    }
+  ]
+}

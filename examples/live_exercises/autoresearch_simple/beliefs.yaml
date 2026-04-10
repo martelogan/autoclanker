@@ -1,0 +1,51 @@
+session_context:
+  session_id: exercise_autoresearch_simple
+  era_id: era_live_autoresearch
+  author: live_exercise@example.com
+  user_profile: basic
+beliefs:
+- id: ar1
+  kind: idea
+  confidence_level: 3
+  evidence_sources:
+  - prior_run
+  gene:
+    gene_id: train.depth
+    state_id: depth_10
+  effect_strength: 3
+  rationale: Extra depth helps on the lightweight upstream-anchored landscape.
+- id: ar2
+  kind: idea
+  confidence_level: 3
+  evidence_sources:
+  - prior_run
+  gene:
+    gene_id: optim.matrix_lr
+    state_id: lr_0_03
+  effect_strength: 3
+  rationale: A slightly lower matrix learning rate improves stability.
+- id: ar3
+  kind: relation
+  confidence_level: 2
+  evidence_sources:
+  - prior_run
+  members:
+  - gene_id: train.depth
+    state_id: depth_10
+  - gene_id: optim.matrix_lr
+    state_id: lr_0_03
+  relation: synergy
+  strength: 3
+  joint_effect_strength: 3
+  rationale: Extra depth works best when the matrix learning rate is slightly reduced.
+- id: ar4
+  kind: constraint
+  confidence_level: 3
+  evidence_sources:
+  - prior_run
+  constraint_type: soft_avoid
+  severity: 3
+  scope:
+  - gene_id: batch.total
+    state_id: batch_2_20
+  rationale: The largest batch size tends to create memory pressure in this exercise.

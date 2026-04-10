@@ -1,0 +1,6 @@
+{
+  "ideas": [
+    "Give compiled matching an explicit stronger prior on this parser with a conservative normal prior.",
+    "Keep compiled matching and the context-pair plan together in the interaction screen."
+  ]
+}

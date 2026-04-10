@@ -1,0 +1,24 @@
+# autoclanker strict environment mode: devenv + direnv.
+#
+# Usage:
+# 1) cp dev/env/envrc.devenv.example .envrc
+# 2) direnv allow
+#
+# Activation owner rule:
+# - In this mode, direnv owns activation.
+# - Do not also enable `mise activate` for this repo.
+
+export PATH="$PWD/.local/dev/bin:$PWD/.venv/bin:$PATH"
+
+if ! command -v devenv >/dev/null 2>&1; then
+  echo "devenv not found. Install devenv or use default bin/dev workflow." >&2
+  exit 1
+fi
+
+eval "$(devenv direnvrc)"
+use devenv
+
+dotenv_if_exists .env
+dotenv_if_exists .env.local
+
+export UV_CACHE_DIR="$PWD/.local/dev/uv-cache"

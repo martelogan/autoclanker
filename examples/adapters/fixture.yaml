@@ -1,0 +1,5 @@
+adapter:
+  kind: fixture
+  mode: fixture
+  session_root: .autoclanker
+  allow_missing: false

@@ -1,0 +1,37 @@
+{
+  "session_context": {
+    "session_id": "quickstart_log_parser",
+    "era_id": "era_log_parser_v1",
+    "author": "beginner_demo@example.com"
+  },
+  "ideas": [
+    {
+      "idea": "Compiled regex matching usually helps this parser on repeated log formats.",
+      "confidence": 2,
+      "option": "parser.matcher=matcher_compiled",
+      "effect": "help",
+      "risks": ["metric_instability"]
+    },
+    {
+      "idea": "Compiled matching works best with the context-pair plan on repeated error traces.",
+      "confidence": 2,
+      "options": [
+        "parser.matcher=matcher_compiled",
+        "parser.plan=plan_context_pair"
+      ]
+    },
+    {
+      "idea": "A wide capture window regularly blows the memory budget on long traces.",
+      "confidence": 3,
+      "option": "capture.window=window_wide",
+      "effect": "hurt",
+      "risks": ["oom"]
+    },
+    {
+      "idea": "Try streaming summary output if the capture window stays default.",
+      "confidence": 1,
+      "scope": "patch",
+      "risks": ["metric_instability"]
+    }
+  ]
+}

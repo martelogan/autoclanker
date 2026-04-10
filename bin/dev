@@ -1,0 +1,421 @@
+#!/usr/bin/env bash
+#
+# autoclanker developer command front door.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${ROOT_DIR}"
+# shellcheck source=../scripts/dev/common.sh
+source "${ROOT_DIR}/scripts/dev/common.sh"
+
+INSTALL_ROOT="${AUTOCLANKER_DEV_INSTALL_ROOT:-${ROOT_DIR}/.local/dev}"
+LOCAL_MISE_BIN="${INSTALL_ROOT}/mise/bin/mise"
+LOCAL_BIN_DIR="${INSTALL_ROOT}/bin"
+
+export PATH="${LOCAL_BIN_DIR}:${ROOT_DIR}/.venv/bin:${PATH}"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-${ROOT_DIR}/.local/dev/uv-cache}"
+
+export MISE_DATA_DIR="${MISE_DATA_DIR:-${ROOT_DIR}/.mise/data}"
+export MISE_CACHE_DIR="${MISE_CACHE_DIR:-${ROOT_DIR}/.mise/cache}"
+export MISE_CONFIG_DIR="${MISE_CONFIG_DIR:-${ROOT_DIR}/.mise/config}"
+export MISE_STATE_DIR="${MISE_STATE_DIR:-${ROOT_DIR}/.mise/state}"
+
+print_help() {
+    cat <<'HELP'
+Usage: bin/dev <command> [args]
+
+Core commands:
+  setup
+  format
+  lint
+  typecheck
+  pylint
+  test
+  test-unit
+  test-integration
+  test-full
+  test-upstream-live
+  test-live
+  test-max-live
+  test-all
+  build
+  check
+
+Other:
+  deps upstreams [autoresearch|cevolve|all]
+  deps autoresearch
+  deps cevolve
+  exec -- <command...>
+  doctor
+  bootstrap
+  strict-env status
+  strict-env devenv
+  strict-env devcontainer
+  strict-env validate
+
+Environment knobs:
+  AUTOCLANKER_DEV_MISE_BIN
+  AUTOCLANKER_DEV_DISABLE_BOOTSTRAP=1
+  AUTOCLANKER_DEV_INSTALL_ROOT
+HELP
+}
+
+err() {
+    echo "error: $*" >&2
+}
+
+find_mise() {
+    if [[ -n "${AUTOCLANKER_DEV_MISE_BIN:-}" && -x "${AUTOCLANKER_DEV_MISE_BIN}" ]]; then
+        echo "${AUTOCLANKER_DEV_MISE_BIN}"
+        return 0
+    fi
+    if [[ -x "${LOCAL_MISE_BIN}" ]]; then
+        echo "${LOCAL_MISE_BIN}"
+        return 0
+    fi
+    if command -v mise >/dev/null 2>&1; then
+        command -v mise
+        return 0
+    fi
+    return 1
+}
+
+bootstrap_mise() {
+    if [[ "${AUTOCLANKER_DEV_DISABLE_BOOTSTRAP:-0}" == "1" ]]; then
+        return 1
+    fi
+
+    "${ROOT_DIR}/scripts/dev/bootstrap-mise.sh" >/dev/null
+    if [[ -x "${LOCAL_MISE_BIN}" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+run_task_with_mise_or_fallback() {
+    local task="$1"
+    shift
+    local unavailable_rc=86
+    local stderr_log
+    local rc
+    local had_errexit=0
+
+    [[ $- == *e* ]] && had_errexit=1
+
+    local mise_bin
+    if mise_bin="$(find_mise)"; then
+        stderr_log="$(mktemp)"
+        set +e
+        "${mise_bin}" run "${task}" "$@" 2>"${stderr_log}"
+        rc=$?
+        if [[ ${had_errexit} -eq 1 ]]; then
+            set -e
+        fi
+        if [[ ${rc} -ne 0 ]] && grep -Eq "not trusted|are not trusted" "${stderr_log}"; then
+            rm -f "${stderr_log}"
+            return "${unavailable_rc}"
+        fi
+        if [[ -s "${stderr_log}" ]]; then
+            cat "${stderr_log}" >&2
+        fi
+        rm -f "${stderr_log}"
+        return "${rc}"
+    fi
+
+    if bootstrap_mise && mise_bin="$(find_mise)"; then
+        stderr_log="$(mktemp)"
+        set +e
+        "${mise_bin}" run "${task}" "$@" 2>"${stderr_log}"
+        rc=$?
+        if [[ ${had_errexit} -eq 1 ]]; then
+            set -e
+        fi
+        if [[ ${rc} -ne 0 ]] && grep -Eq "not trusted|are not trusted" "${stderr_log}"; then
+            rm -f "${stderr_log}"
+            return "${unavailable_rc}"
+        fi
+        if [[ -s "${stderr_log}" ]]; then
+            cat "${stderr_log}" >&2
+        fi
+        rm -f "${stderr_log}"
+        return "${rc}"
+    fi
+
+    return "${unavailable_rc}"
+}
+
+fallback_core_task() {
+    local task="$1"
+    case "${task}" in
+        setup)
+            uv sync --dev
+            ;;
+        format)
+            dev_run_tool ruff check --fix .
+            dev_run_tool ruff format .
+            ;;
+        lint)
+            dev_run_tool ruff check .
+            ;;
+        typecheck)
+            dev_run_tool pyright
+            ;;
+        pylint)
+            dev_run_tool pylint --errors-only autoclanker
+            ;;
+        test|test-unit)
+            dev_run_tool pytest --cov-fail-under=90 -m "not integration and not upstream_live and not live"
+            ;;
+        test-integration)
+            bash "${ROOT_DIR}/scripts/test-integration.sh"
+            ;;
+        test-full)
+            bash "${ROOT_DIR}/scripts/run-full-test-suite.sh"
+            ;;
+        test-upstream-live)
+            bash "${ROOT_DIR}/scripts/test-upstream-live.sh"
+            ;;
+        test-live)
+            bash "${ROOT_DIR}/scripts/test-live.sh"
+            ;;
+        test-max-live)
+            bash "${ROOT_DIR}/scripts/run-max-live-test-suites.sh"
+            ;;
+        test-all)
+            bash "${ROOT_DIR}/scripts/run-all-test-suites.sh"
+            ;;
+        build)
+            dev_run_python -m build --no-isolation
+            ;;
+        check)
+            bash "${ROOT_DIR}/scripts/check.sh"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+run_task() {
+    local task="$1"
+    shift
+    local unavailable_rc=86
+
+    set +e
+    run_task_with_mise_or_fallback "${task}" "$@"
+    local rc=$?
+    set -e
+
+    if [[ ${rc} -eq 0 ]]; then
+        return 0
+    fi
+    if [[ ${rc} -ne ${unavailable_rc} ]]; then
+        return "${rc}"
+    fi
+
+    fallback_core_task "${task}" "$@"
+}
+
+doctor() {
+    local mise_status="missing"
+    local system_mise=""
+    local selected_mise=""
+
+    selected_mise="$(find_mise 2>/dev/null || true)"
+    if [[ -n "${selected_mise}" ]]; then
+        if [[ -n "${AUTOCLANKER_DEV_MISE_BIN:-}" && "${AUTOCLANKER_DEV_MISE_BIN}" == "${selected_mise}" ]]; then
+            mise_status="explicit:${selected_mise}"
+        elif [[ "${selected_mise}" == "${LOCAL_MISE_BIN}" ]]; then
+            mise_status="local:${selected_mise}"
+        else
+            mise_status="system:${selected_mise}"
+            system_mise="${selected_mise}"
+        fi
+    fi
+
+    local python_status="missing"
+    local uv_status="missing"
+    local ruff_status="missing"
+    local pyright_status="missing"
+    local pylint_status="missing"
+    local git_status="missing"
+    local direnv_status="missing"
+    local devenv_status="missing"
+    local devcontainer_cfg_status="missing"
+
+    command -v python >/dev/null 2>&1 && python_status="$(command -v python)"
+    command -v uv >/dev/null 2>&1 && uv_status="$(command -v uv)"
+    command -v ruff >/dev/null 2>&1 && ruff_status="$(command -v ruff)"
+    command -v pyright >/dev/null 2>&1 && pyright_status="$(command -v pyright)"
+    command -v pylint >/dev/null 2>&1 && pylint_status="$(command -v pylint)"
+    command -v git >/dev/null 2>&1 && git_status="$(command -v git)"
+    command -v direnv >/dev/null 2>&1 && direnv_status="$(command -v direnv)"
+    command -v devenv >/dev/null 2>&1 && devenv_status="$(command -v devenv)"
+    [[ -f "${ROOT_DIR}/.devcontainer/devcontainer.json" ]] && devcontainer_cfg_status="present"
+
+    echo "autoclanker Developer Environment Doctor"
+    echo "  repo:          ${ROOT_DIR}"
+    echo "  install_root:  ${INSTALL_ROOT}"
+    echo "  local_bin:     ${LOCAL_BIN_DIR}"
+    echo "  mise:          ${mise_status}"
+    [[ -n "${system_mise}" ]] && echo "  mise(system):  ${system_mise}"
+    echo ""
+    echo "Capability matrix"
+    printf "  %-18s %s\n" "python" "${python_status}"
+    printf "  %-18s %s\n" "uv" "${uv_status}"
+    printf "  %-18s %s\n" "ruff" "${ruff_status}"
+    printf "  %-18s %s\n" "pyright" "${pyright_status}"
+    printf "  %-18s %s\n" "pylint" "${pylint_status}"
+    printf "  %-18s %s\n" "git" "${git_status}"
+    printf "  %-18s %s\n" "direnv" "${direnv_status}"
+    printf "  %-18s %s\n" "devenv" "${devenv_status}"
+    printf "  %-18s %s\n" "devcontainer-config" "${devcontainer_cfg_status}"
+}
+
+strict_env_status() {
+    echo "autoclanker strict environment modes (optional)"
+    echo "  default mode: bin/dev + optional mise activation"
+    echo "  strict mode: devenv + direnv"
+    echo "  strict mode owner: direnv (do not combine with mise activation)"
+    echo "  git hooks: none (bin/dev does not install pre-commit hooks)"
+    echo ""
+    echo "Available mode assets"
+    [[ -f "${ROOT_DIR}/devenv.nix" ]] && echo "  devenv:       present (devenv.nix)" || echo "  devenv:       missing"
+    [[ -f "${ROOT_DIR}/.devcontainer/devcontainer.json" ]] && echo "  devcontainer: present (.devcontainer/devcontainer.json)" || echo "  devcontainer: missing"
+    [[ -f "${ROOT_DIR}/.envrc" ]] && echo "  .envrc:       present" || echo "  .envrc:       absent"
+    echo ""
+    echo "Commands"
+    echo "  bin/dev strict-env devenv       # write .envrc from devenv template"
+    echo "  bin/dev strict-env devcontainer # print devcontainer path guidance"
+    echo "  bin/dev strict-env validate     # validate cross-manifest strict-env parity"
+}
+
+strict_env_validate() {
+    local validator="${ROOT_DIR}/scripts/dev/validate-dev-environment.py"
+    if [[ -x "${ROOT_DIR}/.venv/bin/python" ]]; then
+        "${ROOT_DIR}/.venv/bin/python" "${validator}"
+        return 0
+    fi
+    if command -v uv >/dev/null 2>&1; then
+        uv run python "${validator}"
+        return 0
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+        python3 "${validator}"
+        return 0
+    fi
+    if command -v python >/dev/null 2>&1; then
+        python "${validator}"
+        return 0
+    fi
+    err "strict-env validate requires python (or uv)"
+    return 1
+}
+
+strict_env_use() {
+    local mode="$1"
+    case "${mode}" in
+        devenv)
+            bash "${ROOT_DIR}/scripts/dev/setup-direnv-mode.sh" "${mode}"
+            ;;
+        devcontainer)
+            echo "devcontainer config: ${ROOT_DIR}/.devcontainer/devcontainer.json"
+            echo "See: ${ROOT_DIR}/.devcontainer/README.md"
+            ;;
+        validate)
+            strict_env_validate
+            ;;
+        *)
+            err "strict-env mode must be one of: status|devenv|devcontainer|validate"
+            exit 2
+            ;;
+    esac
+}
+
+deps_use() {
+    if [[ $# -lt 1 ]]; then
+        err "deps requires one of: upstreams|autoresearch|cevolve"
+        exit 2
+    fi
+    case "$1" in
+        upstreams)
+            shift
+            bash "${ROOT_DIR}/scripts/live/install-upstreams.sh" "$@"
+            ;;
+        autoresearch|cevolve)
+            bash "${ROOT_DIR}/scripts/live/install-upstreams.sh" "$1"
+            ;;
+        *)
+            err "deps requires one of: upstreams|autoresearch|cevolve"
+            exit 2
+            ;;
+    esac
+}
+
+run_bootstrap() {
+    if "${ROOT_DIR}/scripts/dev/bootstrap-mise.sh" >/dev/null; then
+        echo "mise bootstrapped at ${LOCAL_MISE_BIN}"
+        return 0
+    fi
+    err "failed to bootstrap mise"
+    return 1
+}
+
+if [[ $# -eq 0 ]]; then
+    print_help
+    exit 0
+fi
+
+command_name="$1"
+shift
+
+case "${command_name}" in
+    -h|--help|help)
+        print_help
+        ;;
+    setup|format|lint|typecheck|pylint|test|test-unit|test-integration|test-full|test-upstream-live|test-live|test-max-live|test-all|build|check)
+        run_task "${command_name}" "$@"
+        ;;
+    exec)
+        if [[ $# -lt 2 || "$1" != "--" ]]; then
+            err "usage: bin/dev exec -- <command...>"
+            exit 2
+        fi
+        shift
+        "$@"
+        ;;
+    doctor)
+        doctor
+        ;;
+    bootstrap)
+        run_bootstrap
+        ;;
+    strict-env)
+        if [[ $# -lt 1 ]]; then
+            err "strict-env requires one of: status|devenv|devcontainer|validate"
+            exit 2
+        fi
+        case "$1" in
+            status)
+                strict_env_status
+                ;;
+            devenv|devcontainer|validate)
+                strict_env_use "$1"
+                ;;
+            *)
+                err "strict-env requires one of: status|devenv|devcontainer|validate"
+                exit 2
+                ;;
+        esac
+        ;;
+    deps)
+        deps_use "$@"
+        ;;
+    *)
+        err "unknown command '${command_name}'"
+        print_help
+        exit 2
+        ;;
+esac

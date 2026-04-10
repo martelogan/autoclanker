@@ -1,0 +1,25 @@
+{
+  "name": "autoclanker-dev",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.11"
+    }
+  },
+  "containerEnv": {
+    "UV_CACHE_DIR": "/workspaces/autoclanker/.local/dev/uv-cache",
+    "MISE_DATA_DIR": "/workspaces/autoclanker/.mise/data",
+    "MISE_CACHE_DIR": "/workspaces/autoclanker/.mise/cache",
+    "MISE_CONFIG_DIR": "/workspaces/autoclanker/.mise/config",
+    "MISE_STATE_DIR": "/workspaces/autoclanker/.mise/state"
+  },
+  "postCreateCommand": "bash -lc 'python3 -m pip install --user uv && ./bin/dev setup'",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff"
+      ]
+    }
+  }
+}

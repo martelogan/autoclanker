@@ -1,0 +1,95 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[codz]
+*$py.class
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+.hypothesis/
+nosetests.xml
+coverage.xml
+*.cover
+cover/
+
+# Environments
+.env
+.env.local
+.env.*.local
+.envrc
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Type checker / linter caches
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.ruff_cache/
+
+# Notebooks / REPLs
+.ipynb_checkpoints
+profile_default/
+ipython_config.py
+
+# Tooling
+.local/
+.autoclanker/
+.codex/
+.mise/
+.direnv/
+.devenv/
+.devbox/
+.python-version
+Pipfile.lock
+poetry.lock
+.pdm.toml
+__pypackages__/
+cython_debug/
+
+# Editors / IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+
+# Keep strict-mode templates versioned.
+!dev/env/
+!dev/env/*.example
+
+# Local runtime and experiment artifacts
+.autoclanker-live/

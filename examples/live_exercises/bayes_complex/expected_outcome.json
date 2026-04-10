@@ -1,0 +1,21 @@
+{
+  "cold_start": {
+    "beliefs_top_candidate": "cand_c_compiled_context_pair",
+    "control_top_candidate": "cand_a_default",
+    "min_good_pair_predicted_utility": 1.4,
+    "min_good_pair_margin_over_lr_only": 0.6,
+    "max_bad_oom_valid_probability": 0.45
+  },
+  "post_observations": {
+    "observation_seeds": {
+      "cand_a_default": 11,
+      "cand_b_compiled_matcher": 13,
+      "cand_d_wide_window_large_chunk": 17
+    },
+    "min_good_pair_uplift_over_control": 0.9,
+    "beliefs_recommended": true,
+    "control_recommended": false,
+    "min_beliefs_gain_probability": 0.9,
+    "max_control_gain_probability": 0.9
+  }
+}

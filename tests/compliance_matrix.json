@@ -1,0 +1,248 @@
+[
+  {
+    "requirement_id": "M0-001",
+    "gate": "required",
+    "description": "Project surfaces expose autoclanker identity cleanly and consistently.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M0-002",
+    "gate": "required",
+    "description": "CLI exposes the required command families for beliefs, eval, adapter, and session workflows.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M1-001",
+    "gate": "required",
+    "description": "JSON and YAML belief examples validate into typed belief batches.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M1-002",
+    "gate": "required",
+    "description": "Invalid payloads fail with stable machine-readable validation errors.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M1-003",
+    "gate": "required",
+    "description": "Compiled-prior preview is machine-readable and schema-valid.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M1-004",
+    "gate": "required",
+    "description": "Adapter config examples validate successfully.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M1-005",
+    "gate": "required",
+    "description": "Rough ideas canonicalize through deterministic or hybrid pipelines with inspectable provenance, while unresolved text stays metadata-only.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M2-001",
+    "gate": "required",
+    "description": "Evaluation aggregation is patch-hash-aware and deterministic.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M2-002",
+    "gate": "required",
+    "description": "Objective and feasibility surrogates apply runtime prior decay and observation weight.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M2-003",
+    "gate": "required",
+    "description": "Eval-result validation preserves intended and realized genotype order.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M3-001",
+    "gate": "required",
+    "description": "Session artifacts live under a configurable filesystem root.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M3-002",
+    "gate": "required",
+    "description": "Session state resumes from files with manifest-backed status metadata.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M3-003",
+    "gate": "required",
+    "description": "Commit decisions are persisted as structured session artifacts.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M3-004",
+    "gate": "required",
+    "description": "Session ingest rejects eval results from the wrong era.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M3-005",
+    "gate": "required",
+    "description": "Session artifacts persist surface snapshots, overlays, canonicalization summaries, and influence summaries for reproducible hybrid runs.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M4-001",
+    "gate": "required",
+    "description": "The fixture adapter exercises the full loop without external dependencies.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M4-002",
+    "gate": "required",
+    "description": "Generic python_module adapters can probe and execute without fixture fallback.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M4-003",
+    "gate": "required",
+    "description": "Generic subprocess adapters can probe and execute through JSON-over-stdio.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M4-004",
+    "gate": "required",
+    "description": "Adapter CLI commands work non-interactively for list, validate-config, and probe.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M4-005",
+    "gate": "required",
+    "description": "adapter surface exposes semantic metadata plus higher-level strategy and risk families.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M5-001",
+    "gate": "required",
+    "description": "The first-party autoresearch adapter uses a real contract target when present.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M5-002",
+    "gate": "required",
+    "description": "The first-party cevolve adapter uses a real contract target when present.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M5-LIVE-001",
+    "gate": "live",
+    "description": "The live autoresearch lane runs against a real upstream checkout through the first-party adapter without fixture fallback, using the repo-native contract exercise harness.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M5-LIVE-002",
+    "gate": "live",
+    "description": "The live cevolve lane runs against a real upstream checkout through the first-party adapter without fixture fallback, using the repo-native contract exercise harness.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M1-LIVE-001",
+    "gate": "live",
+    "description": "A billed model-provider canonicalization lane can resolve rough parser ideas into typed beliefs through the public CLI.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M6-001",
+    "gate": "required",
+    "description": "Session workflows enforce a preview-then-apply gate before beliefs become active.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M6-002",
+    "gate": "required",
+    "description": "CLI failures return stable JSON errors and nonzero exit codes.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M6-003",
+    "gate": "required",
+    "description": "session apply-beliefs is available as a non-interactive CLI command.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M6-004",
+    "gate": "required",
+    "description": "Machine-readable CLI commands support --output when users place it after the subcommand as well as in the root-global position.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M6-LIVE-001",
+    "gate": "live",
+    "description": "A billed live canonicalization session measurably changes parser candidate ranking relative to unresolved proposal-only ideas.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M7-LIVE-001",
+    "gate": "live",
+    "description": "A billed model-provider path can promote rough advanced-authoring ideas into expert_prior and graph_directive beliefs through the public canonicalize-ideas CLI.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M7-001",
+    "gate": "required",
+    "description": "A human-readable compliance mirror stays synchronized with the machine-readable matrix.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M7-002",
+    "gate": "required",
+    "description": "Example adapter configs and docs stay runtime-consistent while treating checkout paths as optional rather than mandatory.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M7-003",
+    "gate": "required",
+    "description": "The Bayes showcase example stays executable and proves belief-guided CLI sessions outperform control on the documented toy scenario.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M7-004",
+    "gate": "required",
+    "description": "Human-readable code showcase examples stay documented, runnable, and numerically aligned with their intended optimization stories.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M7-005",
+    "gate": "required",
+    "description": "Beginner live-exercise docs expose minimum required files, bounded belief fields, and low-cruft replay commands.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M7-006",
+    "gate": "required",
+    "description": "Comparative zero-eval cold-start lanes show typed canonical Bayes guidance outperforming control and proposal-only baselines on the parser target.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M7-007",
+    "gate": "required",
+    "description": "The advanced belief authoring skill stays aligned with the CLI and a provider-agnostic workflow for promoting rough ideas into expert_prior and graph_directive authoring.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M7-008",
+    "gate": "required",
+    "description": "Public docs clearly distinguish the non-billed upstream-live lane from the billed model-provider live lane.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M7-009",
+    "gate": "required",
+    "description": "The primary repo docs focus on the current library and contributor workflow rather than internal handoff or scaffold artifacts.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M7-010",
+    "gate": "required",
+    "description": "The advanced skill and belief-input docs describe the common LLM-assisted workflow from rough ideas to advanced typed Bayes specs, with JSON preferred for machine-authored outputs.",
+    "status": "active"
+  }
+]

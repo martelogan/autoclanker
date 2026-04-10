@@ -1,0 +1,14 @@
+{
+  "preview": {
+    "proposal_compile_status": "metadata_only",
+    "compiled_belief_count_at_least": 3,
+    "risk_target_ref": "feasibility:capture.window=window_wide#oom"
+  },
+  "cold_start": {
+    "beliefs_top_candidate": "cand_c_compiled_context_pair",
+    "control_top_candidate": "cand_a_default",
+    "min_good_pair_margin_over_lr_only": 1.0,
+    "max_risky_valid_probability": 0.4,
+    "max_risky_predicted_utility": -0.5
+  }
+}

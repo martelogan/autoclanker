@@ -1,0 +1,40 @@
+{
+  "session_context": {
+    "session_id": "exercise_cevolve_synergy",
+    "era_id": "era_live_cevolve",
+    "author": "live_exercise@example.com"
+  },
+  "ideas": [
+    {
+      "idea": "The workload mix tends to favor the medium insertion threshold.",
+      "confidence": 3,
+      "option": "sort.threshold=threshold_32",
+      "effect": "help",
+      "evidence_sources": ["benchmark"]
+    },
+    {
+      "idea": "Hoare partitioning is usually better on this target.",
+      "confidence": 2,
+      "option": "sort.partition=partition_hoare",
+      "effect": "help",
+      "evidence_sources": ["benchmark"]
+    },
+    {
+      "idea": "Threshold 32 and Hoare partitioning are much stronger together than separately.",
+      "confidence": 4,
+      "options": [
+        "sort.threshold=threshold_32",
+        "sort.partition=partition_hoare"
+      ],
+      "relation": "synergy",
+      "evidence_sources": ["benchmark"]
+    },
+    {
+      "idea": "Random pivots consistently hurt this workload mix.",
+      "confidence": 2,
+      "option": "sort.pivot=pivot_random",
+      "effect": "hurt",
+      "evidence_sources": ["benchmark"]
+    }
+  ]
+}

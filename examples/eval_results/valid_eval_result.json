@@ -1,0 +1,42 @@
+{
+  "era_id": "era_003",
+  "candidate_id": "cand_0142",
+  "intended_genotype": [
+    {
+      "gene_id": "parser.matcher",
+      "state_id": "matcher_compiled"
+    },
+    {
+      "gene_id": "parser.plan",
+      "state_id": "plan_context_pair"
+    }
+  ],
+  "realized_genotype": [
+    {
+      "gene_id": "parser.matcher",
+      "state_id": "matcher_compiled"
+    },
+    {
+      "gene_id": "parser.plan",
+      "state_id": "plan_context_pair"
+    }
+  ],
+  "patch_hash": "sha256:9fd896ef6c4d97f3d7c3b5e0f2d0a1b4f5c7d9aa31d01d9a4ebd35f740bf2b27",
+  "status": "valid",
+  "seed": 7,
+  "runtime_sec": 289.4,
+  "peak_vram_mb": 21432.0,
+  "raw_metrics": {
+    "val_loss": 1.932,
+    "val_accuracy": 0.612
+  },
+  "delta_perf": 0.018,
+  "utility": 0.011,
+  "replication_index": 0,
+  "stdout_digest": "stdout:2c1d",
+  "stderr_digest": "stderr:clean",
+  "artifact_paths": [
+    "artifacts/era_003/cand_0142/metrics.json"
+  ],
+  "failure_metadata": {}
+}

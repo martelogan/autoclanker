@@ -1,0 +1,1 @@
+"""Autoresearch-flavored code showcase."""

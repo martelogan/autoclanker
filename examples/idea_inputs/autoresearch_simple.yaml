@@ -1,0 +1,50 @@
+# Minimal upstream-backed autoresearch example.
+#
+# First provision the live upstream once:
+#   ./bin/dev test-upstream-live
+# Show the allowed states for this upstream-backed registry:
+#   ./bin/dev exec -- autoclanker adapter registry --input examples/live_exercises/autoresearch_simple/adapter.local.yaml
+# Preview these ideas:
+#   ./bin/dev exec -- autoclanker beliefs preview --input examples/idea_inputs/autoresearch_simple.yaml --adapter-config examples/live_exercises/autoresearch_simple/adapter.local.yaml
+# Expand them into the full typed belief schema:
+#   ./bin/dev exec -- autoclanker beliefs expand-ideas --input examples/idea_inputs/autoresearch_simple.yaml
+# Run the starter demo:
+#   ./bin/dev exec -- python scripts/live/replay_ideas_demo.py --exercise autoresearch_simple
+
+session_context:
+  session_id: exercise_autoresearch_simple
+  era_id: era_live_autoresearch
+  author: live_exercise@example.com
+
+ideas:
+  - idea: The deeper model usually helps on this lightweight landscape.
+    confidence: 3
+    option: train.depth=depth_10
+    effect: help
+    evidence_sources:
+      - prior_run
+
+  - idea: A slightly lower matrix learning rate improves stability.
+    confidence: 3
+    option: optim.matrix_lr=lr_0_03
+    effect: help
+    evidence_sources:
+      - prior_run
+
+  - idea: Extra depth works best when the matrix learning rate is slightly reduced.
+    confidence: 2
+    options:
+      - train.depth=depth_10
+      - optim.matrix_lr=lr_0_03
+    relation: synergy
+    evidence_sources:
+      - prior_run
+
+  - idea: The largest batch size tends to create memory pressure in this exercise.
+    confidence: 3
+    option: batch.total=batch_2_20
+    effect: hurt
+    risks:
+      - oom
+    evidence_sources:
+      - prior_run

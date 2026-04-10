@@ -1,0 +1,77 @@
+# Beginner-friendly Bayes beliefs.
+#
+# This file intentionally stays in the "basic" lane:
+# - `idea` for one change you think helps or hurts,
+# - `relation` for a pair that seems to work well together,
+# - `proposal` for a free-form patch idea that is not yet canonicalized.
+#
+# In the preview output:
+# - `idea` and `relation` compile into real priors,
+# - `proposal` stays as `metadata_only` until somebody turns it into a concrete gene.
+
+session_context:
+  session_id: quickstart_log_parser
+  era_id: era_log_parser_v1
+  author: beginner_demo@example.com
+  user_profile: basic
+
+beliefs:
+  - id: qs1
+    kind: idea
+    confidence_level: 2
+    evidence_sources:
+      - prior_run
+    gene:
+      gene_id: parser.matcher
+      state_id: matcher_compiled
+    effect_strength: 2
+    risk:
+      metric_instability: 1
+    rationale: >
+      On repeated log formats, compiled regex matching usually improves parser
+      throughput without changing the parsed result.
+
+  - id: qs2
+    kind: relation
+    confidence_level: 2
+    evidence_sources:
+      - code_inspection
+    members:
+      - gene_id: parser.matcher
+        state_id: matcher_compiled
+      - gene_id: parser.plan
+        state_id: plan_context_pair
+    relation: synergy
+    strength: 2
+    joint_effect_strength: 2
+    rationale: >
+      Compiled matching works best with the context-pair plan because the route
+      line and the error line tend to sit next to each other in these traces.
+
+  - id: qs3
+    kind: idea
+    confidence_level: 3
+    evidence_sources:
+      - prior_run
+    gene:
+      gene_id: capture.window
+      state_id: window_wide
+    effect_strength: -2
+    risk:
+      oom: 3
+    rationale: >
+      A wide capture window regularly blows the memory budget on long traces, so
+      it should start out disfavored.
+
+  - id: qs4
+    kind: proposal
+    confidence_level: 1
+    evidence_sources:
+      - intuition
+    proposal_text: Try streaming summary output if the capture window stays default.
+    suggested_scope: patch
+    risk_hints:
+      metric_instability: 1
+    rationale: >
+      This is a rough idea, not a canonicalized gene yet. The preview should keep
+      it as metadata rather than pretending it is already a concrete prior.

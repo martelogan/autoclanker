@@ -1,0 +1,86 @@
+[tools]
+python = "3.11"
+
+[tasks.setup]
+description = "Install Python development dependencies"
+run = "uv sync --dev"
+
+[tasks."deps:upstreams"]
+description = "Provision the optional real upstream checkouts for autoresearch and cevolve"
+run = "bash scripts/live/install-upstreams.sh"
+
+[tasks."deps:autoresearch"]
+description = "Provision only the optional autoresearch upstream checkout"
+run = "bash scripts/live/install-upstreams.sh autoresearch"
+
+[tasks."deps:cevolve"]
+description = "Provision only the optional cevolve upstream checkout"
+run = "bash scripts/live/install-upstreams.sh cevolve"
+
+[tasks.format]
+description = "Auto-format and apply safe lint fixes"
+run = "uv run ruff check --fix . && uv run ruff format ."
+
+[tasks.lint]
+description = "Run lint checks"
+run = "uv run ruff check ."
+
+[tasks.typecheck]
+description = "Run static type checks"
+run = "uv run pyright"
+
+[tasks.pylint]
+description = "Run lightweight pylint error checks"
+run = "uv run pylint --errors-only autoclanker"
+
+[tasks.test]
+description = "Run the default test lane"
+run = "uv run pytest --cov-fail-under=90"
+
+[tasks."test-unit"]
+description = "Run unit tests only"
+run = "uv run pytest --cov-fail-under=90 -m 'not integration and not live'"
+
+[tasks."test-integration"]
+description = "Run integration tests if any exist"
+run = "bash scripts/test-integration.sh"
+
+[tasks."test-full"]
+description = "Run integration tests and then the default unit lane"
+run = "bash scripts/run-full-test-suite.sh"
+
+[tasks."test-upstream-live"]
+description = "Run real upstream smoke checks without billed model usage"
+run = "bash scripts/test-upstream-live.sh"
+
+[tasks."test-live"]
+description = "Run billed LLM canonicalization smoke tests"
+run = "bash scripts/test-live.sh"
+
+[tasks."test-max-live"]
+description = "Run both upstream-live and billed LLM live checks"
+run = "bash scripts/run-max-live-test-suites.sh"
+
+[tasks."test-all"]
+description = "Run the required suite and the non-billed upstream-live lane"
+run = "bash scripts/run-all-test-suites.sh"
+
+[tasks.build]
+description = "Build sdist and wheel artifacts"
+run = "uv run python -m build --no-isolation"
+
+[tasks.check]
+description = "Run the full local validation lane"
+run = "bash scripts/check.sh"
+
+[tasks."strict-env:status"]
+description = "Show optional strict environment mode status"
+run = "bash bin/dev strict-env status"
+
+[tasks."strict-env:devenv"]
+description = "Write .envrc from the devenv direnv config"
+run = "bash bin/dev strict-env devenv"
+
+[tasks."strict-env:validate"]
+description = "Validate strict environment manifest parity across lanes"
+run = "bash bin/dev strict-env validate"

@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autoclanker.dev/schemas/adapter_config.schema.json",
+  "title": "autoclanker adapter config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["adapter"],
+  "properties": {
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "mode"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["fixture", "autoresearch", "cevolve", "python_module", "subprocess"]
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["fixture", "auto", "local_repo_path", "installed_module", "subprocess_cli"]
+        },
+        "repo_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "python_module": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "session_root": {
+          "type": "string",
+          "minLength": 1
+        },
+        "config_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "allow_missing": {
+          "type": "boolean"
+        },
+        "metadata": {
+          "type": "object"
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"mode": {"const": "local_repo_path"}}},
+          "then": {"required": ["repo_path"]}
+        },
+        {
+          "if": {"properties": {"mode": {"const": "installed_module"}}},
+          "then": {"required": ["python_module"]}
+        },
+        {
+          "if": {"properties": {"mode": {"const": "subprocess_cli"}}},
+          "then": {"required": ["command"]}
+        }
+      ]
+    }
+  }
+}

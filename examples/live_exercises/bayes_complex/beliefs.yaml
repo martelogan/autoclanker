@@ -1,0 +1,76 @@
+session_context:
+  session_id: exercise_bayes_complex
+  era_id: era_parser_advanced
+  author: live_exercise@example.com
+  user_profile: expert
+beliefs:
+- id: bx1
+  kind: expert_prior
+  confidence_level: 4
+  evidence_sources:
+  - prior_run
+  target:
+    target_kind: main_effect
+    gene:
+      gene_id: parser.matcher
+      state_id: matcher_compiled
+  prior_family: normal
+  mean: 0.8
+  scale: 0.35
+  observation_weight: 1.5
+- id: bx2
+  kind: expert_prior
+  confidence_level: 4
+  evidence_sources:
+  - prior_run
+  target:
+    target_kind: pair_effect
+    members:
+    - gene_id: parser.matcher
+      state_id: matcher_compiled
+    - gene_id: parser.plan
+      state_id: plan_context_pair
+  prior_family: normal
+  mean: 0.7
+  scale: 0.4
+  decay_override:
+    per_eval_multiplier: 0.9
+    cross_era_transfer: 0.25
+- id: bx3
+  kind: expert_prior
+  confidence_level: 3
+  evidence_sources:
+  - benchmark
+  target:
+    target_kind: feasibility_logit
+    gene:
+      gene_id: capture.window
+      state_id: window_wide
+    failure_mode: oom
+  prior_family: logit_normal
+  mean: 1.2
+  scale: 0.5
+- id: bx4
+  kind: graph_directive
+  confidence_level: 4
+  evidence_sources:
+  - prior_run
+  members:
+  - gene_id: parser.matcher
+    state_id: matcher_compiled
+  - gene_id: parser.plan
+    state_id: plan_context_pair
+  directive: screen_include
+  strength: 3
+- id: bx5
+  kind: graph_directive
+  confidence_level: 3
+  evidence_sources:
+  - benchmark
+  members:
+  - gene_id: capture.window
+    state_id: window_wide
+  - gene_id: io.chunk
+    state_id: chunk_large
+  directive: linkage_negative
+  strength: 3

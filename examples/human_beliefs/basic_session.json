@@ -1,0 +1,83 @@
+{
+  "session_context": {
+    "session_id": "demo_basic",
+    "era_id": "era_003",
+    "hardware_profile_id": "a100_80gb",
+    "budget_profile_id": "5min_eval",
+    "author": "researcher@example.com",
+    "user_profile": "basic"
+  },
+  "beliefs": [
+    {
+      "id": "b1",
+      "kind": "idea",
+      "confidence_level": 2,
+      "evidence_sources": [
+        "prior_run",
+        "benchmark"
+      ],
+      "gene": {
+        "gene_id": "parser.matcher",
+        "state_id": "matcher_compiled"
+      },
+      "effect_strength": 2,
+      "risk": {
+        "metric_instability": 1
+      },
+      "rationale": "Under the fixed five-minute budget, compiled regex matching has helped similar log parsers process repeated formats more efficiently."
+    },
+    {
+      "id": "b2",
+      "kind": "relation",
+      "confidence_level": 2,
+      "evidence_sources": [
+        "intuition",
+        "code_inspection"
+      ],
+      "members": [
+        {
+          "gene_id": "parser.matcher",
+          "state_id": "matcher_compiled"
+        },
+        {
+          "gene_id": "parser.plan",
+          "state_id": "plan_context_pair"
+        }
+      ],
+      "relation": "synergy",
+      "strength": 2,
+      "joint_effect_strength": 2,
+      "rationale": "Compiled matching tends to work best when the parser also reconstructs the nearest context line for each error."
+    },
+    {
+      "id": "b3",
+      "kind": "constraint",
+      "confidence_level": 3,
+      "evidence_sources": [
+        "prior_run"
+      ],
+      "constraint_type": "soft_avoid",
+      "severity": 2,
+      "scope": [
+        {
+          "gene_id": "capture.window",
+          "state_id": "window_wide"
+        }
+      ],
+      "rationale": "This frequently spikes VRAM on the target hardware."
+    },
+    {
+      "id": "b4",
+      "kind": "proposal",
+      "confidence_level": 1,
+      "evidence_sources": [
+        "intuition"
+      ],
+      "proposal_text": "Try streaming summary output only when the capture window stays default.",
+      "suggested_scope": "patch",
+      "risk_hints": {
+        "metric_instability": 1
+      }
+    }
+  ]
+}

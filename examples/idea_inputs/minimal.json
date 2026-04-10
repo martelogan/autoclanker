@@ -1,0 +1,11 @@
+{
+  "ideas": [
+    "Compiled regex matching probably helps this parser on repeated log formats.",
+    {
+      "idea": "A wide capture window is likely to run out of memory on long traces.",
+      "confidence": 3,
+      "effect": "hurt",
+      "risks": ["oom"]
+    }
+  ]
+}

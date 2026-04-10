@@ -1,0 +1,83 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">autoclanker logo</title>
+  <desc id="desc">A robot head beneath a Bayesian-style node graph, representing belief-guided software optimization.</desc>
+  <defs>
+    <linearGradient id="bg" x1="80" y1="72" x2="430" y2="440" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1830"/>
+      <stop offset="1" stop-color="#122845"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="178" y1="156" x2="342" y2="340" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F5F2E8"/>
+      <stop offset="1" stop-color="#D9E1EB"/>
+    </linearGradient>
+    <linearGradient id="halo" x1="162" y1="128" x2="351" y2="218" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#62C3FF"/>
+      <stop offset="1" stop-color="#7AE0A8"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="189" y1="281" x2="323" y2="333" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#36A6F2"/>
+      <stop offset="1" stop-color="#68D6AE"/>
+    </linearGradient>
+    <linearGradient id="jaw" x1="204" y1="339" x2="307" y2="392" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#163455"/>
+      <stop offset="1" stop-color="#28537F"/>
+    </linearGradient>
+    <filter id="shadow" x="52" y="54" width="408" height="414" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#040A12" flood-opacity="0.38"/>
+    </filter>
+  </defs>
+
+  <rect x="44" y="44" width="424" height="424" rx="118" fill="url(#bg)"/>
+
+  <g filter="url(#shadow)">
+    <path d="M152 195C170 145 208 114 256 114C304 114 342 145 360 195" stroke="#223E63" stroke-width="22" stroke-linecap="round"/>
+    <path d="M160 193C176 149 211 124 256 124C301 124 336 149 352 193" stroke="url(#halo)" stroke-width="10" stroke-linecap="round"/>
+
+    <g stroke="#92D7FF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M176 176L219 150"/>
+      <path d="M219 150L256 134"/>
+      <path d="M256 134L296 149"/>
+      <path d="M296 149L336 177"/>
+      <path d="M219 150L296 149"/>
+    </g>
+
+    <g fill="#0F2138" stroke="#8FD3FF" stroke-width="6">
+      <circle cx="176" cy="176" r="14"/>
+      <circle cx="219" cy="150" r="14"/>
+      <circle cx="256" cy="134" r="16" fill="#1A3356"/>
+      <circle cx="296" cy="149" r="14"/>
+      <circle cx="336" cy="177" r="14"/>
+    </g>
+
+    <path d="M248 151H264" stroke="#7AE0A8" stroke-width="6" stroke-linecap="round"/>
+
+    <rect x="171" y="170" width="170" height="168" rx="42" fill="url(#panel)" stroke="#18344E" stroke-width="10"/>
+    <rect x="151" y="214" width="28" height="74" rx="14" fill="#E4C26E" stroke="#18344E" stroke-width="10"/>
+    <rect x="333" y="214" width="28" height="74" rx="14" fill="#E4C26E" stroke="#18344E" stroke-width="10"/>
+
+    <path d="M206 190V165C206 137 228 114 256 114C284 114 306 137 306 165V190" stroke="#18344E" stroke-width="10" stroke-linecap="round"/>
+    <circle cx="256" cy="110" r="18" fill="#68D6AE" stroke="#18344E" stroke-width="10"/>
+
+    <rect x="201" y="217" width="44" height="40" rx="14" fill="#193250"/>
+    <rect x="267" y="217" width="44" height="40" rx="14" fill="#193250"/>
+    <circle cx="223" cy="237" r="7" fill="#75D7FF"/>
+    <circle cx="289" cy="237" r="7" fill="#75D7FF"/>
+
+    <rect x="197" y="277" width="118" height="25" rx="12.5" fill="#102235"/>
+    <path d="M214 289H298" stroke="#6ED9AF" stroke-width="8" stroke-linecap="round" stroke-dasharray="2 16"/>
+
+    <path d="M198 338H314L288 392H224L198 338Z" fill="url(#jaw)" stroke="#18344E" stroke-width="10" stroke-linejoin="round"/>
+    <path d="M214 353H298" stroke="#90D6FF" stroke-width="8" stroke-linecap="round"/>
+
+    <path d="M174 352C190 374 218 388 256 388C294 388 322 374 338 352" stroke="url(#accent)" stroke-width="12" stroke-linecap="round"/>
+    <path d="M174 352V384" stroke="#18344E" stroke-width="10" stroke-linecap="round"/>
+    <path d="M338 352V384" stroke="#18344E" stroke-width="10" stroke-linecap="round"/>
+
+    <g opacity="0.42" stroke="#6FA4D0" stroke-width="4" stroke-linecap="round">
+      <path d="M118 293H143"/>
+      <path d="M372 293H397"/>
+      <path d="M134 336L151 324"/>
+      <path d="M378 324L395 336"/>
+    </g>
+  </g>
+</svg>
