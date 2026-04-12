@@ -40,7 +40,7 @@ the underlying loop.
 ## How It Works
 
 <p align="center">
-  <img src="assets/autoclanker_mermaid.webp" width="460" alt="Autoclanker workflow diagram">
+  <img src="assets/autoclanker_simple_loop.png" width="460" alt="Autoclanker workflow diagram">
 </p>
 
 The core idea is simple: keep the outer loop you already trust, but make it
