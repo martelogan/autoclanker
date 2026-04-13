@@ -182,9 +182,7 @@ def test_docs_distinguish_upstream_live_from_billed_model_live() -> None:
 def test_primary_docs_focus_on_current_library_surface() -> None:
     root = Path(__file__).resolve().parents[1]
     readme = (root / "README.md").read_text(encoding="utf-8")
-    contributing = (root / ".github" / "CONTRIBUTING.md").read_text(
-        encoding="utf-8"
-    )
+    contributing = (root / ".github" / "CONTRIBUTING.md").read_text(encoding="utf-8")
     style = (root / "docs" / "STYLE.md").read_text(encoding="utf-8")
 
     assert "BAYES_HANDOFF.md" not in readme

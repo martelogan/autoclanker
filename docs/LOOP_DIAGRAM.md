@@ -1,8 +1,9 @@
 # Loop Diagram
 
-This is the compact loop view of `autoclanker`: ideas nudge candidate choice,
-the existing eval harness runs the candidate, and the resulting observations
-feed the next choice.
+This is the compact loop view of `autoclanker`: ideas steer explicit candidate
+lanes, the existing eval harness can run the available lanes in parallel when
+practical, and the resulting observations feed the next ranked choice while the
+session keeps its active surface snapshotted on disk.
 
 ```mermaid
 flowchart TB
@@ -16,18 +17,21 @@ flowchart TB
   end
 
   subgraph engine["② Candidate loop"]
-    choose["🎯 Pick next candidate"]:::core
-    refine["📘 Refine search"]:::core
+    choose["🎯 Candidate lanes A / B / A+B"]:::core
+    snapshot["📸 Snapshot active surface"]:::core
+    refine["📘 Rank, query, refine"]:::core
   end
 
   subgraph existing["③ Existing eval harness"]
-    eval["🧪 Run candidate"]:::loop
-    result["📚 Record result"]:::loop
+    eval["🧪 Run available lanes\nin parallel when practical"]:::loop
+    result["📚 Append eval observations"]:::loop
   end
 
   ideas -->|"steer"| choose
   surface -->|"available moves"| choose
+  choose --> snapshot
   choose --> eval
+  snapshot --> eval
   eval --> result
   result --> refine
   refine --> choose

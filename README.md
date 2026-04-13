@@ -32,10 +32,11 @@ the underlying loop.
 ## Why autoclanker
 
 - Keep your existing eval harness instead of rebuilding around a new optimizer.
+- Keep several candidate lanes explicit so an outer harness can explore them in parallel when practical.
 - Add inspectable human & LLM beliefs instead of relying on prompt-only steering.
 - Preview compiled priors before they affect a session.
 - Separate utility and feasibility so risky candidates stay visible but bounded.
-- Persist session state, observations, canonicalization summaries, and influence summaries to disk.
+- Persist surface snapshots, append-only eval observations, canonicalization summaries, and influence summaries to disk.
 - Work with generic external adapters, plus built-in `autoresearch` and `cevolve` integrations.
 
 ## How It Works
@@ -45,7 +46,8 @@ the underlying loop.
 </p>
 
 The core idea is simple: keep the outer loop you already trust, but make it
-belief-aware in a way that is typed, previewable, and resumable.
+belief-aware in a way that is typed, previewable, resumable, and friendly to
+explicit multi-lane exploration.
 
 The loop itself is simpler than the full belief machinery:
 
@@ -53,13 +55,18 @@ The loop itself is simpler than the full belief machinery:
 ideas / hints
      |
      v
-pick next candidate ---> run eval ---> record result
-      ^                                  |
-      |                                  |
-      +---------- refine search <--------+
+pick next lanes: [A] [B] [A+B] ---> run evals ---> record results
+      ^          (fixed eval snapshot)  (parallel)        |
+      |                                                   |
+      +---------- rank / refine / query <-----------------+
 ```
 
 For a more detailed diagram, see [here](docs/assets/autoclanker_mermaid.png).
+
+In practice, that means `suggest` can rank an explicit candidate pool instead of
+one opaque prompt thread, an outer harness can evaluate the available lanes in
+parallel when practical, and the session keeps the active surface plus each
+observed eval result on disk so the same comparison can be revisited later.
 
 The outer-layer adapter and session-boundary outer loop over
 [Autoresearch](https://github.com/karpathy/autoresearch) here was inspired by
@@ -220,11 +227,11 @@ The intended flow is:
 ```text
 rough ideas
 → preview or canonicalize
-→ session init
+→ session init (store preview + surface snapshot)
 → apply previewed beliefs
-→ ingest evals
+→ ingest eval results
 → fit
-→ suggest
+→ suggest against an explicit candidate pool
 → recommend-commit
 ```
 
@@ -251,12 +258,14 @@ autoclanker session apply-beliefs \
 
 Once the session has observations, `fit`, `suggest`, `recommend-commit`, and
 `render-report` keep a small human-readable report bundle refreshed inside the
-session root.
+session root. When you have several candidate lanes to compare, `suggest` can
+rank them together from `--candidates-input` while the underlying eval runs stay
+parallelizable in whatever outer harness you already trust.
 
 ## Run Artifacts
 
-The session root now keeps both machine-readable Bayesian state and a compact
-report bundle:
+The session root now keeps machine-readable Bayesian state, a reproducible
+surface snapshot, append-only eval observations, and a compact report bundle:
 
 ```text
 .autoclanker/<session_id>/
@@ -280,6 +289,7 @@ The key files are:
 
 - `RESULTS.md`: current run summary with top candidates, follow-up queries, and
   commit state
+- `observations.jsonl`: append-only eval results recorded for the session
 - `convergence.png`: observed utility over time plus best-so-far progress
 - `candidate_rankings.png`: current ranked candidates with acquisition scores
 - `belief_graph_prior.png`: the prior interaction structure implied by active
