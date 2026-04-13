@@ -35,6 +35,7 @@ from autoclanker.bayes_layer.config import (
 from autoclanker.bayes_layer.posterior_graph import build_posterior_graph
 from autoclanker.bayes_layer.query_policy import suggest_queries
 from autoclanker.bayes_layer.registry import GeneRegistry
+from autoclanker.bayes_layer.reporting import render_session_report_bundle
 from autoclanker.bayes_layer.session_store import FilesystemSessionStore
 from autoclanker.bayes_layer.surrogate_feasibility import fit_feasibility_surrogate
 from autoclanker.bayes_layer.surrogate_objective import fit_objective_surrogate
@@ -472,7 +473,19 @@ def handle_fit(args: argparse.Namespace) -> dict[str, JsonValue]:
             )
         },
     )
-    return cast(dict[str, JsonValue], to_json_value(summary))
+    report_artifacts = render_session_report_bundle(
+        store=store,
+        session_id=args.session_id,
+        manifest=manifest,
+        compiled=compiled,
+        observations=observations,
+        summary=summary,
+    )
+    payload = cast(dict[str, JsonValue], to_json_value(summary))
+    payload["report_artifacts"] = cast(
+        dict[str, JsonValue], to_json_value(report_artifacts)
+    )
+    return payload
 
 
 def handle_suggest(args: argparse.Namespace) -> dict[str, JsonValue]:
@@ -528,6 +541,22 @@ def handle_suggest(args: argparse.Namespace) -> dict[str, JsonValue]:
         ranked_candidates=ranked_payload,
         queries=queries,
     )
+    summary = _compute_summary(
+        era_state=era_state,
+        registry=registry,
+        observations=observations,
+        compiled=compiled,
+    )
+    report_artifacts = render_session_report_bundle(
+        store=store,
+        session_id=args.session_id,
+        manifest=manifest,
+        compiled=compiled,
+        observations=observations,
+        summary=summary,
+        ranked_candidates=ranked[:8],
+        queries=queries,
+    )
     return {
         "session_id": args.session_id,
         "ranked_candidates": cast(list[JsonValue], list(ranked_payload)),
@@ -544,6 +573,7 @@ def handle_suggest(args: argparse.Namespace) -> dict[str, JsonValue]:
                 )
             ),
         ),
+        "report_artifacts": cast(dict[str, JsonValue], to_json_value(report_artifacts)),
     }
 
 
@@ -600,7 +630,64 @@ def handle_recommend_commit(args: argparse.Namespace) -> dict[str, JsonValue]:
             )
         },
     )
-    return cast(dict[str, JsonValue], to_json_value(decision))
+    summary = _compute_summary(
+        era_state=era_state,
+        registry=registry,
+        observations=observations,
+        compiled=compiled,
+    )
+    report_artifacts = render_session_report_bundle(
+        store=store,
+        session_id=args.session_id,
+        manifest=manifest,
+        compiled=compiled,
+        observations=observations,
+        summary=summary,
+        ranked_candidates=ranked[:8],
+        decision=decision,
+    )
+    payload = cast(dict[str, JsonValue], to_json_value(decision))
+    payload["report_artifacts"] = cast(
+        dict[str, JsonValue], to_json_value(report_artifacts)
+    )
+    return payload
+
+
+def handle_render_report(args: argparse.Namespace) -> dict[str, JsonValue]:
+    adapter_config = _load_adapter_config(args.adapter_config)
+    store = _store(args.session_root, adapter_config)
+    manifest = store.load_manifest(args.session_id)
+    registry = _registry_from_config(adapter_config)
+    overlay = store.load_surface_overlay(args.session_id)
+    if overlay is not None:
+        registry = registry.with_overlay(overlay)
+    observations = store.read_observations(args.session_id)
+    _beliefs, compiled = _load_active_beliefs_and_bundle(
+        store=store,
+        manifest=manifest,
+        registry=registry,
+    )
+    summary = _compute_summary(
+        era_state=EraState(
+            era_id=manifest.era_id,
+            observation_count=len(observations),
+        ),
+        registry=registry,
+        observations=observations,
+        compiled=compiled,
+    )
+    report_artifacts = render_session_report_bundle(
+        store=store,
+        session_id=args.session_id,
+        manifest=manifest,
+        compiled=compiled,
+        observations=observations,
+        summary=summary,
+    )
+    return {
+        "session_id": args.session_id,
+        "report_artifacts": cast(dict[str, JsonValue], to_json_value(report_artifacts)),
+    }
 
 
 def handle_status(args: argparse.Namespace) -> dict[str, JsonValue]:
@@ -709,3 +796,12 @@ def register_session_commands(subparsers: Any) -> None:
     status_parser.add_argument("--adapter-config", help="Optional adapter config path.")
     status_parser.add_argument("--session-root", help="Override session root.")
     status_parser.set_defaults(handler=handle_status)
+
+    render_parser = session_subparsers.add_parser(
+        "render-report",
+        help="Write a human-readable session summary and visual report artifacts.",
+    )
+    render_parser.add_argument("--session-id", required=True, help="Target session id.")
+    render_parser.add_argument("--adapter-config", help="Optional adapter config path.")
+    render_parser.add_argument("--session-root", help="Override session root.")
+    render_parser.set_defaults(handler=handle_render_report)

@@ -16,6 +16,7 @@
 **[Demo Paths](#demo-paths)** ·
 **[How It Works](#how-it-works)** ·
 **[Session Flow](#session-flow)** ·
+**[Run Artifacts](#run-artifacts)** ·
 **[Live Exercises](#live-exercises)** ·
 **[Documentation](#documentation)**
 
@@ -58,12 +59,12 @@ pick next candidate ---> run eval ---> record result
       +---------- refine search <--------+
 ```
 
-For the same loop as a compact color-coded diagram, see
-[`docs/LOOP_DIAGRAM.md`](docs/LOOP_DIAGRAM.md).
+For a more detailed diagram, see [here](assets/autoclanker_mermaid.png).
 
-The outer-layer adapter and session-boundary outer loop over autoresearch here
-was inspired by [cEvolve](https://github.com/jnormore/cevolve), which remains a
-first-party integration target.
+The outer-layer adapter and session-boundary outer loop over
+[Autoresearch](https://github.com/karpathy/autoresearch) here was inspired by
+[cEvolve](https://github.com/jnormore/cevolve), which remains a first-party
+integration target.
 
 ## What You Get
 
@@ -246,6 +247,51 @@ suggesting so beliefs become active:
 autoclanker session apply-beliefs \
   --session-id parser-demo \
   --preview-digest <digest-from-session-init>
+```
+
+Once the session has observations, `fit`, `suggest`, `recommend-commit`, and
+`render-report` keep a small human-readable report bundle refreshed inside the
+session root.
+
+## Run Artifacts
+
+The session root now keeps both machine-readable Bayesian state and a compact
+report bundle:
+
+```text
+.autoclanker/<session_id>/
+  session_manifest.yaml
+  beliefs.yaml
+  compiled_preview.json
+  compiled_priors.json
+  observations.jsonl
+  posterior_summary.json
+  query.json
+  commit_decision.json
+  influence_summary.json
+  RESULTS.md
+  convergence.png
+  candidate_rankings.png
+  belief_graph_prior.png
+  belief_graph_posterior.png
+```
+
+The key files are:
+
+- `RESULTS.md`: current run summary with top candidates, follow-up queries, and
+  commit state
+- `convergence.png`: observed utility over time plus best-so-far progress
+- `candidate_rankings.png`: current ranked candidates with acquisition scores
+- `belief_graph_prior.png`: the prior interaction structure implied by active
+  beliefs
+- `belief_graph_posterior.png`: the posterior interaction structure learned from
+  the current era
+
+You can refresh that bundle explicitly at any point:
+
+```bash
+autoclanker session render-report \
+  --session-id parser-demo
 ```
 
 ## Model-Assisted Canonicalization

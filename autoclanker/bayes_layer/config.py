@@ -136,6 +136,11 @@ class SessionArtifactConfig:
     query: str
     commit_decision: str
     influence_summary: str
+    results_markdown: str
+    convergence_plot: str
+    candidate_rankings_plot: str
+    prior_graph_plot: str
+    posterior_graph_plot: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -327,6 +332,15 @@ def load_bayes_layer_config(path: Path | None = None) -> BayesLayerConfig:
                 query=_require_str(artifact_mapping, "query"),
                 commit_decision=_require_str(artifact_mapping, "commit_decision"),
                 influence_summary=_require_str(artifact_mapping, "influence_summary"),
+                results_markdown=_require_str(artifact_mapping, "results_markdown"),
+                convergence_plot=_require_str(artifact_mapping, "convergence_plot"),
+                candidate_rankings_plot=_require_str(
+                    artifact_mapping, "candidate_rankings_plot"
+                ),
+                prior_graph_plot=_require_str(artifact_mapping, "prior_graph_plot"),
+                posterior_graph_plot=_require_str(
+                    artifact_mapping, "posterior_graph_plot"
+                ),
             ),
         ),
         integration_emit_schema_validated_eval_results=_require_bool(

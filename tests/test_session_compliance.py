@@ -84,6 +84,27 @@ def test_session_manifest_and_status_record_preview_gate_state(
     assert applied_output["beliefs_status"] == "applied"
     assert applied_output["compiled_priors_active"] is True
 
+    assert (
+        main(
+            [
+                "session",
+                "status",
+                "--session-id",
+                session_id,
+                "--session-root",
+                str(session_root),
+            ]
+        )
+        == 0
+    )
+    status_output = json.loads(capsys.readouterr().out)
+    artifact_paths = status_output["artifact_paths"]
+    assert artifact_paths["results_markdown"].endswith("RESULTS.md")
+    assert artifact_paths["convergence_plot"].endswith("convergence.png")
+    assert artifact_paths["candidate_rankings_plot"].endswith("candidate_rankings.png")
+    assert artifact_paths["prior_graph_plot"].endswith("belief_graph_prior.png")
+    assert artifact_paths["posterior_graph_plot"].endswith("belief_graph_posterior.png")
+
 
 @covers("M3-004", "M6-002")
 def test_session_ingest_eval_rejects_wrong_era(

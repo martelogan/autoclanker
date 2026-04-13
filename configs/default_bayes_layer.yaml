@@ -107,6 +107,11 @@ session_store:
     query: query.json
     commit_decision: commit_decision.json
     influence_summary: influence_summary.json
+    results_markdown: RESULTS.md
+    convergence_plot: convergence.png
+    candidate_rankings_plot: candidate_rankings.png
+    prior_graph_plot: belief_graph_prior.png
+    posterior_graph_plot: belief_graph_posterior.png
 graph:
   user_visible_by_default: false
   auto_derive_from_data: true

@@ -74,6 +74,7 @@ autoclanker session ingest-eval
 autoclanker session fit
 autoclanker session suggest
 autoclanker session recommend-commit
+autoclanker session render-report
 autoclanker session status
 ```
 
@@ -99,7 +100,9 @@ Requirements:
 - default root `.autoclanker/`;
 - support alternate placement under another tool’s session directory;
 - append-only observation logging via `observations.jsonl`;
-- structured JSON or YAML artifacts for session manifest, belief batch, preview, compiled priors, posterior summary, query, and commit decision.
+- structured JSON or YAML artifacts for session manifest, belief batch, preview, compiled priors, posterior summary, query, and commit decision;
+- a human-readable `RESULTS.md` artifact describing the current run state;
+- rendered report artifacts for convergence, candidate rankings, and prior-vs-posterior graph views.
 
 The adapter boundary must make it trivial for a future wrapper or companion tool to place session files under:
 - `.autoclanker/<session_id>/`, or

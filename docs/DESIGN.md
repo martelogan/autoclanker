@@ -187,6 +187,12 @@ Default session layout:
   posterior_summary.json
   query.json
   commit_decision.json
+  influence_summary.json
+  RESULTS.md
+  convergence.png
+  candidate_rankings.png
+  belief_graph_prior.png
+  belief_graph_posterior.png
 ```
 
 The same store must be relocatable under another parent path, e.g.:

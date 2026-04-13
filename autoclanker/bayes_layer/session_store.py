@@ -15,6 +15,7 @@ from autoclanker.bayes_layer.belief_io import (
 )
 from autoclanker.bayes_layer.config import (
     BayesLayerConfig,
+    SessionArtifactConfig,
     load_bayes_layer_config,
 )
 from autoclanker.bayes_layer.registry import GeneRegistry
@@ -35,7 +36,12 @@ from autoclanker.bayes_layer.types import (
 
 
 class SessionStore(Protocol):
+    @property
+    def artifact_filenames(self) -> SessionArtifactConfig: ...
+
     def session_path(self, session_id: str) -> Path: ...
+
+    def artifact_path(self, session_id: str, filename: str) -> Path: ...
 
     def init_session(self, manifest: SessionManifest) -> Path: ...
 
@@ -133,8 +139,15 @@ class FilesystemSessionStore:
     def root(self) -> Path:
         return self._root
 
+    @property
+    def artifact_filenames(self) -> SessionArtifactConfig:
+        return self._artifacts
+
     def session_path(self, session_id: str) -> Path:
         return self.root / session_id
+
+    def artifact_path(self, session_id: str, filename: str) -> Path:
+        return self._artifact_path(session_id, filename)
 
     def _artifact_path(self, session_id: str, filename: str) -> Path:
         session_path = self.session_path(session_id)
@@ -356,6 +369,21 @@ class FilesystemSessionStore:
             ),
             "influence_summary": str(
                 self._artifact_path(session_id, self._artifacts.influence_summary)
+            ),
+            "results_markdown": str(
+                self._artifact_path(session_id, self._artifacts.results_markdown)
+            ),
+            "convergence_plot": str(
+                self._artifact_path(session_id, self._artifacts.convergence_plot)
+            ),
+            "candidate_rankings_plot": str(
+                self._artifact_path(session_id, self._artifacts.candidate_rankings_plot)
+            ),
+            "prior_graph_plot": str(
+                self._artifact_path(session_id, self._artifacts.prior_graph_plot)
+            ),
+            "posterior_graph_plot": str(
+                self._artifact_path(session_id, self._artifacts.posterior_graph_plot)
             ),
         }
         return SessionStatus(

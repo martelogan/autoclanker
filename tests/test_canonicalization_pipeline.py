@@ -18,6 +18,7 @@ from autoclanker.cli import main
 from tests.compliance import covers
 
 ROOT = Path(__file__).resolve().parents[1]
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
 def _require_mapping(value: object) -> dict[str, object]:
@@ -36,6 +37,11 @@ def _run_cli(argv: list[str]) -> dict[str, object]:
             f"autoclanker {' '.join(argv)!r} failed: {stderr.getvalue().strip()}"
         )
     return _require_mapping(json.loads(stdout.getvalue()))
+
+
+def _assert_png(path: Path) -> None:
+    raw = path.read_bytes()
+    assert raw.startswith(PNG_MAGIC)
 
 
 @covers("M4-005")
@@ -239,6 +245,7 @@ def test_hybrid_session_persists_surface_and_influence_artifacts(
         _require_mapping(item)
         for item in cast(list[object], suggest_output["ranked_candidates"])
     ]
+    report_artifacts = _require_mapping(suggest_output["report_artifacts"])
     influence_summary = [
         _require_mapping(item)
         for item in cast(list[object], suggest_output["influence_summary"])
@@ -250,12 +257,14 @@ def test_hybrid_session_persists_surface_and_influence_artifacts(
     )
 
     assert ranked_candidates[0]["candidate_id"] == "cand_c_compiled_context_pair"
+    assert Path(str(report_artifacts["results_markdown"])).exists()
+    assert Path(str(report_artifacts["candidate_rankings_plot"])).exists()
     assert any(
         "main:search.repeated_format_fast_path=path_compiled_context" in str(entry)
         for entry in cast(list[object], top_influence["influence_summary"])
     )
 
-    _run_cli(
+    commit_output = _run_cli(
         [
             "session",
             "recommend-commit",
@@ -265,6 +274,15 @@ def test_hybrid_session_persists_surface_and_influence_artifacts(
             str(session_root),
         ]
     )
+    commit_report_artifacts = _require_mapping(commit_output["report_artifacts"])
+    results_path = Path(str(commit_report_artifacts["results_markdown"]))
+    assert "Session Results" in results_path.read_text(encoding="utf-8")
+    assert "Follow-up queries" in results_path.read_text(encoding="utf-8")
+    assert "Commit recommendation" in results_path.read_text(encoding="utf-8")
+    _assert_png(Path(str(commit_report_artifacts["convergence_plot"])))
+    _assert_png(Path(str(commit_report_artifacts["candidate_rankings_plot"])))
+    _assert_png(Path(str(commit_report_artifacts["prior_graph_plot"])))
+    _assert_png(Path(str(commit_report_artifacts["posterior_graph_plot"])))
     influence_artifact = _require_mapping(
         json.loads(
             (session_path / "influence_summary.json").read_text(encoding="utf-8")
@@ -276,3 +294,43 @@ def test_hybrid_session_persists_surface_and_influence_artifacts(
         == "main:search.repeated_format_fast_path=path_compiled_context"
         for item in persisted_influences
     )
+
+
+@covers("M3-005")
+def test_session_render_report_refreshes_visual_artifacts(tmp_path: Path) -> None:
+    session_root = tmp_path / "sessions"
+    session_id = "render_report_demo"
+    _run_cli(
+        [
+            "session",
+            "init",
+            "--session-id",
+            session_id,
+            "--era-id",
+            "era_render_v1",
+            "--session-root",
+            str(session_root),
+        ]
+    )
+
+    render_output = _run_cli(
+        [
+            "session",
+            "render-report",
+            "--session-id",
+            session_id,
+            "--session-root",
+            str(session_root),
+        ]
+    )
+    report_artifacts = _require_mapping(render_output["report_artifacts"])
+    results_text = Path(str(report_artifacts["results_markdown"])).read_text(
+        encoding="utf-8"
+    )
+
+    assert "Session Results" in results_text
+    assert "Observation count: `0`" in results_text
+    _assert_png(Path(str(report_artifacts["convergence_plot"])))
+    _assert_png(Path(str(report_artifacts["candidate_rankings_plot"])))
+    _assert_png(Path(str(report_artifacts["prior_graph_plot"])))
+    _assert_png(Path(str(report_artifacts["posterior_graph_plot"])))
