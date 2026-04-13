@@ -162,8 +162,8 @@ autoclanker/
 Keep these synchronized with the code:
 
 - `README.md`
-- `CONTRIBUTING.md`
-- `STYLE.md`
+- `.github/CONTRIBUTING.md`
+- `docs/STYLE.md`
 - `docs/SPEC.md`
 - `docs/DESIGN.md`
 - `docs/INTEGRATIONS.md`

@@ -182,8 +182,10 @@ def test_docs_distinguish_upstream_live_from_billed_model_live() -> None:
 def test_primary_docs_focus_on_current_library_surface() -> None:
     root = Path(__file__).resolve().parents[1]
     readme = (root / "README.md").read_text(encoding="utf-8")
-    contributing = (root / "CONTRIBUTING.md").read_text(encoding="utf-8")
-    style = (root / "STYLE.md").read_text(encoding="utf-8")
+    contributing = (root / ".github" / "CONTRIBUTING.md").read_text(
+        encoding="utf-8"
+    )
+    style = (root / "docs" / "STYLE.md").read_text(encoding="utf-8")
 
     assert "BAYES_HANDOFF.md" not in readme
     assert "CODEX_TASK.md" not in readme
@@ -191,8 +193,8 @@ def test_primary_docs_focus_on_current_library_surface() -> None:
     assert "PI_EXTENSION_FUTURE.md" not in readme
     assert "codex-autonomous" not in readme
     assert "starter-python-project" not in readme
-    assert "CONTRIBUTING.md" in readme
-    assert "STYLE.md" in readme
+    assert ".github/CONTRIBUTING.md" in readme
+    assert "docs/STYLE.md" in readme
     assert "Development setup" in contributing
     assert "Validation" in contributing
     assert "Style Guide" in style

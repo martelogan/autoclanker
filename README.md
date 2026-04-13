@@ -1,6 +1,6 @@
 <div align="center">
 
-<img height="120" alt="autoclanker logo" src="assets/autoclanker-logo.svg" />
+<img height="120" alt="autoclanker logo" src="docs/assets/autoclanker-logo.svg" />
 
 # autoclanker
 
@@ -41,7 +41,7 @@ the underlying loop.
 ## How It Works
 
 <p align="center">
-  <img src="assets/autoclanker_simple_loop.png" width="460" alt="Autoclanker workflow diagram">
+  <img src="docs/assets/autoclanker_simple_loop.png" width="460" alt="Autoclanker workflow diagram">
 </p>
 
 The core idea is simple: keep the outer loop you already trust, but make it
@@ -59,7 +59,7 @@ pick next candidate ---> run eval ---> record result
       +---------- refine search <--------+
 ```
 
-For a more detailed diagram, see [here](assets/autoclanker_mermaid.png).
+For a more detailed diagram, see [here](docs/assets/autoclanker_mermaid.png).
 
 The outer-layer adapter and session-boundary outer loop over
 [Autoresearch](https://github.com/karpathy/autoresearch) here was inspired by
@@ -381,7 +381,7 @@ The main local quality commands are:
 ./bin/dev check
 ```
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md), [`STYLE.md`](STYLE.md), and
+See [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md), [`docs/STYLE.md`](docs/STYLE.md), and
 [`docs/developer-environment.md`](docs/developer-environment.md) for contributor
 guidance.
 

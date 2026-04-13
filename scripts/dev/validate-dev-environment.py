@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MISE_TOML = ROOT / "mise.toml"
 DEVENV_NIX = ROOT / "devenv.nix"
 DEVCONTAINER_JSON = ROOT / ".devcontainer" / "devcontainer.json"
-ENVRC_DEVENV = ROOT / "dev" / "env" / "envrc.devenv.example"
+ENVRC_DEVENV = ROOT / "configs" / "strict-env" / "envrc.devenv.example"
 
 REQUIRED_ENV_KEYS = {
     "UV_CACHE_DIR",

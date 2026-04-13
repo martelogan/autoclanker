@@ -16,7 +16,7 @@ if [[ "${MODE}" != "devenv" ]]; then
     exit 2
 fi
 
-TEMPLATE="${ROOT}/dev/env/envrc.${MODE}.example"
+TEMPLATE="${ROOT}/configs/strict-env/envrc.${MODE}.example"
 TARGET="${ROOT}/.envrc"
 
 if [[ ! -f "${TEMPLATE}" ]]; then

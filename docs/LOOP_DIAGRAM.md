@@ -34,4 +34,4 @@ flowchart TB
 ```
 
 Editable Mermaid source lives at
-[`assets/autoclanker_loop.mmd`](../assets/autoclanker_loop.mmd).
+[`docs/assets/autoclanker_loop.mmd`](./assets/autoclanker_loop.mmd).

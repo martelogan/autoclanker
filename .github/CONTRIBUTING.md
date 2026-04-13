@@ -78,4 +78,4 @@ Before submitting:
 - schemas live in `schemas/`
 - examples live in `examples/`
 
-See [`STYLE.md`](STYLE.md) for day-to-day coding conventions.
+See [`docs/STYLE.md`](docs/STYLE.md) for day-to-day coding conventions.

@@ -104,6 +104,10 @@ They resolve to:
 
 Both point at `.local/real-upstreams/` rather than a repo-specific vendor directory.
 
+If you keep manual checkout copies elsewhere, the path-resolution helpers also
+honor `references/autoresearch` and `references/cevolve` as optional local
+fallbacks. Those paths are intentionally not tracked by the repo.
+
 ## 5. CLI expectations
 
 The adapter CLI should support at least:
