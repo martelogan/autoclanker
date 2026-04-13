@@ -127,6 +127,7 @@ class SessionArtifactConfig:
     manifest: str
     beliefs: str
     surface_snapshot: str
+    eval_contract: str
     surface_overlay: str
     canonicalization_summary: str
     compiled_preview: str
@@ -134,8 +135,10 @@ class SessionArtifactConfig:
     observations: str
     posterior_summary: str
     query: str
+    frontier_status: str
     commit_decision: str
     influence_summary: str
+    eval_runs_dir: str
     results_markdown: str
     convergence_plot: str
     candidate_rankings_plot: str
@@ -321,6 +324,7 @@ def load_bayes_layer_config(path: Path | None = None) -> BayesLayerConfig:
                 manifest=_require_str(artifact_mapping, "manifest"),
                 beliefs=_require_str(artifact_mapping, "beliefs"),
                 surface_snapshot=_require_str(artifact_mapping, "surface_snapshot"),
+                eval_contract=_require_str(artifact_mapping, "eval_contract"),
                 surface_overlay=_require_str(artifact_mapping, "surface_overlay"),
                 canonicalization_summary=_require_str(
                     artifact_mapping, "canonicalization_summary"
@@ -330,8 +334,10 @@ def load_bayes_layer_config(path: Path | None = None) -> BayesLayerConfig:
                 observations=_require_str(artifact_mapping, "observations"),
                 posterior_summary=_require_str(artifact_mapping, "posterior_summary"),
                 query=_require_str(artifact_mapping, "query"),
+                frontier_status=_require_str(artifact_mapping, "frontier_status"),
                 commit_decision=_require_str(artifact_mapping, "commit_decision"),
                 influence_summary=_require_str(artifact_mapping, "influence_summary"),
+                eval_runs_dir=_require_str(artifact_mapping, "eval_runs_dir"),
                 results_markdown=_require_str(artifact_mapping, "results_markdown"),
                 convergence_plot=_require_str(artifact_mapping, "convergence_plot"),
                 candidate_rankings_plot=_require_str(

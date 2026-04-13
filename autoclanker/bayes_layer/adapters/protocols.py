@@ -6,6 +6,8 @@ from typing import Protocol
 
 from autoclanker.bayes_layer.registry import GeneRegistry
 from autoclanker.bayes_layer.types import (
+    EvalContractSnapshot,
+    EvalExecutionContext,
     GeneStateRef,
     JsonValue,
     ValidAdapterConfig,
@@ -31,6 +33,8 @@ class EvalLoopAdapter(Protocol):
 
     def build_registry(self) -> GeneRegistry: ...
 
+    def capture_eval_contract(self) -> EvalContractSnapshot: ...
+
     def materialize_candidate(
         self,
         genotype: Sequence[GeneStateRef],
@@ -44,6 +48,7 @@ class EvalLoopAdapter(Protocol):
         genotype: Sequence[GeneStateRef],
         seed: int = 0,
         replication_index: int = 0,
+        execution_context: EvalExecutionContext | None = None,
     ) -> ValidEvalResult: ...
 
     def commit_candidate(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -32,6 +33,8 @@ _DEFAULT_API_URL = "https://api.anthropic.com/v1/messages"
 _DEFAULT_TIMEOUT_SEC = 60
 _DEFAULT_MAX_TOKENS = 1400
 _DEFAULT_TEMPERATURE = 0.0
+_DEFAULT_MAX_RETRIES = 2
+_DEFAULT_RETRY_BACKOFF_SEC = 1.0
 
 
 def _extract_json_object(text: str) -> dict[str, object]:
@@ -590,6 +593,28 @@ class AnthropicCanonicalizationConfig:
     timeout_sec: int
     max_tokens: int
     temperature: float
+    max_retries: int = _DEFAULT_MAX_RETRIES
+    retry_backoff_sec: float = _DEFAULT_RETRY_BACKOFF_SEC
+
+
+def _is_retryable_http_error(exc: HTTPError) -> bool:
+    return exc.code in {429, 500, 502, 503, 504, 529}
+
+
+def _is_retryable_url_error(exc: URLError) -> bool:
+    reason = exc.reason
+    if isinstance(reason, TimeoutError):
+        return True
+    normalized = str(reason).lower()
+    return any(
+        token in normalized
+        for token in (
+            "timed out",
+            "temporarily unavailable",
+            "connection reset",
+            "connection aborted",
+        )
+    )
 
 
 class AnthropicCanonicalizationModel:
@@ -623,18 +648,32 @@ class AnthropicCanonicalizationModel:
                 "anthropic-version": "2023-06-01",
             },
         )
-        try:
-            with urlopen(http_request, timeout=self._config.timeout_sec) as response:
-                rendered = response.read().decode("utf-8")
-        except HTTPError as exc:
-            body_text = exc.read().decode("utf-8", errors="replace")
-            raise ValidationFailure(
-                f"Anthropic canonicalizer request failed with HTTP {exc.code}: {body_text}"
-            ) from exc
-        except URLError as exc:
-            raise ValidationFailure(
-                f"Anthropic canonicalizer request failed: {exc.reason}"
-            ) from exc
+        rendered: str | None = None
+        attempts = self._config.max_retries + 1
+        for attempt in range(attempts):
+            try:
+                with urlopen(
+                    http_request, timeout=self._config.timeout_sec
+                ) as response:
+                    rendered = response.read().decode("utf-8")
+                break
+            except HTTPError as exc:
+                body_text = exc.read().decode("utf-8", errors="replace")
+                if _is_retryable_http_error(exc) and attempt + 1 < attempts:
+                    time.sleep(self._config.retry_backoff_sec * (2**attempt))
+                    continue
+                raise ValidationFailure(
+                    f"Anthropic canonicalizer request failed with HTTP {exc.code}: {body_text}"
+                ) from exc
+            except URLError as exc:
+                if _is_retryable_url_error(exc) and attempt + 1 < attempts:
+                    time.sleep(self._config.retry_backoff_sec * (2**attempt))
+                    continue
+                raise ValidationFailure(
+                    f"Anthropic canonicalizer request failed: {exc.reason}"
+                ) from exc
+        if rendered is None:
+            raise ValidationFailure("Anthropic canonicalizer request produced no body.")
         raw_payload = json.loads(rendered)
         if not isinstance(raw_payload, dict):
             raise ValidationFailure(
@@ -740,6 +779,8 @@ def build_autoclanker_canonicalization_model() -> CanonicalizationModel:
     timeout_raw = os.environ.get("AUTOCLANKER_ANTHROPIC_TIMEOUT_SEC")
     max_tokens_raw = os.environ.get("AUTOCLANKER_ANTHROPIC_MAX_TOKENS")
     temperature_raw = os.environ.get("AUTOCLANKER_ANTHROPIC_TEMPERATURE")
+    max_retries_raw = os.environ.get("AUTOCLANKER_ANTHROPIC_MAX_RETRIES")
+    retry_backoff_raw = os.environ.get("AUTOCLANKER_ANTHROPIC_RETRY_BACKOFF_SEC")
     return AnthropicCanonicalizationModel(
         AnthropicCanonicalizationConfig(
             api_key=api_key.strip(),
@@ -757,6 +798,16 @@ def build_autoclanker_canonicalization_model() -> CanonicalizationModel:
                 float(temperature_raw)
                 if temperature_raw is not None
                 else _DEFAULT_TEMPERATURE
+            ),
+            max_retries=(
+                int(max_retries_raw)
+                if max_retries_raw is not None
+                else _DEFAULT_MAX_RETRIES
+            ),
+            retry_backoff_sec=(
+                float(retry_backoff_raw)
+                if retry_backoff_raw is not None
+                else _DEFAULT_RETRY_BACKOFF_SEC
             ),
         )
     )

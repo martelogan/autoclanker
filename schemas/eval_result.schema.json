@@ -56,6 +56,12 @@
     "failure_metadata": {
       "type": "object",
       "additionalProperties": true
+    },
+    "eval_contract": {
+      "$ref": "#/$defs/EvalContractSnapshot"
+    },
+    "execution_metadata": {
+      "$ref": "#/$defs/EvalExecutionMetadata"
     }
   },
   "$defs": {
@@ -66,6 +72,69 @@
       "properties": {
         "gene_id": { "type": "string", "minLength": 1 },
         "state_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "EvalContractSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_digest",
+        "benchmark_tree_digest",
+        "eval_harness_digest",
+        "adapter_config_digest",
+        "environment_digest"
+      ],
+      "properties": {
+        "contract_digest": { "type": "string", "minLength": 1 },
+        "benchmark_tree_digest": { "type": "string", "minLength": 1 },
+        "eval_harness_digest": { "type": "string", "minLength": 1 },
+        "adapter_config_digest": { "type": "string", "minLength": 1 },
+        "environment_digest": { "type": "string", "minLength": 1 },
+        "measurement_mode": {
+          "type": "string",
+          "enum": ["exclusive", "parallel_ok"]
+        },
+        "stabilization_mode": {
+          "type": "string",
+          "enum": ["off", "soft"]
+        },
+        "lease_scope": { "type": "string", "minLength": 1 },
+        "workspace_snapshot_id": { "type": "string", "minLength": 1 },
+        "workspace_snapshot_mode": { "type": "string", "minLength": 1 },
+        "captured_paths": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "captured_at": { "type": "string", "minLength": 1 }
+      }
+    },
+    "EvalExecutionMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["isolation_mode"],
+      "properties": {
+        "isolation_mode": {
+          "type": "string",
+          "enum": ["git_worktree", "copy", "fixture"]
+        },
+        "workspace_root": { "type": "string", "minLength": 1 },
+        "workspace_snapshot_id": { "type": "string", "minLength": 1 },
+        "contract_digest": { "type": "string", "minLength": 1 },
+        "measurement_mode": {
+          "type": "string",
+          "enum": ["exclusive", "parallel_ok"]
+        },
+        "stabilization_mode": {
+          "type": "string",
+          "enum": ["off", "soft"]
+        },
+        "lease_scope": { "type": "string", "minLength": 1 },
+        "lease_acquired": { "type": "boolean" },
+        "lease_wait_sec": { "type": "number", "minimum": 0 },
+        "noisy_system": { "type": "boolean" },
+        "loadavg_1m_before": { "type": "number", "minimum": 0 },
+        "loadavg_1m_after": { "type": "number", "minimum": 0 },
+        "stabilization_delay_sec": { "type": "number", "minimum": 0 }
       }
     }
   }

@@ -10,7 +10,11 @@ from autoclanker.bayes_layer.adapters import load_adapter
 from autoclanker.bayes_layer.adapters.autoresearch import AutoresearchAdapter
 from autoclanker.bayes_layer.adapters.cevolve import CevolveAdapter
 from autoclanker.bayes_layer.adapters.fixture import FixtureAdapter
-from autoclanker.bayes_layer.types import AdapterFailure, ValidAdapterConfig
+from autoclanker.bayes_layer.types import (
+    AdapterFailure,
+    EvalExecutionContext,
+    ValidAdapterConfig,
+)
 from tests.compliance import covers
 
 
@@ -252,3 +256,54 @@ def test_generic_subprocess_adapter_probe_and_execute() -> None:
     assert probe.metadata["execution_mode"] == "subprocess_cli"
     assert materialized["execution_mode"] == "subprocess_cli"
     assert evaluation.raw_metrics["execution_mode"] == "subprocess_cli"
+
+
+@covers("M4-007")
+def test_first_party_adapters_capture_eval_contracts_and_execution_context() -> None:
+    for adapter in (
+        AutoresearchAdapter(
+            ValidAdapterConfig(
+                kind="autoresearch",
+                mode="auto",
+                session_root=".autoclanker",
+                repo_path=str(Path("tests/fixtures/autoresearch_repo")),
+            )
+        ),
+        CevolveAdapter(
+            ValidAdapterConfig(
+                kind="cevolve",
+                mode="auto",
+                session_root=".autoclanker",
+                repo_path=str(Path("tests/fixtures/cevolve_repo")),
+            )
+        ),
+    ):
+        contract = adapter.capture_eval_contract()
+        execution_context = EvalExecutionContext(
+            session_id="session_contract_demo",
+            era_id="era_contract_v1",
+            contract=contract,
+            isolation_mode="copy",
+            workspace_root="/tmp/autoclanker-isolated-workspace",
+            seed=11,
+            replication_index=2,
+        )
+        evaluation = adapter.evaluate_candidate(
+            era_id="era_contract_v1",
+            candidate_id=f"cand_{adapter.kind}_context",
+            genotype=adapter.build_registry().default_genotype(),
+            seed=11,
+            replication_index=2,
+            execution_context=execution_context,
+        )
+
+        assert contract.contract_digest.startswith("sha256:")
+        assert evaluation.eval_contract is not None
+        assert evaluation.execution_metadata is not None
+        assert evaluation.eval_contract.contract_digest == contract.contract_digest
+        assert evaluation.execution_metadata.contract_digest == contract.contract_digest
+        assert (
+            evaluation.execution_metadata.workspace_root
+            == execution_context.workspace_root
+        )
+        assert evaluation.execution_metadata.isolation_mode == "copy"

@@ -56,6 +56,18 @@ def _predictive_margin(payload: dict[str, object], candidate_id: str) -> float:
     return float(value)
 
 
+def _require_sequence(value: object) -> list[object]:
+    if not isinstance(value, list):
+        raise AssertionError("Expected a JSON list.")
+    return cast(list[object], value)
+
+
+def _require_float(value: object) -> float:
+    if not isinstance(value, (int, float)):
+        raise AssertionError("Expected a numeric value.")
+    return float(value)
+
+
 def _init_and_apply(
     *,
     session_root: Path,
@@ -187,3 +199,161 @@ def test_zero_eval_cold_start_parser_lanes_show_value_from_typed_canonical_bayes
     assert proposal_good_pair == control_good_pair
     assert deterministic_good_pair > control_good_pair
     assert hybrid_good_pair > proposal_good_pair
+
+
+@covers("M7-011")
+def test_frontier_heavy_parser_lanes_preserve_family_budgeting_and_merge_guidance(
+    tmp_path: Path,
+) -> None:
+    session_root = tmp_path / "sessions"
+    frontier_path = tmp_path / "frontier.json"
+    frontier_path.write_text(
+        json.dumps(
+            {
+                "frontier_id": "parser_frontier_demo",
+                "default_family_id": "family_default",
+                "candidates": [
+                    {
+                        "candidate_id": "cand_a_default",
+                        "family_id": "baseline",
+                        "origin_kind": "seed",
+                        "genotype": [
+                            {"gene_id": "parser.matcher", "state_id": "matcher_basic"},
+                            {"gene_id": "parser.plan", "state_id": "plan_default"},
+                            {"gene_id": "capture.window", "state_id": "window_default"},
+                        ],
+                    },
+                    {
+                        "candidate_id": "cand_b_compiled_matcher",
+                        "family_id": "matcher_family",
+                        "origin_kind": "belief",
+                        "parent_belief_ids": ["belief_compiled"],
+                        "budget_weight": 2.0,
+                        "genotype": [
+                            {
+                                "gene_id": "parser.matcher",
+                                "state_id": "matcher_compiled",
+                            },
+                            {"gene_id": "parser.plan", "state_id": "plan_default"},
+                            {"gene_id": "capture.window", "state_id": "window_default"},
+                        ],
+                    },
+                    {
+                        "candidate_id": "cand_c_compiled_context_pair",
+                        "family_id": "plan_family",
+                        "origin_kind": "merge",
+                        "parent_candidate_ids": [
+                            "cand_a_default",
+                            "cand_b_compiled_matcher",
+                        ],
+                        "origin_query_ids": ["query_pair_001"],
+                        "notes": "merge compiled matcher and context pairing",
+                        "genotype": [
+                            {
+                                "gene_id": "parser.matcher",
+                                "state_id": "matcher_compiled",
+                            },
+                            {
+                                "gene_id": "parser.plan",
+                                "state_id": "plan_context_pair",
+                            },
+                            {"gene_id": "capture.window", "state_id": "window_default"},
+                        ],
+                    },
+                ],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    _init_and_apply(session_root=session_root, session_id="frontier_control")
+    _init_and_apply(
+        session_root=session_root,
+        session_id="frontier_deterministic",
+        ideas_json='["Compiled regex matching probably helps this parser on repeated log formats.","Compiled matching works best together with the context pair plan."]',
+    )
+    _init_and_apply(
+        session_root=session_root,
+        session_id="frontier_hybrid",
+        ideas_json='["A repeated-format fast path probably helps this parser."]',
+        canonicalization_model="stub",
+    )
+
+    control = _run_cli(
+        [
+            "session",
+            "suggest",
+            "--session-id",
+            "frontier_control",
+            "--session-root",
+            str(session_root),
+            "--candidates-input",
+            str(frontier_path),
+        ]
+    )
+    deterministic = _run_cli(
+        [
+            "session",
+            "suggest",
+            "--session-id",
+            "frontier_deterministic",
+            "--session-root",
+            str(session_root),
+            "--candidates-input",
+            str(frontier_path),
+        ]
+    )
+    hybrid = _run_cli(
+        [
+            "session",
+            "suggest",
+            "--session-id",
+            "frontier_hybrid",
+            "--session-root",
+            str(session_root),
+            "--candidates-input",
+            str(frontier_path),
+        ]
+    )
+
+    assert _top_candidate_id(control) == "cand_a_default"
+    assert _top_candidate_id(deterministic) == "cand_c_compiled_context_pair"
+    assert _top_candidate_id(hybrid) == "cand_c_compiled_context_pair"
+
+    for payload in (deterministic, hybrid):
+        frontier_summary = _require_mapping(payload["frontier_summary"])
+        assert frontier_summary["family_count"] == 3
+        family_representatives = _require_sequence(
+            frontier_summary["family_representatives"]
+        )
+        assert len(family_representatives) == 3
+        pending_merges = _require_sequence(
+            frontier_summary["pending_merge_suggestions"]
+        )
+        assert pending_merges
+        merge = _require_mapping(pending_merges[0])
+        assert set(_require_sequence(merge["family_ids"])).issubset(
+            {"baseline", "matcher_family", "plan_family"}
+        )
+        assert len(_require_sequence(merge["family_ids"])) == 2
+        assert set(_require_sequence(merge["candidate_ids"])).issubset(
+            {
+                "cand_a_default",
+                "cand_b_compiled_matcher",
+                "cand_c_compiled_context_pair",
+            }
+        )
+        assert len(_require_sequence(merge["candidate_ids"])) == 2
+        budget_allocations = _require_mapping(frontier_summary["budget_allocations"])
+        assert budget_allocations == {
+            "baseline": 0.25,
+            "matcher_family": 0.5,
+            "plan_family": 0.25,
+        }
+        assert (
+            round(
+                sum(_require_float(value) for value in budget_allocations.values()), 3
+            )
+            == 1.0
+        )

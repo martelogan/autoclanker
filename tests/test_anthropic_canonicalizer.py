@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import email.message
+import io
 import json
+
+from urllib.error import HTTPError
 
 import pytest
 
@@ -206,6 +210,80 @@ def test_anthropic_provider_reads_messages_api_response(
     suggestions = model.canonicalize(request)
 
     assert suggestions == ()
+
+
+@covers("M1-005")
+def test_anthropic_provider_retries_transient_overload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = AnthropicCanonicalizationModel(
+        AnthropicCanonicalizationConfig(
+            api_key="test-key",
+            model="claude-sonnet-4-20250514",
+            api_url="https://example.invalid/v1/messages",
+            timeout_sec=10,
+            max_tokens=600,
+            temperature=0.0,
+            max_retries=2,
+            retry_backoff_sec=0.01,
+        )
+    )
+    request = CanonicalizationRequest(
+        session_context=SessionContext(era_id="era_log_parser_v1"),
+        registry=build_fixture_registry(),
+        ideas=(),
+    )
+
+    class _FakeResponse:
+        def __enter__(self) -> _FakeResponse:
+            return self
+
+        def __exit__(
+            self,
+            exc_type: object,
+            exc: object,
+            traceback: object,
+        ) -> None:
+            del exc_type, exc, traceback
+
+        def read(self) -> bytes:
+            return json.dumps(
+                {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": '{"suggestions": []}',
+                        }
+                    ]
+                }
+            ).encode("utf-8")
+
+    attempts = {"count": 0}
+
+    def _fake_urlopen(request_obj: object, timeout: int) -> _FakeResponse:
+        del request_obj, timeout
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise HTTPError(
+                url="https://example.invalid/v1/messages",
+                code=529,
+                msg="Overloaded",
+                hdrs=email.message.Message(),
+                fp=io.BytesIO(
+                    b'{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}'
+                ),
+            )
+        return _FakeResponse()
+
+    def _fake_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(anthropic_canonicalizer, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(anthropic_canonicalizer.time, "sleep", _fake_sleep)
+    suggestions = model.canonicalize(request)
+
+    assert suggestions == ()
+    assert attempts["count"] == 2
 
 
 @covers("M1-005")

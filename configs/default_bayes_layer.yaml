@@ -98,6 +98,7 @@ session_store:
     manifest: session_manifest.yaml
     beliefs: beliefs.yaml
     surface_snapshot: surface_snapshot.json
+    eval_contract: eval_contract.json
     surface_overlay: surface_overlay.json
     canonicalization_summary: canonicalization_summary.json
     compiled_preview: compiled_preview.json
@@ -105,8 +106,10 @@ session_store:
     observations: observations.jsonl
     posterior_summary: posterior_summary.json
     query: query.json
+    frontier_status: frontier_status.json
     commit_decision: commit_decision.json
     influence_summary: influence_summary.json
+    eval_runs_dir: eval_runs
     results_markdown: RESULTS.md
     convergence_plot: convergence.png
     candidate_rankings_plot: candidate_rankings.png

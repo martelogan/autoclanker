@@ -35,7 +35,7 @@ optional provider-agnostic model canonicalization
     ↓
 typed beliefs + optional session-local surface overlay
     ↓
-preview / apply boundary + influence summary
+preview / apply boundary + locked eval contract + influence summary
     ↓
 preview compiler  ───────────────┐
     ↓                           │
@@ -43,15 +43,15 @@ belief compiler                  │
     ↓                           │
 prior store ────────────────────┤
                                 ↓
-outer-loop adapter → feature encoder → objective surrogate
-                    ↓                ↓
-                    └────────────→ feasibility surrogate
-                                     ↓
-                        posterior interaction graph
-                                     ↓
-                       acquisition + batch select
-                                     ↓
-                  session store + CLI JSON outputs
+frontier-aware outer-loop adapter → feature encoder → objective surrogate
+                             ↓                ↓
+                             └────────────→ feasibility surrogate
+                                              ↓
+                                 posterior interaction graph
+                                              ↓
+                        acquisition + family-aware query policy
+                                              ↓
+                 session store + CLI JSON outputs + eval run records
 ```
 
 The key layering is:
@@ -141,8 +141,9 @@ The generic adapter should be able to:
 - identify itself and report status,
 - discover or build a gene / idea registry,
 - expose a richer optimization surface with semantic metadata, not just low-level knobs,
+- capture a reproducible eval contract for the active benchmark and environment,
 - materialize a candidate genotype into an eval-ready form,
-- run an evaluation and emit a schema-valid result,
+- run an evaluation under an explicit execution context and emit a schema-valid result,
 - optionally recommend or apply a commit step,
 - expose enough metadata for rethink summaries.
 
@@ -180,14 +181,17 @@ Default session layout:
 ```text
 .autoclanker/<session_id>/
   session_manifest.yaml
+  eval_contract.json
   beliefs.yaml
   compiled_preview.json
   compiled_priors.json
   observations.jsonl
+  frontier_status.json
   posterior_summary.json
   query.json
   commit_decision.json
   influence_summary.json
+  eval_runs/
   RESULTS.md
   convergence.png
   candidate_rankings.png
@@ -222,8 +226,11 @@ adapter probe
 session init
 session apply-beliefs
 session ingest-eval
+session run-eval
+session run-frontier
 session fit
 session suggest
+session frontier-status
 session recommend-commit
 session status
 ```
@@ -234,6 +241,14 @@ The CLI should be:
 - file-friendly,
 - script-friendly,
 - easy for future wrappers to call.
+
+`run-eval` and `run-frontier` are the hardened execution path when the engine
+itself is responsible for running the benchmark. They must default to isolated
+temp git worktrees when a repo snapshot is available, and only fall back to
+copy-mode or fixture mode when the adapter cannot support git-backed isolation.
+When the active eval policy is measurement-sensitive, the measured phase should
+also take a contract-scoped advisory lease and record soft-stabilization
+metadata so local performance runs do not silently overlap.
 
 ## 8. User-lane design
 
@@ -259,10 +274,22 @@ rough ideas
 → optional model-assisted typed suggestions / overlays
 → preview
 → apply
-→ fit / suggest / recommend
+→ run-eval or ingest
+→ fit / suggest / frontier-status / recommend
 ```
 
 This lane must stay inspectable and reproducible through session artifacts rather than hidden model state.
+
+### 8.6 Frontier-aware exploration
+
+Candidate pools now support a persisted frontier document rather than only a
+flat list input. The current frontier state preserves:
+
+- family representatives and normalized per-family budget allocations based on
+  the supplied candidate weights,
+- parent candidate and parent belief lineage metadata,
+- heuristic pending merge suggestions when two frontier families remain strong,
+- unresolved cross-family queries.
 
 ### 8.5 Common assistant-authoring workflow
 

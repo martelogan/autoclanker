@@ -44,7 +44,54 @@
           "type": "boolean"
         },
         "metadata": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "benchmark_root": {
+              "type": "string",
+              "minLength": 1
+            },
+            "eval_harness_path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "environment_paths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "workspace_root": {
+              "type": "string",
+              "minLength": 1
+            },
+            "workspace_snapshot_mode": {
+              "type": "string",
+              "enum": ["git_worktree", "copy", "fixture"]
+            },
+            "eval_policy": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": ["auto", "exclusive", "parallel_ok"]
+                },
+                "stabilization": {
+                  "type": "string",
+                  "enum": ["off", "soft"]
+                },
+                "performance_sensitive": {
+                  "type": "boolean"
+                },
+                "lease_scope": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          "additionalProperties": true
         }
       },
       "allOf": [

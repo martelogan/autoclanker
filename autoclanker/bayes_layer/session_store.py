@@ -23,9 +23,16 @@ from autoclanker.bayes_layer.types import (
     BeliefsStatus,
     CanonicalizationMode,
     CommitDecision,
+    EvalContractSnapshot,
+    EvalMeasurementMode,
+    EvalStabilizationMode,
+    FrontierFamilyRepresentative,
+    FrontierSummary,
     JsonValue,
+    MergeSuggestion,
     PosteriorSummary,
     QuerySuggestion,
+    QueryType,
     SessionFailure,
     SessionManifest,
     SessionStatus,
@@ -33,6 +40,57 @@ from autoclanker.bayes_layer.types import (
     ValidEvalResult,
     to_json_value,
 )
+
+
+def _require_object_mapping(value: object, *, label: str) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise SessionFailure(f"{label} must be a JSON object.")
+    return cast(Mapping[str, object], value)
+
+
+def _require_object_list(
+    value: object, *, label: str
+) -> tuple[Mapping[str, object], ...]:
+    if not isinstance(value, list):
+        raise SessionFailure(f"{label} must be a list.")
+    result: list[Mapping[str, object]] = []
+    for index, item in enumerate(cast(list[object], value)):
+        result.append(_require_object_mapping(item, label=f"{label}[{index}]"))
+    return tuple(result)
+
+
+def _require_string_list(value: object, *, label: str) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise SessionFailure(f"{label} must be a list of strings.")
+    raw_items = cast(list[object], value)
+    if any(not isinstance(item, str) for item in raw_items):
+        raise SessionFailure(f"{label} must be a list of strings.")
+    return tuple(cast(list[str], raw_items))
+
+
+def _require_number(value: object, *, label: str) -> float:
+    if not isinstance(value, (int, float)):
+        raise SessionFailure(f"{label} must be numeric.")
+    return float(value)
+
+
+def _require_int(value: object, *, label: str) -> int:
+    if not isinstance(value, int):
+        raise SessionFailure(f"{label} must be an integer.")
+    return value
+
+
+def _require_query_type(value: object, *, label: str) -> QueryType:
+    if value not in {
+        "effect_sign",
+        "risk_triage",
+        "relation_check",
+        "pairwise_preference",
+    }:
+        raise SessionFailure(
+            f"{label} must be one of effect_sign, risk_triage, relation_check, pairwise_preference."
+        )
+    return cast(QueryType, value)
 
 
 class SessionStore(Protocol):
@@ -56,6 +114,12 @@ class SessionStore(Protocol):
     def write_surface_snapshot(
         self, session_id: str, payload: Mapping[str, JsonValue]
     ) -> Path: ...
+
+    def write_eval_contract(
+        self, session_id: str, contract: EvalContractSnapshot
+    ) -> Path: ...
+
+    def load_eval_contract(self, session_id: str) -> EvalContractSnapshot | None: ...
 
     def write_surface_overlay(
         self, session_id: str, payload: Mapping[str, JsonValue]
@@ -91,7 +155,14 @@ class SessionStore(Protocol):
         *,
         ranked_candidates: tuple[Mapping[str, JsonValue], ...],
         queries: tuple[QuerySuggestion, ...],
+        frontier_summary: FrontierSummary | None = None,
     ) -> Path: ...
+
+    def write_frontier_status(
+        self, session_id: str, frontier_summary: FrontierSummary
+    ) -> Path: ...
+
+    def load_frontier_status(self, session_id: str) -> FrontierSummary | None: ...
 
     def write_commit_decision(
         self, session_id: str, decision: CommitDecision
@@ -101,6 +172,14 @@ class SessionStore(Protocol):
         self,
         session_id: str,
         *,
+        payload: Mapping[str, JsonValue],
+    ) -> Path: ...
+
+    def write_eval_run_record(
+        self,
+        session_id: str,
+        *,
+        candidate_id: str,
         payload: Mapping[str, JsonValue],
     ) -> Path: ...
 
@@ -157,6 +236,12 @@ class FilesystemSessionStore:
     def _manifest_path(self, session_id: str) -> Path:
         return self._artifact_path(session_id, self._artifacts.manifest)
 
+    def _eval_runs_path(self, session_id: str, *, create: bool = True) -> Path:
+        path = self.session_path(session_id) / self._artifacts.eval_runs_dir
+        if create:
+            path.mkdir(parents=True, exist_ok=True)
+        return path
+
     def init_session(self, manifest: SessionManifest) -> Path:
         session_path = self.session_path(manifest.session_id)
         session_path.mkdir(parents=True, exist_ok=True)
@@ -194,6 +279,11 @@ class FilesystemSessionStore:
                 CanonicalizationMode | None, raw.get("canonicalization_mode")
             ),
             surface_overlay_active=bool(raw.get("surface_overlay_active", False)),
+            eval_contract_digest=cast(str | None, raw.get("eval_contract_digest")),
+            eval_contract_required=bool(raw.get("eval_contract_required", False)),
+            workspace_snapshot_mode=cast(
+                str | None, raw.get("workspace_snapshot_mode")
+            ),
         )
 
     def write_beliefs(self, session_id: str, beliefs: ValidatedBeliefBatch) -> Path:
@@ -214,6 +304,40 @@ class FilesystemSessionStore:
         return _json_dump(
             self._artifact_path(session_id, self._artifacts.surface_snapshot),
             payload,
+        )
+
+    def write_eval_contract(
+        self, session_id: str, contract: EvalContractSnapshot
+    ) -> Path:
+        return _json_dump(
+            self._artifact_path(session_id, self._artifacts.eval_contract),
+            cast(Mapping[str, JsonValue], to_json_value(contract)),
+        )
+
+    def load_eval_contract(self, session_id: str) -> EvalContractSnapshot | None:
+        path = self._artifact_path(session_id, self._artifacts.eval_contract)
+        if not path.exists():
+            return None
+        raw = load_serialized_payload(path)
+        return EvalContractSnapshot(
+            contract_digest=str(raw["contract_digest"]),
+            benchmark_tree_digest=str(raw["benchmark_tree_digest"]),
+            eval_harness_digest=str(raw["eval_harness_digest"]),
+            adapter_config_digest=str(raw["adapter_config_digest"]),
+            environment_digest=str(raw["environment_digest"]),
+            measurement_mode=cast(
+                EvalMeasurementMode | None, raw.get("measurement_mode")
+            ),
+            stabilization_mode=cast(
+                EvalStabilizationMode | None, raw.get("stabilization_mode")
+            ),
+            lease_scope=cast(str | None, raw.get("lease_scope")),
+            workspace_snapshot_id=cast(str | None, raw.get("workspace_snapshot_id")),
+            workspace_snapshot_mode=cast(
+                str | None, raw.get("workspace_snapshot_mode")
+            ),
+            captured_paths=cast(dict[str, JsonValue] | None, raw.get("captured_paths")),
+            captured_at=cast(str | None, raw.get("captured_at")),
         )
 
     def write_surface_overlay(
@@ -306,14 +430,146 @@ class FilesystemSessionStore:
         *,
         ranked_candidates: tuple[Mapping[str, JsonValue], ...],
         queries: tuple[QuerySuggestion, ...],
+        frontier_summary: FrontierSummary | None = None,
     ) -> Path:
-        payload = {
-            "ranked_candidates": cast(list[JsonValue], list(ranked_candidates)),
-            "queries": cast(list[JsonValue], to_json_value(queries)),
+        payload: dict[str, JsonValue] = {
+            "ranked_candidates": cast(JsonValue, list(ranked_candidates)),
+            "queries": to_json_value(queries),
         }
+        if frontier_summary is not None:
+            payload["frontier_summary"] = to_json_value(frontier_summary)
         return _json_dump(
             self._artifact_path(session_id, self._artifacts.query),
             payload,
+        )
+
+    def write_frontier_status(
+        self, session_id: str, frontier_summary: FrontierSummary
+    ) -> Path:
+        return _json_dump(
+            self._artifact_path(session_id, self._artifacts.frontier_status),
+            cast(Mapping[str, JsonValue], to_json_value(frontier_summary)),
+        )
+
+    def load_frontier_status(self, session_id: str) -> FrontierSummary | None:
+        path = self._artifact_path(session_id, self._artifacts.frontier_status)
+        if not path.exists():
+            return None
+        raw = load_serialized_payload(path)
+        family_representatives = tuple(
+            FrontierFamilyRepresentative(
+                family_id=str(item["family_id"]),
+                representative_candidate_id=str(item["representative_candidate_id"]),
+                representative_acquisition_score=_require_number(
+                    item["representative_acquisition_score"],
+                    label="family_representatives[].representative_acquisition_score",
+                ),
+                candidate_count=_require_int(
+                    item["candidate_count"],
+                    label="family_representatives[].candidate_count",
+                ),
+                compared_candidate_ids=_require_string_list(
+                    item["compared_candidate_ids"],
+                    label="family_representatives[].compared_candidate_ids",
+                ),
+                budget_weight=_require_number(
+                    item["budget_weight"],
+                    label="family_representatives[].budget_weight",
+                ),
+            )
+            for item in _require_object_list(
+                raw.get("family_representatives", []),
+                label="family_representatives",
+            )
+        )
+        pending_queries = tuple(
+            QuerySuggestion(
+                query_id=str(item["query_id"]),
+                query_type=_require_query_type(
+                    item["query_type"],
+                    label="pending_queries[].query_type",
+                ),
+                prompt=str(item["prompt"]),
+                target_refs=_require_string_list(
+                    item["target_refs"],
+                    label="pending_queries[].target_refs",
+                ),
+                expected_value=_require_number(
+                    item["expected_value"],
+                    label="pending_queries[].expected_value",
+                ),
+                confidence_gap=_require_number(
+                    item["confidence_gap"],
+                    label="pending_queries[].confidence_gap",
+                ),
+            )
+            for item in _require_object_list(
+                raw.get("pending_queries", []),
+                label="pending_queries",
+            )
+        )
+        pending_merge_suggestions = tuple(
+            MergeSuggestion(
+                merge_id=str(item["merge_id"]),
+                family_ids=_require_string_list(
+                    item["family_ids"],
+                    label="pending_merge_suggestions[].family_ids",
+                ),
+                candidate_ids=_require_string_list(
+                    item["candidate_ids"],
+                    label="pending_merge_suggestions[].candidate_ids",
+                ),
+                rationale=str(item["rationale"]),
+            )
+            for item in _require_object_list(
+                raw.get("pending_merge_suggestions", []),
+                label="pending_merge_suggestions",
+            )
+        )
+        dropped_family_reasons_raw = raw.get("dropped_family_reasons")
+        if dropped_family_reasons_raw is not None:
+            dropped_family_reasons_raw = _require_object_mapping(
+                dropped_family_reasons_raw,
+                label="dropped_family_reasons",
+            )
+        budget_allocations_raw = raw.get("budget_allocations")
+        if budget_allocations_raw is not None:
+            budget_allocations_raw = _require_object_mapping(
+                budget_allocations_raw,
+                label="budget_allocations",
+            )
+        return FrontierSummary(
+            frontier_id=str(raw.get("frontier_id", "frontier_default")),
+            candidate_count=_require_int(
+                raw.get("candidate_count", 0),
+                label="candidate_count",
+            ),
+            family_count=_require_int(
+                raw.get("family_count", len(family_representatives)),
+                label="family_count",
+            ),
+            family_representatives=family_representatives,
+            dropped_family_reasons=(
+                {}
+                if dropped_family_reasons_raw is None
+                else {
+                    str(key): str(value)
+                    for key, value in dropped_family_reasons_raw.items()
+                }
+            ),
+            pending_queries=pending_queries,
+            pending_merge_suggestions=pending_merge_suggestions,
+            budget_allocations=(
+                {}
+                if budget_allocations_raw is None
+                else {
+                    str(key): _require_number(
+                        value,
+                        label=f"budget_allocations[{key}]",
+                    )
+                    for key, value in budget_allocations_raw.items()
+                }
+            ),
         )
 
     def write_commit_decision(self, session_id: str, decision: CommitDecision) -> Path:
@@ -333,15 +589,36 @@ class FilesystemSessionStore:
             payload,
         )
 
+    def write_eval_run_record(
+        self,
+        session_id: str,
+        *,
+        candidate_id: str,
+        payload: Mapping[str, JsonValue],
+    ) -> Path:
+        return _json_dump(
+            self._eval_runs_path(session_id) / f"{candidate_id}.json",
+            payload,
+        )
+
     def status(self, session_id: str) -> SessionStatus:
         session_path = self.session_path(session_id)
         manifest = self.load_manifest(session_id)
         observations = self.read_observations(session_id)
+        frontier_status = self.load_frontier_status(session_id)
+        last_execution = (
+            None
+            if not observations or observations[-1].execution_metadata is None
+            else observations[-1].execution_metadata
+        )
         artifact_paths = {
             "manifest": str(self._manifest_path(session_id)),
             "beliefs": str(self._artifact_path(session_id, self._artifacts.beliefs)),
             "surface_snapshot": str(
                 self._artifact_path(session_id, self._artifacts.surface_snapshot)
+            ),
+            "eval_contract": str(
+                self._artifact_path(session_id, self._artifacts.eval_contract)
             ),
             "surface_overlay": str(
                 self._artifact_path(session_id, self._artifacts.surface_overlay)
@@ -364,6 +641,9 @@ class FilesystemSessionStore:
                 self._artifact_path(session_id, self._artifacts.posterior_summary)
             ),
             "query": str(self._artifact_path(session_id, self._artifacts.query)),
+            "frontier_status": str(
+                self._artifact_path(session_id, self._artifacts.frontier_status)
+            ),
             "commit_decision": str(
                 self._artifact_path(session_id, self._artifacts.commit_decision)
             ),
@@ -385,6 +665,7 @@ class FilesystemSessionStore:
             "posterior_graph_plot": str(
                 self._artifact_path(session_id, self._artifacts.posterior_graph_plot)
             ),
+            "eval_runs": str(self._eval_runs_path(session_id, create=False)),
         }
         return SessionStatus(
             session_id=session_id,
@@ -402,4 +683,32 @@ class FilesystemSessionStore:
             ),
             canonicalization_mode=manifest.canonicalization_mode,
             surface_overlay_active=manifest.surface_overlay_active,
+            eval_contract_digest=manifest.eval_contract_digest,
+            eval_contract_required=manifest.eval_contract_required,
+            last_eval_measurement_mode=(
+                None if last_execution is None else last_execution.measurement_mode
+            ),
+            last_eval_stabilization_mode=(
+                None if last_execution is None else last_execution.stabilization_mode
+            ),
+            last_eval_used_lease=(
+                None if last_execution is None else last_execution.lease_acquired
+            ),
+            last_eval_noisy_system=(
+                None if last_execution is None else last_execution.noisy_system
+            ),
+            frontier_family_count=(
+                0 if frontier_status is None else frontier_status.family_count
+            ),
+            frontier_candidate_count=(
+                0 if frontier_status is None else frontier_status.candidate_count
+            ),
+            pending_query_count=(
+                0 if frontier_status is None else len(frontier_status.pending_queries)
+            ),
+            pending_merge_suggestion_count=(
+                0
+                if frontier_status is None
+                else len(frontier_status.pending_merge_suggestions)
+            ),
         )

@@ -5,6 +5,7 @@ import hashlib
 import json
 import sys
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -32,6 +33,20 @@ from autoclanker.bayes_layer.config import (
     DEFAULT_ADAPTER_CONFIG_PATH,
     load_bayes_layer_config,
 )
+from autoclanker.bayes_layer.eval_contract import (
+    compare_eval_contracts,
+    drift_status_for_contracts,
+    hardened_eval_result,
+    isolated_execution_workspace,
+    measured_execution_window,
+)
+from autoclanker.bayes_layer.frontier import (
+    FrontierDocument,
+    frontier_candidates_payload,
+    frontier_from_candidate_pairs,
+    parse_frontier_payload,
+    summarize_frontier,
+)
 from autoclanker.bayes_layer.posterior_graph import build_posterior_graph
 from autoclanker.bayes_layer.query_policy import suggest_queries
 from autoclanker.bayes_layer.registry import GeneRegistry
@@ -41,10 +56,15 @@ from autoclanker.bayes_layer.surrogate_feasibility import fit_feasibility_surrog
 from autoclanker.bayes_layer.surrogate_objective import fit_objective_surrogate
 from autoclanker.bayes_layer.types import (
     CompiledPriorBundle,
+    EvalExecutionContext,
+    FrontierCandidate,
+    FrontierSummary,
     GeneStateRef,
     InfluenceSummary,
     JsonValue,
     PosteriorSummary,
+    QuerySuggestion,
+    RankedCandidate,
     SessionContext,
     SessionFailure,
     SessionManifest,
@@ -188,15 +208,46 @@ def _candidate_input_to_refs(
     return tuple(parsed)
 
 
-def _load_candidates(
+def _frontier_from_payload(payload: dict[str, object]) -> FrontierDocument:
+    if "frontier_id" in payload or "default_family_id" in payload:
+        return parse_frontier_payload(payload)
+    raw_candidates = payload.get("candidates")
+    if not isinstance(raw_candidates, list):
+        raise ValidationFailure("Candidate payload must contain a 'candidates' list.")
+    metadata_keys = {
+        "family_id",
+        "origin_kind",
+        "parent_candidate_ids",
+        "parent_belief_ids",
+        "origin_query_ids",
+        "notes",
+        "budget_weight",
+    }
+    if any(
+        isinstance(item, dict) and any(key in item for key in metadata_keys)
+        for item in cast(list[object], raw_candidates)
+    ):
+        return parse_frontier_payload(payload)
+    return frontier_from_candidate_pairs(_candidate_input_to_refs(payload))
+
+
+def _load_frontier(
     candidates_input: str | None,
     *,
     registry: GeneRegistry,
     compiled: CompiledPriorBundle,
-) -> tuple[tuple[str, tuple[GeneStateRef, ...]], ...]:
+) -> FrontierDocument:
     if candidates_input is None:
-        return generate_candidate_pool(registry, compiled_priors=compiled)
-    return _candidate_input_to_refs(_load_payload(candidates_input))
+        return frontier_from_candidate_pairs(
+            generate_candidate_pool(registry, compiled_priors=compiled)
+        )
+    return _frontier_from_payload(_load_payload(candidates_input))
+
+
+def _frontier_lookup(
+    frontier: FrontierDocument,
+) -> dict[str, FrontierCandidate]:
+    return {candidate.candidate_id: candidate for candidate in frontier.candidates}
 
 
 def _load_active_beliefs_and_bundle(
@@ -273,6 +324,155 @@ def _compute_summary(
     )
 
 
+def _status_payload(
+    *,
+    store: FilesystemSessionStore,
+    manifest: SessionManifest,
+    adapter_config: ValidAdapterConfig,
+) -> dict[str, JsonValue]:
+    payload = cast(
+        dict[str, JsonValue], to_json_value(store.status(manifest.session_id))
+    )
+    expected_contract = store.load_eval_contract(manifest.session_id)
+    current_contract = None
+    try:
+        current_contract = load_adapter(adapter_config).capture_eval_contract()
+    except Exception:  # pragma: no cover - status remains readable without live probe
+        current_contract = None
+    if expected_contract is not None:
+        payload["eval_contract"] = cast(
+            dict[str, JsonValue], to_json_value(expected_contract)
+        )
+    if current_contract is not None:
+        payload["current_eval_contract"] = cast(
+            dict[str, JsonValue], to_json_value(current_contract)
+        )
+        payload["current_eval_contract_digest"] = current_contract.contract_digest
+    payload["eval_contract_matches_current"] = (
+        None
+        if expected_contract is None or current_contract is None
+        else not compare_eval_contracts(expected_contract, current_contract)
+    )
+    payload["eval_contract_drift_status"] = drift_status_for_contracts(
+        expected_contract,
+        current_contract,
+    )
+    return payload
+
+
+def _append_hardened_eval_result(
+    *,
+    store: FilesystemSessionStore,
+    manifest: SessionManifest,
+    adapter_config: ValidAdapterConfig,
+    candidate: FrontierCandidate,
+    seed: int,
+    replication_index: int,
+) -> ValidEvalResult:
+    adapter = load_adapter(adapter_config)
+    expected_contract = store.load_eval_contract(manifest.session_id)
+    if expected_contract is None:
+        expected_contract = adapter.capture_eval_contract()
+    with (
+        isolated_execution_workspace(expected_contract) as (
+            isolation_mode,
+            workspace_root,
+        ),
+        measured_execution_window(expected_contract) as measurement,
+    ):
+        result = adapter.evaluate_candidate(
+            era_id=manifest.era_id,
+            candidate_id=candidate.candidate_id,
+            genotype=candidate.genotype,
+            seed=seed,
+            replication_index=replication_index,
+            execution_context=EvalExecutionContext(
+                session_id=manifest.session_id,
+                era_id=manifest.era_id,
+                contract=expected_contract,
+                isolation_mode=isolation_mode,
+                workspace_root=workspace_root,
+                seed=seed,
+                replication_index=replication_index,
+                measurement_mode=measurement.measurement_mode,
+                stabilization_mode=measurement.stabilization_mode,
+                lease_scope=measurement.lease_scope,
+            ),
+        )
+        hardened = hardened_eval_result(
+            result,
+            contract=expected_contract,
+            isolation_mode=isolation_mode,
+            workspace_root=workspace_root,
+            measurement=measurement,
+        )
+    store.append_observation(manifest.session_id, hardened)
+    store.write_eval_run_record(
+        manifest.session_id,
+        candidate_id=candidate.candidate_id,
+        payload={
+            "candidate": cast(dict[str, JsonValue], to_json_value(candidate)),
+            "result": cast(dict[str, JsonValue], to_json_value(hardened)),
+        },
+    )
+    return hardened
+
+
+def _suggest_from_frontier(
+    *,
+    store: FilesystemSessionStore,
+    manifest: SessionManifest,
+    registry: GeneRegistry,
+    beliefs: ValidatedBeliefBatch,
+    compiled: CompiledPriorBundle,
+    frontier: FrontierDocument,
+    observations: tuple[ValidEvalResult, ...],
+) -> tuple[tuple[RankedCandidate, ...], tuple[QuerySuggestion, ...], FrontierSummary]:
+    era_state = EraState(
+        era_id=manifest.era_id,
+        observation_count=len(observations),
+    )
+    objective = fit_objective_surrogate(
+        observations,
+        registry=registry,
+        compiled_priors=compiled,
+        era_state=era_state,
+    )
+    feasibility = fit_feasibility_surrogate(
+        observations,
+        registry=registry,
+        compiled_priors=compiled,
+        era_state=era_state,
+    )
+    ranked = rank_candidates(
+        frontier_candidates_payload(frontier),
+        registry=registry,
+        objective_posterior=objective,
+        feasibility_posterior=feasibility,
+        compiled_priors=compiled,
+        frontier_candidates=_frontier_lookup(frontier),
+    )
+    queries = suggest_queries(
+        objective,
+        beliefs=beliefs,
+        ranked_candidates=ranked,
+    )
+    frontier_summary = summarize_frontier(
+        frontier,
+        ranked_candidates=ranked[:8],
+        queries=queries,
+    )
+    ranked_payload = tuple(_json_object(item) for item in ranked[:8])
+    store.write_query_artifact(
+        manifest.session_id,
+        ranked_candidates=ranked_payload,
+        queries=queries,
+        frontier_summary=frontier_summary,
+    )
+    store.write_frontier_status(manifest.session_id, frontier_summary)
+    return ranked[:8], queries, frontier_summary
+
+
 def handle_init(args: argparse.Namespace) -> dict[str, JsonValue]:
     adapter_config = _load_adapter_config(args.adapter_config)
     adapter = load_adapter(adapter_config)
@@ -317,6 +517,7 @@ def handle_init(args: argparse.Namespace) -> dict[str, JsonValue]:
         raise ValidationFailure(
             "session init requires a session id and era id, directly or via beliefs."
         )
+    eval_contract = adapter.capture_eval_contract()
     if beliefs is not None:
         preview = preview_compiled_beliefs(beliefs, registry, EraState(era_id=era_id))
         preview_payload = cast(dict[str, JsonValue], to_json_value(preview))
@@ -343,8 +544,12 @@ def handle_init(args: argparse.Namespace) -> dict[str, JsonValue]:
             else None
         ),
         surface_overlay_active=surface_overlay_payload is not None,
+        eval_contract_digest=eval_contract.contract_digest,
+        eval_contract_required=True,
+        workspace_snapshot_mode=eval_contract.workspace_snapshot_mode,
     )
     store.init_session(manifest)
+    store.write_eval_contract(session_id, eval_contract)
     store.write_surface_snapshot(
         session_id,
         {
@@ -352,6 +557,7 @@ def handle_init(args: argparse.Namespace) -> dict[str, JsonValue]:
             "surface_summary": cast(
                 dict[str, JsonValue], to_json_value(registry.surface_summary())
             ),
+            "eval_contract": cast(dict[str, JsonValue], to_json_value(eval_contract)),
         },
     )
     if beliefs is not None and preview_payload is not None:
@@ -364,7 +570,11 @@ def handle_init(args: argparse.Namespace) -> dict[str, JsonValue]:
                 session_id,
                 canonicalization_summary_payload,
             )
-    payload = cast(dict[str, JsonValue], to_json_value(store.status(session_id)))
+    payload = _status_payload(
+        store=store,
+        manifest=manifest,
+        adapter_config=adapter_config,
+    )
     if canonicalization_summary_payload is not None:
         payload["canonicalization_summary"] = canonicalization_summary_payload
     if surface_overlay_payload is not None:
@@ -403,23 +613,18 @@ def handle_apply_beliefs(args: argparse.Namespace) -> dict[str, JsonValue]:
         cast(dict[str, JsonValue], to_json_value(compiled)),
     )
     store.write_manifest(
-        SessionManifest(
-            session_id=manifest.session_id,
-            era_id=manifest.era_id,
-            adapter_kind=manifest.adapter_kind,
-            adapter_execution_mode=manifest.adapter_execution_mode,
-            session_root=manifest.session_root,
-            created_at=manifest.created_at,
-            preview_required=manifest.preview_required,
+        replace(
+            manifest,
             beliefs_status="applied",
-            preview_digest=manifest.preview_digest,
             compiled_priors_active=True,
-            user_profile=manifest.user_profile,
-            canonicalization_mode=manifest.canonicalization_mode,
-            surface_overlay_active=manifest.surface_overlay_active,
         )
     )
-    return cast(dict[str, JsonValue], to_json_value(store.status(args.session_id)))
+    updated_manifest = store.load_manifest(args.session_id)
+    return _status_payload(
+        store=store,
+        manifest=updated_manifest,
+        adapter_config=adapter_config,
+    )
 
 
 def handle_ingest_eval(args: argparse.Namespace) -> dict[str, JsonValue]:
@@ -431,6 +636,29 @@ def handle_ingest_eval(args: argparse.Namespace) -> dict[str, JsonValue]:
         raise SessionFailure(
             f"Eval result era {result.era_id!r} did not match session era {manifest.era_id!r}."
         )
+    if manifest.eval_contract_required:
+        expected_contract = store.load_eval_contract(args.session_id)
+        if expected_contract is None:
+            raise SessionFailure(
+                f"Session {args.session_id!r} requires an eval contract, but none was stored."
+            )
+        if result.eval_contract is None:
+            raise SessionFailure(
+                "Eval result did not include eval_contract for this hardened session."
+            )
+        mismatches = compare_eval_contracts(expected_contract, result.eval_contract)
+        if mismatches:
+            raise SessionFailure(
+                "Eval result contract did not match the locked session contract: "
+                + ", ".join(mismatches)
+            )
+        current_contract = load_adapter(adapter_config).capture_eval_contract()
+        current_mismatches = compare_eval_contracts(expected_contract, current_contract)
+        if current_mismatches:
+            raise SessionFailure(
+                "Current evaluation surface drifted from the locked session contract: "
+                + ", ".join(current_mismatches)
+            )
     store.append_observation(args.session_id, result)
     return {
         "session_id": args.session_id,
@@ -502,47 +730,25 @@ def handle_suggest(args: argparse.Namespace) -> dict[str, JsonValue]:
         manifest=manifest,
         registry=registry,
     )
-    era_state = EraState(
-        era_id=manifest.era_id,
-        observation_count=len(observations),
-    )
-    objective = fit_objective_surrogate(
-        observations,
-        registry=registry,
-        compiled_priors=compiled,
-        era_state=era_state,
-    )
-    feasibility = fit_feasibility_surrogate(
-        observations,
-        registry=registry,
-        compiled_priors=compiled,
-        era_state=era_state,
-    )
-    candidates = _load_candidates(
+    frontier = _load_frontier(
         args.candidates_input,
         registry=registry,
         compiled=compiled,
     )
-    ranked = rank_candidates(
-        candidates,
+    ranked, queries, frontier_summary = _suggest_from_frontier(
+        store=store,
+        manifest=manifest,
         registry=registry,
-        objective_posterior=objective,
-        feasibility_posterior=feasibility,
-        compiled_priors=compiled,
-    )
-    queries = suggest_queries(
-        objective,
         beliefs=beliefs,
-        ranked_candidates=ranked,
-    )
-    ranked_payload = tuple(_json_object(item) for item in ranked[:8])
-    store.write_query_artifact(
-        args.session_id,
-        ranked_candidates=ranked_payload,
-        queries=queries,
+        compiled=compiled,
+        frontier=frontier,
+        observations=observations,
     )
     summary = _compute_summary(
-        era_state=era_state,
+        era_state=EraState(
+            era_id=manifest.era_id,
+            observation_count=len(observations),
+        ),
         registry=registry,
         observations=observations,
         compiled=compiled,
@@ -559,8 +765,9 @@ def handle_suggest(args: argparse.Namespace) -> dict[str, JsonValue]:
     )
     return {
         "session_id": args.session_id,
-        "ranked_candidates": cast(list[JsonValue], list(ranked_payload)),
+        "ranked_candidates": cast(list[JsonValue], to_json_value(ranked)),
         "queries": cast(list[JsonValue], to_json_value(queries)),
+        "frontier_summary": cast(dict[str, JsonValue], to_json_value(frontier_summary)),
         "influence_summary": cast(
             list[JsonValue],
             to_json_value(
@@ -575,6 +782,103 @@ def handle_suggest(args: argparse.Namespace) -> dict[str, JsonValue]:
         ),
         "report_artifacts": cast(dict[str, JsonValue], to_json_value(report_artifacts)),
     }
+
+
+def handle_run_eval(args: argparse.Namespace) -> dict[str, JsonValue]:
+    adapter_config = _load_adapter_config(args.adapter_config)
+    store = _store(args.session_root, adapter_config)
+    manifest = store.load_manifest(args.session_id)
+    raw_payload = _load_payload(args.candidate_input)
+    frontier = _frontier_from_payload(
+        raw_payload if "candidates" in raw_payload else {"candidates": [raw_payload]}
+    )
+    if len(frontier.candidates) != 1:
+        raise ValidationFailure("run-eval requires exactly one candidate.")
+    candidate = frontier.candidates[0]
+    result = _append_hardened_eval_result(
+        store=store,
+        manifest=manifest,
+        adapter_config=adapter_config,
+        candidate=candidate,
+        seed=args.seed,
+        replication_index=args.replication_index,
+    )
+    return {
+        "session_id": args.session_id,
+        "result": cast(dict[str, JsonValue], to_json_value(result)),
+        "observation_count": len(store.read_observations(args.session_id)),
+    }
+
+
+def handle_run_frontier(args: argparse.Namespace) -> dict[str, JsonValue]:
+    adapter_config = _load_adapter_config(args.adapter_config)
+    store = _store(args.session_root, adapter_config)
+    manifest = store.load_manifest(args.session_id)
+    registry = _registry_from_config(adapter_config)
+    overlay = store.load_surface_overlay(args.session_id)
+    if overlay is not None:
+        registry = registry.with_overlay(overlay)
+    beliefs, compiled = _load_active_beliefs_and_bundle(
+        store=store,
+        manifest=manifest,
+        registry=registry,
+    )
+    frontier = _frontier_from_payload(_load_payload(args.frontier_input))
+    results: list[ValidEvalResult] = []
+    for index, candidate in enumerate(frontier.candidates):
+        results.append(
+            _append_hardened_eval_result(
+                store=store,
+                manifest=manifest,
+                adapter_config=adapter_config,
+                candidate=candidate,
+                seed=args.seed_base + index,
+                replication_index=0,
+            )
+        )
+    observations = store.read_observations(args.session_id)
+    ranked, queries, frontier_summary = _suggest_from_frontier(
+        store=store,
+        manifest=manifest,
+        registry=registry,
+        beliefs=beliefs,
+        compiled=compiled,
+        frontier=frontier,
+        observations=observations,
+    )
+    return {
+        "session_id": args.session_id,
+        "results": cast(list[JsonValue], to_json_value(tuple(results))),
+        "ranked_candidates": cast(list[JsonValue], to_json_value(ranked)),
+        "queries": cast(list[JsonValue], to_json_value(queries)),
+        "frontier_summary": cast(dict[str, JsonValue], to_json_value(frontier_summary)),
+    }
+
+
+def handle_frontier_status(args: argparse.Namespace) -> dict[str, JsonValue]:
+    adapter_config = _load_adapter_config(args.adapter_config)
+    store = _store(args.session_root, adapter_config)
+    manifest = store.load_manifest(args.session_id)
+    frontier_summary = store.load_frontier_status(args.session_id)
+    payload = _status_payload(
+        store=store,
+        manifest=manifest,
+        adapter_config=adapter_config,
+    )
+    payload["frontier_summary"] = to_json_value(
+        frontier_summary
+        or FrontierSummary(
+            frontier_id="frontier_default",
+            candidate_count=0,
+            family_count=0,
+            family_representatives=(),
+            dropped_family_reasons={},
+            pending_queries=(),
+            pending_merge_suggestions=(),
+            budget_allocations={},
+        )
+    )
+    return payload
 
 
 def handle_recommend_commit(args: argparse.Namespace) -> dict[str, JsonValue]:
@@ -693,8 +997,12 @@ def handle_render_report(args: argparse.Namespace) -> dict[str, JsonValue]:
 def handle_status(args: argparse.Namespace) -> dict[str, JsonValue]:
     adapter_config = _load_adapter_config(args.adapter_config)
     store = _store(args.session_root, adapter_config)
-    status = store.status(args.session_id)
-    return cast(dict[str, JsonValue], to_json_value(status))
+    manifest = store.load_manifest(args.session_id)
+    return _status_payload(
+        store=store,
+        manifest=manifest,
+        adapter_config=adapter_config,
+    )
 
 
 def register_session_commands(subparsers: Any) -> None:
@@ -755,6 +1063,60 @@ def register_session_commands(subparsers: Any) -> None:
     ingest_parser.add_argument("--session-root", help="Override session root.")
     ingest_parser.set_defaults(handler=handle_ingest_eval)
 
+    run_eval_parser = session_subparsers.add_parser(
+        "run-eval",
+        help="Execute one candidate under the locked eval contract and append the result.",
+    )
+    run_eval_parser.add_argument(
+        "--session-id", required=True, help="Target session id."
+    )
+    run_eval_parser.add_argument(
+        "--candidate-input",
+        required=True,
+        help="Path to one candidate object or one-candidate frontier payload.",
+    )
+    run_eval_parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="Seed to pass through to the adapter.",
+    )
+    run_eval_parser.add_argument(
+        "--replication-index",
+        type=int,
+        default=0,
+        help="Replication index to pass through to the adapter.",
+    )
+    run_eval_parser.add_argument(
+        "--adapter-config", help="Optional adapter config path."
+    )
+    run_eval_parser.add_argument("--session-root", help="Override session root.")
+    run_eval_parser.set_defaults(handler=handle_run_eval)
+
+    run_frontier_parser = session_subparsers.add_parser(
+        "run-frontier",
+        help="Execute a frontier batch under the locked eval contract.",
+    )
+    run_frontier_parser.add_argument(
+        "--session-id", required=True, help="Target session id."
+    )
+    run_frontier_parser.add_argument(
+        "--frontier-input",
+        required=True,
+        help="Path to a frontier payload.",
+    )
+    run_frontier_parser.add_argument(
+        "--seed-base",
+        type=int,
+        default=0,
+        help="Base seed; candidates increment from this value.",
+    )
+    run_frontier_parser.add_argument(
+        "--adapter-config", help="Optional adapter config path."
+    )
+    run_frontier_parser.add_argument("--session-root", help="Override session root.")
+    run_frontier_parser.set_defaults(handler=handle_run_frontier)
+
     fit_parser = session_subparsers.add_parser(
         "fit", help="Refresh posterior summaries."
     )
@@ -771,7 +1133,8 @@ def register_session_commands(subparsers: Any) -> None:
         "--session-id", required=True, help="Target session id."
     )
     suggest_parser.add_argument(
-        "--candidates-input", help="Optional candidate pool payload."
+        "--candidates-input",
+        help="Optional candidate pool or frontier payload.",
     )
     suggest_parser.add_argument(
         "--adapter-config", help="Optional adapter config path."
@@ -796,6 +1159,19 @@ def register_session_commands(subparsers: Any) -> None:
     status_parser.add_argument("--adapter-config", help="Optional adapter config path.")
     status_parser.add_argument("--session-root", help="Override session root.")
     status_parser.set_defaults(handler=handle_status)
+
+    frontier_status_parser = session_subparsers.add_parser(
+        "frontier-status",
+        help="Read the persisted frontier summary and current trust state.",
+    )
+    frontier_status_parser.add_argument(
+        "--session-id", required=True, help="Target session id."
+    )
+    frontier_status_parser.add_argument(
+        "--adapter-config", help="Optional adapter config path."
+    )
+    frontier_status_parser.add_argument("--session-root", help="Override session root.")
+    frontier_status_parser.set_defaults(handler=handle_frontier_status)
 
     render_parser = session_subparsers.add_parser(
         "render-report",

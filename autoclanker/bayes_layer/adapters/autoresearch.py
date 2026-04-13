@@ -4,6 +4,7 @@ import importlib.util
 import shutil
 
 from collections.abc import Mapping, Sequence
+from typing import cast
 
 from autoclanker.bayes_layer.adapters.external import (
     JsonSubprocessAdapter,
@@ -17,9 +18,12 @@ from autoclanker.bayes_layer.adapters.protocols import (
     EvalLoopAdapter,
 )
 from autoclanker.bayes_layer.config import BayesLayerConfig, load_bayes_layer_config
+from autoclanker.bayes_layer.eval_contract import capture_eval_contract
 from autoclanker.bayes_layer.registry import GeneRegistry
 from autoclanker.bayes_layer.types import (
     AdapterFailure,
+    EvalContractSnapshot,
+    EvalExecutionContext,
     GeneStateRef,
     JsonValue,
     ValidAdapterConfig,
@@ -190,6 +194,13 @@ class AutoresearchAdapter:
         delegate, _execution_mode, _detail = self._delegate()
         return delegate.build_registry()
 
+    def capture_eval_contract(self) -> EvalContractSnapshot:
+        delegate, _execution_mode, _detail = self._delegate()
+        capture_method = getattr(delegate, "capture_eval_contract", None)
+        if callable(capture_method):
+            return cast(EvalContractSnapshot, capture_method())
+        return capture_eval_contract(self.config, kind=self.kind)
+
     def materialize_candidate(
         self,
         genotype: Sequence[GeneStateRef],
@@ -208,6 +219,7 @@ class AutoresearchAdapter:
         genotype: Sequence[GeneStateRef],
         seed: int = 0,
         replication_index: int = 0,
+        execution_context: EvalExecutionContext | None = None,
     ) -> ValidEvalResult:
         delegate, _execution_mode, _detail = self._delegate()
         return delegate.evaluate_candidate(
@@ -216,6 +228,7 @@ class AutoresearchAdapter:
             genotype=genotype,
             seed=seed,
             replication_index=replication_index,
+            execution_context=execution_context,
         )
 
     def commit_candidate(self, candidate_id: str) -> Mapping[str, JsonValue]:

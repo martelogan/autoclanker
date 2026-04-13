@@ -23,6 +23,10 @@ from autoclanker.bayes_layer.types import (
     ConstraintBelief,
     ConstraintType,
     DecayOverride,
+    EvalContractSnapshot,
+    EvalExecutionMetadata,
+    EvalMeasurementMode,
+    EvalStabilizationMode,
     EvalStatus,
     ExpertPriorBelief,
     FailureMode,
@@ -31,6 +35,7 @@ from autoclanker.bayes_layer.types import (
     GraphDirectiveBelief,
     GraphDirectiveType,
     IdeaBelief,
+    IsolationMode,
     JsonValue,
     MainEffectTarget,
     PairEffectTarget,
@@ -89,6 +94,24 @@ def _require_int(mapping: Mapping[str, object], key: str) -> int:
 
 def _require_float(mapping: Mapping[str, object], key: str) -> float:
     value = mapping.get(key)
+    if not isinstance(value, (int, float)):
+        raise ValidationFailure(f"Expected {key!r} to be numeric.")
+    return float(value)
+
+
+def _optional_bool(mapping: Mapping[str, object], key: str) -> bool | None:
+    value = mapping.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise ValidationFailure(f"Expected {key!r} to be a boolean.")
+    return value
+
+
+def _optional_float(mapping: Mapping[str, object], key: str) -> float | None:
+    value = mapping.get(key)
+    if value is None:
+        return None
     if not isinstance(value, (int, float)):
         raise ValidationFailure(f"Expected {key!r} to be numeric.")
     return float(value)
@@ -1207,6 +1230,86 @@ def validate_eval_result(payload: Mapping[str, object]) -> ValidEvalResult:
         if failure_metadata_raw is None
         else {key: to_json_value(value) for key, value in failure_metadata_raw.items()}
     )
+    eval_contract_raw = _optional_mapping(payload.get("eval_contract"), "eval_contract")
+    eval_contract = None
+    if eval_contract_raw is not None:
+        captured_paths_raw = _optional_mapping(
+            eval_contract_raw.get("captured_paths"), "eval_contract.captured_paths"
+        )
+        eval_contract = EvalContractSnapshot(
+            contract_digest=_require_string(eval_contract_raw, "contract_digest"),
+            benchmark_tree_digest=_require_string(
+                eval_contract_raw, "benchmark_tree_digest"
+            ),
+            eval_harness_digest=_require_string(
+                eval_contract_raw, "eval_harness_digest"
+            ),
+            adapter_config_digest=_require_string(
+                eval_contract_raw, "adapter_config_digest"
+            ),
+            environment_digest=_require_string(eval_contract_raw, "environment_digest"),
+            measurement_mode=cast(
+                EvalMeasurementMode | None,
+                _optional_string(eval_contract_raw, "measurement_mode"),
+            ),
+            stabilization_mode=cast(
+                EvalStabilizationMode | None,
+                _optional_string(eval_contract_raw, "stabilization_mode"),
+            ),
+            lease_scope=_optional_string(eval_contract_raw, "lease_scope"),
+            workspace_snapshot_id=_optional_string(
+                eval_contract_raw, "workspace_snapshot_id"
+            ),
+            workspace_snapshot_mode=_optional_string(
+                eval_contract_raw, "workspace_snapshot_mode"
+            ),
+            captured_paths=(
+                None
+                if captured_paths_raw is None
+                else {
+                    key: to_json_value(value)
+                    for key, value in captured_paths_raw.items()
+                }
+            ),
+            captured_at=_optional_string(eval_contract_raw, "captured_at"),
+        )
+    execution_metadata_raw = _optional_mapping(
+        payload.get("execution_metadata"),
+        "execution_metadata",
+    )
+    execution_metadata = None
+    if execution_metadata_raw is not None:
+        execution_metadata = EvalExecutionMetadata(
+            isolation_mode=cast(
+                IsolationMode, _require_string(execution_metadata_raw, "isolation_mode")
+            ),
+            workspace_root=_optional_string(execution_metadata_raw, "workspace_root"),
+            workspace_snapshot_id=_optional_string(
+                execution_metadata_raw, "workspace_snapshot_id"
+            ),
+            contract_digest=_optional_string(execution_metadata_raw, "contract_digest"),
+            measurement_mode=cast(
+                EvalMeasurementMode | None,
+                _optional_string(execution_metadata_raw, "measurement_mode"),
+            ),
+            stabilization_mode=cast(
+                EvalStabilizationMode | None,
+                _optional_string(execution_metadata_raw, "stabilization_mode"),
+            ),
+            lease_scope=_optional_string(execution_metadata_raw, "lease_scope"),
+            lease_acquired=_optional_bool(execution_metadata_raw, "lease_acquired"),
+            lease_wait_sec=_optional_float(execution_metadata_raw, "lease_wait_sec"),
+            noisy_system=_optional_bool(execution_metadata_raw, "noisy_system"),
+            loadavg_1m_before=_optional_float(
+                execution_metadata_raw, "loadavg_1m_before"
+            ),
+            loadavg_1m_after=_optional_float(
+                execution_metadata_raw, "loadavg_1m_after"
+            ),
+            stabilization_delay_sec=_optional_float(
+                execution_metadata_raw, "stabilization_delay_sec"
+            ),
+        )
     return ValidEvalResult(
         era_id=_require_string(payload, "era_id"),
         candidate_id=_require_string(payload, "candidate_id"),
@@ -1225,6 +1328,8 @@ def validate_eval_result(payload: Mapping[str, object]) -> ValidEvalResult:
         stderr_digest=_optional_string(payload, "stderr_digest"),
         artifact_paths=_optional_path_list(payload, "artifact_paths"),
         failure_metadata=failure_metadata,
+        eval_contract=eval_contract,
+        execution_metadata=execution_metadata,
     )
 
 

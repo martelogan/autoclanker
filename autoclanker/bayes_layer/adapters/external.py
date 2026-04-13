@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import inspect
 import json
 import subprocess
 import sys
@@ -20,9 +21,12 @@ from autoclanker.bayes_layer.belief_io import (
     resolve_relative_path,
     validate_eval_result,
 )
+from autoclanker.bayes_layer.eval_contract import capture_eval_contract
 from autoclanker.bayes_layer.registry import GeneRegistry
 from autoclanker.bayes_layer.types import (
     AdapterFailure,
+    EvalContractSnapshot,
+    EvalExecutionContext,
     GeneStateRef,
     JsonValue,
     SemanticLevel,
@@ -147,6 +151,22 @@ def _require_string(value: object, *, message: str) -> str:
     return value
 
 
+def _supports_keyword(callable_obj: object, keyword: str) -> bool:
+    if not callable(callable_obj):
+        return False
+    try:
+        signature = inspect.signature(callable_obj)
+    except (TypeError, ValueError):
+        return False
+    parameter = signature.parameters.get(keyword)
+    if parameter is None:
+        return False
+    return parameter.kind in {
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    }
+
+
 class ModuleContractAdapter:
     def __init__(
         self,
@@ -188,6 +208,12 @@ class ModuleContractAdapter:
     def build_registry(self) -> GeneRegistry:
         return self._delegate.build_registry()
 
+    def capture_eval_contract(self) -> EvalContractSnapshot:
+        capture_method = getattr(self._delegate, "capture_eval_contract", None)
+        if callable(capture_method):
+            return cast(EvalContractSnapshot, capture_method())
+        return capture_eval_contract(self.config, kind=self.kind)
+
     def materialize_candidate(
         self,
         genotype: Sequence[GeneStateRef],
@@ -205,14 +231,27 @@ class ModuleContractAdapter:
         genotype: Sequence[GeneStateRef],
         seed: int = 0,
         replication_index: int = 0,
+        execution_context: EvalExecutionContext | None = None,
     ) -> ValidEvalResult:
-        result = self._delegate.evaluate_candidate(
-            era_id=era_id,
-            candidate_id=candidate_id,
-            genotype=genotype,
-            seed=seed,
-            replication_index=replication_index,
-        )
+        if execution_context is not None and _supports_keyword(
+            getattr(self._delegate, "evaluate_candidate", None), "execution_context"
+        ):
+            result = self._delegate.evaluate_candidate(
+                era_id=era_id,
+                candidate_id=candidate_id,
+                genotype=genotype,
+                seed=seed,
+                replication_index=replication_index,
+                execution_context=execution_context,
+            )
+        else:
+            result = self._delegate.evaluate_candidate(
+                era_id=era_id,
+                candidate_id=candidate_id,
+                genotype=genotype,
+                seed=seed,
+                replication_index=replication_index,
+            )
         return ValidEvalResult(
             era_id=result.era_id,
             candidate_id=result.candidate_id,
@@ -227,6 +266,11 @@ class ModuleContractAdapter:
                 **result.raw_metrics,
                 "adapter_kind": self.kind,
                 "execution_mode": self._execution_mode,
+                "workspace_root": (
+                    None
+                    if execution_context is None
+                    else execution_context.workspace_root
+                ),
             },
             delta_perf=result.delta_perf,
             utility=result.utility,
@@ -235,6 +279,8 @@ class ModuleContractAdapter:
             stderr_digest=result.stderr_digest,
             artifact_paths=result.artifact_paths,
             failure_metadata=result.failure_metadata,
+            eval_contract=result.eval_contract,
+            execution_metadata=result.execution_metadata,
         )
 
     def commit_candidate(self, candidate_id: str) -> Mapping[str, JsonValue]:
@@ -418,6 +464,50 @@ class JsonSubprocessAdapter:
             metadata=metadata or None,
         )
 
+    def capture_eval_contract(self) -> EvalContractSnapshot:
+        try:
+            payload = self._run(self._request("capture_eval_contract"))
+        except AdapterFailure:
+            return capture_eval_contract(self.config, kind=self.kind)
+        if not isinstance(payload, Mapping):
+            return capture_eval_contract(self.config, kind=self.kind)
+        try:
+            mapping = cast(Mapping[str, object], payload)
+            return EvalContractSnapshot(
+                contract_digest=_require_string(
+                    mapping.get("contract_digest"),
+                    message="capture_eval_contract requires contract_digest.",
+                ),
+                benchmark_tree_digest=_require_string(
+                    mapping.get("benchmark_tree_digest"),
+                    message="capture_eval_contract requires benchmark_tree_digest.",
+                ),
+                eval_harness_digest=_require_string(
+                    mapping.get("eval_harness_digest"),
+                    message="capture_eval_contract requires eval_harness_digest.",
+                ),
+                adapter_config_digest=_require_string(
+                    mapping.get("adapter_config_digest"),
+                    message="capture_eval_contract requires adapter_config_digest.",
+                ),
+                environment_digest=_require_string(
+                    mapping.get("environment_digest"),
+                    message="capture_eval_contract requires environment_digest.",
+                ),
+                workspace_snapshot_id=cast(
+                    str | None, mapping.get("workspace_snapshot_id")
+                ),
+                workspace_snapshot_mode=cast(
+                    str | None, mapping.get("workspace_snapshot_mode")
+                ),
+                captured_paths=cast(
+                    dict[str, JsonValue] | None, mapping.get("captured_paths")
+                ),
+                captured_at=cast(str | None, mapping.get("captured_at")),
+            )
+        except AdapterFailure:
+            return capture_eval_contract(self.config, kind=self.kind)
+
     def materialize_candidate(
         self,
         genotype: Sequence[GeneStateRef],
@@ -441,6 +531,7 @@ class JsonSubprocessAdapter:
         genotype: Sequence[GeneStateRef],
         seed: int = 0,
         replication_index: int = 0,
+        execution_context: EvalExecutionContext | None = None,
     ) -> ValidEvalResult:
         payload = self._run(
             self._request(
@@ -450,6 +541,7 @@ class JsonSubprocessAdapter:
                 genotype=tuple(genotype),
                 seed=seed,
                 replication_index=replication_index,
+                execution_context=execution_context,
             )
         )
         if not isinstance(payload, Mapping):

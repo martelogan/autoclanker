@@ -110,6 +110,13 @@ def suggest_queries(
     ):
         left = ranked_candidates[0]
         right = ranked_candidates[1]
+        for candidate in ranked_candidates[1:]:
+            if (
+                candidate.family_id is not None
+                and candidate.family_id != left.family_id
+            ):
+                right = candidate
+                break
         queries.append(
             QuerySuggestion(
                 query_id="query_001",

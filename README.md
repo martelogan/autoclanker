@@ -65,8 +65,9 @@ For a more detailed diagram, see [here](docs/assets/autoclanker_mermaid.png).
 
 In practice, that means `suggest` can rank an explicit candidate pool instead of
 one opaque prompt thread, an outer harness can evaluate the available lanes in
-parallel when practical, and the session keeps the active surface plus each
-observed eval result on disk so the same comparison can be revisited later.
+parallel when practical, and the session keeps a locked eval contract plus each
+observed eval result on disk so the same comparison can be revisited later
+without quietly drifting the benchmark surface.
 
 The outer-layer adapter and session-boundary outer loop over
 [Autoresearch](https://github.com/karpathy/autoresearch) here was inspired by
@@ -227,11 +228,11 @@ The intended flow is:
 ```text
 rough ideas
 → preview or canonicalize
-→ session init (store preview + surface snapshot)
+→ session init (store preview + locked eval contract)
 → apply previewed beliefs
-→ ingest eval results
+→ run-eval or ingest eval results
 → fit
-→ suggest against an explicit candidate pool
+→ suggest against an explicit candidate pool or frontier
 → recommend-commit
 ```
 
@@ -256,11 +257,27 @@ autoclanker session apply-beliefs \
   --preview-digest <digest-from-session-init>
 ```
 
-Once the session has observations, `fit`, `suggest`, `recommend-commit`, and
-`render-report` keep a small human-readable report bundle refreshed inside the
-session root. When you have several candidate lanes to compare, `suggest` can
-rank them together from `--candidates-input` while the underlying eval runs stay
-parallelizable in whatever outer harness you already trust.
+If you want `autoclanker` itself to execute the evals under the locked contract,
+use `run-eval` for one candidate or `run-frontier` for a multi-path frontier:
+
+```bash
+autoclanker session run-frontier \
+  --session-id parser-demo \
+  --frontier-input examples/frontiers/parser_frontier.json
+```
+
+Those hardened execution commands use the locked eval contract as the trust
+boundary. They isolate the candidate workspace, and when the active eval policy
+marks the benchmark as measurement-sensitive they also serialize the measured
+phase behind a contract-scoped lease and record soft-stabilization metadata on
+the eval result.
+
+Once the session has observations, `fit`, `suggest`, `frontier-status`,
+`recommend-commit`, and `render-report` keep a small human-readable report
+bundle refreshed inside the session root. When you have several candidate lanes
+to compare, `suggest` can rank them together from `--candidates-input` while the
+underlying eval runs stay parallelizable in whatever outer harness you already
+trust.
 
 ## Run Artifacts
 
@@ -270,14 +287,17 @@ surface snapshot, append-only eval observations, and a compact report bundle:
 ```text
 .autoclanker/<session_id>/
   session_manifest.yaml
+  eval_contract.json
   beliefs.yaml
   compiled_preview.json
   compiled_priors.json
   observations.jsonl
+  frontier_status.json
   posterior_summary.json
   query.json
   commit_decision.json
   influence_summary.json
+  eval_runs/
   RESULTS.md
   convergence.png
   candidate_rankings.png
@@ -289,7 +309,13 @@ The key files are:
 
 - `RESULTS.md`: current run summary with top candidates, follow-up queries, and
   commit state
+- `eval_contract.json`: locked benchmark tree, eval harness, adapter, and
+  environment digests for the session, plus the effective measurement policy
 - `observations.jsonl`: append-only eval results recorded for the session
+- `frontier_status.json`: persisted family representatives, pending queries, and
+  heuristic merge suggestions for the active frontier
+- `eval_runs/`: per-candidate execution records written by `run-eval` and
+  `run-frontier`, including contract echo and lease/stabilization metadata
 - `convergence.png`: observed utility over time plus best-so-far progress
 - `candidate_rankings.png`: current ranked candidates with acquisition scores
 - `belief_graph_prior.png`: the prior interaction structure implied by active
@@ -365,6 +391,7 @@ Useful validation lanes:
 - [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md): adapter model and upstream behavior
 - [`docs/BELIEF_INPUT_REFERENCE.md`](docs/BELIEF_INPUT_REFERENCE.md): belief fields, bounds, and beginner inputs
 - [`docs/LIVE_EXERCISES.md`](docs/LIVE_EXERCISES.md): runnable demos and live lanes
+- [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md): deterministic comparison targets and report script
 - [`docs/LOOP_DIAGRAM.md`](docs/LOOP_DIAGRAM.md): compact loop visual
 - [`docs/TOY_EXAMPLES.md`](docs/TOY_EXAMPLES.md): secondary toy examples for code-level intuition
 - [`docs/WHITEPAPER.md`](docs/WHITEPAPER.md): research framing and design rationale

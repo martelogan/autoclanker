@@ -29,6 +29,11 @@ The quickest repo-native replay commands are:
 For the exact field bounds and the difference between free-form text and strict
 registry identifiers, see [../docs/BELIEF_INPUT_REFERENCE.md](../docs/BELIEF_INPUT_REFERENCE.md).
 
+If you want the explicit multi-path frontier shape rather than the smaller idea
+inputs, start from [`frontiers/parser_frontier.json`](frontiers/parser_frontier.json)
+and compare it with `autoclanker session suggest --candidates-input ...` or
+`autoclanker session run-frontier --frontier-input ...`.
+
 ## Secondary Toy Examples
 
 `docs/toy_examples/` is intentionally secondary.

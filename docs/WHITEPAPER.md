@@ -18,6 +18,12 @@ This project adds a Bayesian guidance layer on top of an expensive black-box eva
 5. a query policy that asks humans only high-value questions,
 6. a principled commit policy that is more robust than `best observed score wins`.
 
+In the current implementation, that guidance now also sits behind a locked
+eval-contract boundary and an explicit frontier model. The goal is not only to
+rank candidates, but to keep the evaluated benchmark surface reproducible and to
+keep parallel candidate families, lineage metadata, and merge-suggestion
+artifacts inspectable.
+
 ## Core position
 
 The best-supported architecture is a **hybrid** [1], [2], [3], [4]:
@@ -79,6 +85,10 @@ The chosen implementation direction is therefore:
 - bounded active querying,
 - hybrid LLM + BO behavior instead of LLM-only control,
 - provider-backed canonicalization that remains inspectable rather than hidden,
+- locked eval contracts and isolated execution when the engine itself runs the
+  benchmark,
+- frontier-aware lineage, normalized budget allocations, and heuristic merge
+  suggestions rather than only flat candidate lists,
 - repo-native, testable implementation inside the project repository.
 
 That combination is intentionally conservative in the right places: it borrows robust patterns from prior-guided BO, user-guided BO, and prior elicitation, while using newer LLM-in-the-loop results as design pressure rather than as the sole foundation [1]–[10].

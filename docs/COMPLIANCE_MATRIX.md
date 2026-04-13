@@ -19,11 +19,20 @@ This document mirrors the machine-readable acceptance matrix at [`tests/complian
 | `M3-003` | `required` | Commit decisions are persisted as structured session artifacts. |
 | `M3-004` | `required` | Session ingest rejects eval results from the wrong era. |
 | `M3-005` | `required` | Session artifacts persist surface snapshots, overlays, canonicalization summaries, and influence summaries for reproducible hybrid runs. |
+| `M3-007` | `required` | session init captures and persists a locked eval contract with digests for the benchmark tree, eval harness, adapter config, and environment inputs. |
+| `M3-008` | `required` | Session status exposes current-versus-locked eval-contract drift for hardened sessions. |
+| `M3-009` | `required` | session run-eval executes one candidate under isolated execution and records execution metadata. |
+| `M3-010` | `required` | session ingest-eval rejects missing or mismatched eval-contract digests for hardened sessions. |
+| `M3-011` | `required` | Per-candidate eval run artifacts persist under eval_runs/ with echoed eval-contract metadata. |
+| `M3-012` | `required` | session run-frontier executes a frontier batch under the locked eval contract and persists the resulting frontier state. |
+| `M3-013` | `required` | session run-eval records contract-scoped lease and soft-stabilization metadata for measured execution when the active eval policy requires it. |
 | `M4-001` | `required` | The fixture adapter exercises the full loop without external dependencies. |
 | `M4-002` | `required` | Generic python_module adapters can probe and execute without fixture fallback. |
 | `M4-003` | `required` | Generic subprocess adapters can probe and execute through JSON-over-stdio. |
 | `M4-004` | `required` | Adapter CLI commands work non-interactively for list, validate-config, and probe. |
 | `M4-005` | `required` | adapter surface exposes semantic metadata plus higher-level strategy and risk families. |
+| `M4-006` | `required` | Frontier inputs preserve candidate lineage metadata, normalized family budget allocations, and heuristic merge suggestions across suggest, status, and persisted session artifacts. |
+| `M4-007` | `required` | First-party adapters capture eval contracts and preserve isolated execution metadata when delegating through repo, module, or subprocess shims. |
 | `M5-001` | `required` | The first-party autoresearch adapter uses a real contract target when present. |
 | `M5-002` | `required` | The first-party cevolve adapter uses a real contract target when present. |
 | `M1-LIVE-001` | `live` | A billed model-provider canonicalization lane can resolve rough parser ideas into typed beliefs through the public CLI. |
@@ -45,3 +54,4 @@ This document mirrors the machine-readable acceptance matrix at [`tests/complian
 | `M7-008` | `required` | Public docs clearly distinguish the non-billed upstream-live lane from the billed model-provider live lane. |
 | `M7-009` | `required` | The primary repo docs focus on the current library and contributor workflow rather than internal handoff or scaffold artifacts. |
 | `M7-010` | `required` | The advanced skill and belief-input docs describe the common LLM-assisted workflow from rough ideas to advanced typed Bayes specs, with JSON preferred for machine-authored outputs. |
+| `M7-011` | `required` | A second deterministic frontier-heavy benchmark shows normalized budget allocations and heuristic merge-suggestion artifacts on the parser target rather than only cold-start ranking lift. |

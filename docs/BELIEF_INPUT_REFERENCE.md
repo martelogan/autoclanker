@@ -60,6 +60,7 @@ autoclanker --output preview.json beliefs preview --input ideas.yaml
 | --- | --- | --- |
 | Preview beginner Bayes ideas against the fixture registry | no file at all if you use `--ideas-json`, otherwise `examples/idea_inputs/minimal.json` | `autoclanker adapter registry` |
 | Reproduce the exact Bayes quickstart ranking | `examples/idea_inputs/bayes_quickstart.json`, `examples/live_exercises/bayes_quickstart/candidates.json` | `examples/live_exercises/bayes_quickstart/app.py` |
+| Reproduce the frontier-aware parser comparison | `examples/frontiers/parser_frontier.json` plus a live session | `autoclanker session run-frontier` |
 | Preview live `autoresearch` ideas | `examples/idea_inputs/autoresearch_simple.json`, `examples/live_exercises/autoresearch_simple/adapter.local.yaml` | `examples/live_exercises/autoresearch_simple/README.md` |
 | Preview live `cevolve` ideas | `examples/idea_inputs/cevolve_synergy.json`, `examples/live_exercises/cevolve_synergy/adapter.local.yaml` | `examples/live_exercises/cevolve_synergy/README.md` |
 
@@ -67,6 +68,8 @@ Notes:
 
 - `app.py` and `train.py` are explanatory. They are not required by the CLI.
 - `expected_outcome.json` files are for tests and replay assertions, not for normal usage.
+- `examples/frontiers/parser_frontier.json` is the smallest shipped frontier
+  example showing lineage, families, and merge-ready candidates.
 - The upstream-backed exercise configs in `examples/live_exercises/*/adapter.local.yaml`
   are checkout-backed examples. For a normal installed integration, you can instead
   use `mode: auto` with `python_module` or `command` and omit `repo_path`.
@@ -252,3 +255,47 @@ rough ideas
 ```
 
 YAML still makes sense when you expect to hand-edit the advanced file next.
+
+## Frontier inputs
+
+`session suggest` accepts either the older flat candidate-pool shape:
+
+```json
+{"candidates": [{"candidate_id": "cand_a", "genotype": [...]}]}
+```
+
+or the richer frontier shape:
+
+```json
+{
+  "frontier_id": "parser_frontier_demo",
+  "default_family_id": "family_default",
+  "candidates": [
+    {
+      "candidate_id": "cand_a_default",
+      "family_id": "baseline",
+      "origin_kind": "seed",
+      "genotype": [...]
+    }
+  ]
+}
+```
+
+The richer frontier document is what enables persisted lineage metadata,
+normalized family budget allocations, heuristic merge suggestions, and
+`session frontier-status`.
+
+Useful commands:
+
+```bash
+autoclanker session suggest \
+  --session-id parser-demo \
+  --candidates-input examples/frontiers/parser_frontier.json
+
+autoclanker session run-frontier \
+  --session-id parser-demo \
+  --frontier-input examples/frontiers/parser_frontier.json
+
+autoclanker session frontier-status \
+  --session-id parser-demo
+```

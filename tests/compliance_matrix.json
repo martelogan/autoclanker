@@ -90,6 +90,48 @@
     "status": "active"
   },
   {
+    "requirement_id": "M3-007",
+    "gate": "required",
+    "description": "session init captures and persists a locked eval contract with digests for the benchmark tree, eval harness, adapter config, and environment inputs.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M3-008",
+    "gate": "required",
+    "description": "Session status exposes current-versus-locked eval-contract drift for hardened sessions.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M3-009",
+    "gate": "required",
+    "description": "session run-eval executes one candidate under isolated execution and records execution metadata.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M3-010",
+    "gate": "required",
+    "description": "session ingest-eval rejects missing or mismatched eval-contract digests for hardened sessions.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M3-011",
+    "gate": "required",
+    "description": "Per-candidate eval run artifacts persist under eval_runs/ with echoed eval-contract metadata.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M3-012",
+    "gate": "required",
+    "description": "session run-frontier executes a frontier batch under the locked eval contract and persists the resulting frontier state.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M3-013",
+    "gate": "required",
+    "description": "session run-eval records contract-scoped lease and soft-stabilization metadata for measured execution when the active eval policy requires it.",
+    "status": "active"
+  },
+  {
     "requirement_id": "M4-001",
     "gate": "required",
     "description": "The fixture adapter exercises the full loop without external dependencies.",
@@ -117,6 +159,18 @@
     "requirement_id": "M4-005",
     "gate": "required",
     "description": "adapter surface exposes semantic metadata plus higher-level strategy and risk families.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M4-006",
+    "gate": "required",
+    "description": "Frontier inputs preserve candidate lineage metadata, normalized family budget allocations, and heuristic merge suggestions across suggest, status, and persisted session artifacts.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M4-007",
+    "gate": "required",
+    "description": "First-party adapters capture eval contracts and preserve isolated execution metadata when delegating through repo, module, or subprocess shims.",
     "status": "active"
   },
   {
@@ -243,6 +297,12 @@
     "requirement_id": "M7-010",
     "gate": "required",
     "description": "The advanced skill and belief-input docs describe the common LLM-assisted workflow from rough ideas to advanced typed Bayes specs, with JSON preferred for machine-authored outputs.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M7-011",
+    "gate": "required",
+    "description": "A second deterministic frontier-heavy benchmark shows normalized budget allocations and heuristic merge-suggestion artifacts on the parser target rather than only cold-start ranking lift.",
     "status": "active"
   }
 ]

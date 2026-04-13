@@ -27,7 +27,16 @@ _REQUIRES_BEHAVIORAL_EVIDENCE = {
     "M0-002",
     "M1-005",
     "M1-LIVE-001",
+    "M3-007",
+    "M3-008",
+    "M3-009",
+    "M3-010",
+    "M3-011",
+    "M3-012",
+    "M3-013",
     "M4-004",
+    "M4-006",
+    "M4-007",
     "M5-LIVE-001",
     "M5-LIVE-002",
     "M6-LIVE-001",
@@ -35,6 +44,40 @@ _REQUIRES_BEHAVIORAL_EVIDENCE = {
     "M7-005",
     "M7-006",
     "M7-007",
+    "M7-011",
+}
+_FOCUSED_CONTRACT_CHECKS = {
+    "M3-007": {
+        "tests.test_eval_contract_frontier::test_session_init_persists_eval_contract_and_reports_drift",
+    },
+    "M3-008": {
+        "tests.test_eval_contract_frontier::test_session_init_persists_eval_contract_and_reports_drift",
+    },
+    "M3-009": {
+        "tests.test_eval_contract_frontier::test_session_run_eval_uses_isolated_worktree_and_records_eval_run_artifact",
+    },
+    "M3-010": {
+        "tests.test_eval_contract_frontier::test_session_ingest_eval_rejects_contract_drift",
+    },
+    "M3-011": {
+        "tests.test_eval_contract_frontier::test_session_run_eval_uses_isolated_worktree_and_records_eval_run_artifact",
+    },
+    "M3-012": {
+        "tests.test_eval_contract_frontier::test_session_run_frontier_executes_batch_and_persists_frontier_summary",
+    },
+    "M3-013": {
+        "tests.test_eval_contract_frontier::test_session_run_eval_uses_isolated_worktree_and_records_eval_run_artifact",
+    },
+    "M4-006": {
+        "tests.test_eval_contract_frontier::test_session_suggest_and_frontier_status_preserve_frontier_metadata",
+        "tests.test_eval_contract_frontier::test_session_run_frontier_executes_batch_and_persists_frontier_summary",
+    },
+    "M4-007": {
+        "tests.test_adapter_protocols::test_first_party_adapters_capture_eval_contracts_and_execution_context",
+    },
+    "M7-011": {
+        "tests.test_optimizer_benchmarks::test_frontier_heavy_parser_lanes_preserve_family_budgeting_and_merge_guidance",
+    },
 }
 
 
@@ -124,6 +167,13 @@ def test_compliance_matrix_is_fully_covered() -> None:
         )
     ]
     assert not missing_behavioral
+
+    missing_focused = [
+        requirement_id
+        for requirement_id, expected_nodes in _FOCUSED_CONTRACT_CHECKS.items()
+        if not expected_nodes.issubset(coverage.get(requirement_id, set()))
+    ]
+    assert not missing_focused
 
 
 @covers("M7-001")

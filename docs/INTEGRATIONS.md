@@ -9,6 +9,12 @@ execution, and optional commit behavior.
 
 That boundary is expressed through adapters.
 
+For hardened sessions, the adapter boundary also owns two trust-critical jobs:
+
+- capture the eval contract that defines the locked benchmark surface
+- execute candidates under an explicit isolated execution context when
+  `autoclanker` itself is running the eval
+
 ## 2. Built-in adapter kinds
 
 `autoclanker` ships these adapter kinds:
@@ -120,7 +126,32 @@ autoclanker adapter registry --input examples/adapters/autoresearch.local.yaml
 autoclanker adapter surface --input examples/adapters/autoresearch.local.yaml
 ```
 
-## 6. Real-upstream smoke lane
+## 6. Eval-contract metadata
+
+Adapter metadata may include:
+
+- `benchmark_root`
+- `eval_harness_path`
+- `environment_paths`
+- `workspace_root`
+- `workspace_snapshot_mode`
+- `eval_policy.mode`
+- `eval_policy.stabilization`
+- `eval_policy.performance_sensitive`
+- `eval_policy.lease_scope`
+
+Those fields let `autoclanker` capture digests for the benchmark tree, eval
+harness, adapter config, and environment inputs. They are generic on purpose:
+the same contract model works for fixture-backed tests, checkout-backed
+upstreams, importable module adapters, and future orchestration layers.
+
+When the adapter can bind to a real repo snapshot, hardened execution defaults to
+temp git worktrees. Non-git or fixture adapters may fall back to copy-mode or
+fixture-mode isolation. Measurement-sensitive runs may also take a
+contract-scoped advisory lease and record soft-stabilization metadata so local
+performance probes do not silently overlap.
+
+## 7. Real-upstream smoke lane
 
 `./bin/dev test-upstream-live` provisions the public upstream repos into
 `.local/real-upstreams/` by default and then runs checkout-backed contract-smoke
@@ -130,17 +161,17 @@ That lane exists to prove that the first-party adapters can bind to real upstrea
 source trees without fixture fallback. It is intentionally separate from the more
 general installed-module and runnable-command integrations described above.
 
-It is a real-upstream contract smoke test, not a claim that every scoring path is
-fully upstream-native end to end.
+It is a real-upstream contract smoke test, not a claim that every scoring path
+is fully upstream-native end to end.
 
-## 7. Environment passthrough
+## 8. Environment passthrough
 
 When an upstream adapter resolves to an importable module or subprocess command,
 `autoclanker` passes through the normal process environment. That means upstream
 provider auth and model selection keep working the way the underlying engine expects,
 instead of being remapped by `autoclanker`.
 
-## 8. Future-proofing
+## 9. Future-proofing
 
 This boundary is meant to stay extension-friendly:
 
@@ -148,4 +179,4 @@ This boundary is meant to stay extension-friendly:
 - first-party adapters stay thin integration layers;
 - future users can plug in their own loop via `python_module` or `subprocess`;
 - future wrappers like `pi-autoclanker` can orchestrate the same machine-readable
-  adapter and session contracts.
+  adapter, eval-contract, and frontier contracts.

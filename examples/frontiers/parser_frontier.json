@@ -1,0 +1,75 @@
+{
+  "frontier_id": "parser_frontier_demo",
+  "default_family_id": "family_default",
+  "candidates": [
+    {
+      "candidate_id": "cand_a_default",
+      "family_id": "baseline",
+      "origin_kind": "seed",
+      "genotype": [
+        {
+          "gene_id": "parser.matcher",
+          "state_id": "matcher_basic"
+        },
+        {
+          "gene_id": "parser.plan",
+          "state_id": "plan_default"
+        },
+        {
+          "gene_id": "capture.window",
+          "state_id": "window_default"
+        }
+      ]
+    },
+    {
+      "candidate_id": "cand_b_compiled_matcher",
+      "family_id": "matcher_family",
+      "origin_kind": "belief",
+      "parent_belief_ids": [
+        "belief_compiled"
+      ],
+      "budget_weight": 2.0,
+      "genotype": [
+        {
+          "gene_id": "parser.matcher",
+          "state_id": "matcher_compiled"
+        },
+        {
+          "gene_id": "parser.plan",
+          "state_id": "plan_default"
+        },
+        {
+          "gene_id": "capture.window",
+          "state_id": "window_default"
+        }
+      ]
+    },
+    {
+      "candidate_id": "cand_c_compiled_context_pair",
+      "family_id": "plan_family",
+      "origin_kind": "merge",
+      "parent_candidate_ids": [
+        "cand_a_default",
+        "cand_b_compiled_matcher"
+      ],
+      "origin_query_ids": [
+        "query_pair_001"
+      ],
+      "notes": "merge compiled matcher and context pairing",
+      "genotype": [
+        {
+          "gene_id": "parser.matcher",
+          "state_id": "matcher_compiled"
+        },
+        {
+          "gene_id": "parser.plan",
+          "state_id": "plan_context_pair"
+        },
+        {
+          "gene_id": "capture.window",
+          "state_id": "window_default"
+        }
+      ]
+    }
+  ]
+}

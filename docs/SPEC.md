@@ -71,8 +71,11 @@ autoclanker adapter surface
 autoclanker session init
 autoclanker session apply-beliefs
 autoclanker session ingest-eval
+autoclanker session run-eval
+autoclanker session run-frontier
 autoclanker session fit
 autoclanker session suggest
+autoclanker session frontier-status
 autoclanker session recommend-commit
 autoclanker session render-report
 autoclanker session status
@@ -100,7 +103,8 @@ Requirements:
 - default root `.autoclanker/`;
 - support alternate placement under another tool’s session directory;
 - append-only observation logging via `observations.jsonl`;
-- structured JSON or YAML artifacts for session manifest, belief batch, preview, compiled priors, posterior summary, query, and commit decision;
+- structured JSON or YAML artifacts for session manifest, locked eval contract, belief batch, preview, compiled priors, posterior summary, query, frontier status, and commit decision;
+- per-eval execution records under `eval_runs/` when the session itself executes candidates;
 - a human-readable `RESULTS.md` artifact describing the current run state;
 - rendered report artifacts for convergence, candidate rankings, and prior-vs-posterior graph views.
 
@@ -191,7 +195,22 @@ The result must include:
 - hard masks / exclusions,
 - optional candidate-generation hints.
 
-### 3.4 Eval-result validation
+### 3.4a Evaluation-contract capture
+
+```python
+capture_eval_contract(adapter_config: ValidAdapterConfig, ...) -> EvalContractSnapshot
+```
+
+Requirements:
+- digest the benchmark tree, eval harness, adapter config, and environment inputs;
+- resolve an effective eval policy for measured execution, including whether the
+  benchmark should take a contract-scoped lease and whether soft stabilization
+  is enabled;
+- persist the locked contract at `session init`;
+- expose current-versus-locked drift in session status;
+- reject missing or mismatched digests during `session ingest-eval` for newly hardened sessions.
+
+### 3.5 Eval-result validation
 
 ```python
 validate_eval_result(payload: dict) -> ValidEvalResult
@@ -201,9 +220,10 @@ Requirements:
 - validate against `schemas/eval_result.schema.json`;
 - preserve intended and realized genotypes;
 - preserve `patch_hash`;
+- preserve optional eval-contract echoes and execution metadata;
 - support repeated observations of the same realized configuration.
 
-### 3.5 Adapter-config validation
+### 3.6 Adapter-config validation
 
 ```python
 validate_adapter_config(payload: dict) -> ValidAdapterConfig
@@ -215,12 +235,29 @@ Requirements:
 - support local-path or import-based configuration;
 - expose clean errors for missing paths or unsupported modes.
 
-### 3.6 Generic adapter protocol
+### 3.7 Frontier inputs and family-aware suggestion
+
+`session suggest` must accept either the legacy candidate-pool shape:
+
+```json
+{"candidates": [...]}
+```
+
+or a richer frontier document with lineage and family metadata.
+
+Requirements:
+- preserve candidate `family_id`, `origin_kind`, parent refs, notes, and budget weight;
+- persist a stable `frontier_status.json` artifact;
+- expose frontier summaries through `session suggest` and `session frontier-status`;
+- keep legacy candidate pools valid by normalizing them into a default frontier family.
+
+### 3.8 Generic adapter protocol
 
 Implement a typed adapter protocol that can support:
 - registry discovery,
+- eval-contract capture,
 - candidate materialization,
-- evaluation,
+- evaluation under an explicit execution context,
 - optional commit,
 - optional rethink summary hooks,
 - status / probe reporting.

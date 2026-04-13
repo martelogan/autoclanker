@@ -68,7 +68,20 @@ SemanticLevel: TypeAlias = Literal[
 ]
 CanonicalizationSource: TypeAlias = Literal["deterministic", "llm", "hybrid"]
 CanonicalizationMode: TypeAlias = Literal["deterministic", "hybrid", "llm"]
+EvalPolicyMode: TypeAlias = Literal["auto", "exclusive", "parallel_ok"]
+EvalMeasurementMode: TypeAlias = Literal["exclusive", "parallel_ok"]
+EvalStabilizationMode: TypeAlias = Literal["off", "soft"]
 PreferenceDirection: TypeAlias = Literal["left", "right", "tie"]
+IsolationMode: TypeAlias = Literal["git_worktree", "copy", "fixture"]
+FrontierOriginKind: TypeAlias = Literal[
+    "legacy_pool",
+    "manual",
+    "belief",
+    "query",
+    "merge",
+    "seed",
+]
+EvalDriftStatus: TypeAlias = Literal["locked", "drifted", "unverified"]
 FailureMode: TypeAlias = Literal[
     "valid_run",
     "compile_fail",
@@ -388,6 +401,53 @@ class CompiledPriorBundle:
 
 
 @dataclass(frozen=True, slots=True)
+class EvalContractSnapshot:
+    contract_digest: str
+    benchmark_tree_digest: str
+    eval_harness_digest: str
+    adapter_config_digest: str
+    environment_digest: str
+    measurement_mode: EvalMeasurementMode | None = None
+    stabilization_mode: EvalStabilizationMode | None = None
+    lease_scope: str | None = None
+    workspace_snapshot_id: str | None = None
+    workspace_snapshot_mode: str | None = None
+    captured_paths: dict[str, JsonValue] | None = None
+    captured_at: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EvalExecutionMetadata:
+    isolation_mode: IsolationMode
+    workspace_root: str | None = None
+    workspace_snapshot_id: str | None = None
+    contract_digest: str | None = None
+    measurement_mode: EvalMeasurementMode | None = None
+    stabilization_mode: EvalStabilizationMode | None = None
+    lease_scope: str | None = None
+    lease_acquired: bool | None = None
+    lease_wait_sec: float | None = None
+    noisy_system: bool | None = None
+    loadavg_1m_before: float | None = None
+    loadavg_1m_after: float | None = None
+    stabilization_delay_sec: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EvalExecutionContext:
+    session_id: str
+    era_id: str
+    contract: EvalContractSnapshot
+    isolation_mode: IsolationMode
+    workspace_root: str | None = None
+    seed: int = 0
+    replication_index: int = 0
+    measurement_mode: EvalMeasurementMode | None = None
+    stabilization_mode: EvalStabilizationMode | None = None
+    lease_scope: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ValidEvalResult:
     era_id: str
     candidate_id: str
@@ -406,6 +466,8 @@ class ValidEvalResult:
     stderr_digest: str | None = None
     artifact_paths: tuple[str, ...] = ()
     failure_metadata: dict[str, JsonValue] | None = None
+    eval_contract: EvalContractSnapshot | None = None
+    execution_metadata: EvalExecutionMetadata | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -447,6 +509,26 @@ class AggregatedObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class FrontierCandidate:
+    candidate_id: str
+    genotype: tuple[GeneStateRef, ...]
+    family_id: str = "family_default"
+    origin_kind: FrontierOriginKind = "legacy_pool"
+    parent_candidate_ids: tuple[str, ...] = ()
+    parent_belief_ids: tuple[str, ...] = ()
+    origin_query_ids: tuple[str, ...] = ()
+    notes: str | None = None
+    budget_weight: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FrontierDocument:
+    candidates: tuple[FrontierCandidate, ...]
+    frontier_id: str = "frontier_default"
+    default_family_id: str = "family_default"
+
+
+@dataclass(frozen=True, slots=True)
 class PosteriorFeature:
     feature_name: str
     target_kind: str
@@ -474,6 +556,36 @@ class FeasibilityPosterior:
 
 
 @dataclass(frozen=True, slots=True)
+class FrontierFamilyRepresentative:
+    family_id: str
+    representative_candidate_id: str
+    representative_acquisition_score: float
+    candidate_count: int
+    compared_candidate_ids: tuple[str, ...]
+    budget_weight: float
+
+
+@dataclass(frozen=True, slots=True)
+class MergeSuggestion:
+    merge_id: str
+    family_ids: tuple[str, ...]
+    candidate_ids: tuple[str, ...]
+    rationale: str
+
+
+@dataclass(frozen=True, slots=True)
+class FrontierSummary:
+    frontier_id: str
+    candidate_count: int
+    family_count: int
+    family_representatives: tuple[FrontierFamilyRepresentative, ...]
+    dropped_family_reasons: dict[str, str]
+    pending_queries: tuple[QuerySuggestion, ...]
+    pending_merge_suggestions: tuple[MergeSuggestion, ...]
+    budget_allocations: dict[str, float]
+
+
+@dataclass(frozen=True, slots=True)
 class PosteriorGraphEdge:
     source: str
     target: str
@@ -497,6 +609,13 @@ class RankedCandidate:
     acquisition_score: float
     rationale: tuple[str, ...] = ()
     influence_summary: tuple[str, ...] = ()
+    family_id: str | None = None
+    origin_kind: FrontierOriginKind | None = None
+    parent_candidate_ids: tuple[str, ...] = ()
+    parent_belief_ids: tuple[str, ...] = ()
+    origin_query_ids: tuple[str, ...] = ()
+    notes: str | None = None
+    budget_weight: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -558,6 +677,9 @@ class SessionManifest:
     user_profile: str | None = None
     canonicalization_mode: CanonicalizationMode | None = None
     surface_overlay_active: bool = False
+    eval_contract_digest: str | None = None
+    eval_contract_required: bool = False
+    workspace_snapshot_mode: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -575,3 +697,16 @@ class SessionStatus:
     ready_for_commit_recommendation: bool
     canonicalization_mode: CanonicalizationMode | None = None
     surface_overlay_active: bool = False
+    eval_contract_digest: str | None = None
+    eval_contract_required: bool = False
+    current_eval_contract_digest: str | None = None
+    eval_contract_matches_current: bool | None = None
+    eval_contract_drift_status: EvalDriftStatus | None = None
+    last_eval_measurement_mode: EvalMeasurementMode | None = None
+    last_eval_stabilization_mode: EvalStabilizationMode | None = None
+    last_eval_used_lease: bool | None = None
+    last_eval_noisy_system: bool | None = None
+    frontier_family_count: int = 0
+    frontier_candidate_count: int = 0
+    pending_query_count: int = 0
+    pending_merge_suggestion_count: int = 0

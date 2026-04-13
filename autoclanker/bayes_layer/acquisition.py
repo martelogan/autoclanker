@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from autoclanker.bayes_layer.config import BayesLayerConfig, load_bayes_layer_config
 from autoclanker.bayes_layer.feature_encoder import strategy_materialization_groups
@@ -11,6 +11,7 @@ from autoclanker.bayes_layer.types import (
     CompiledPriorBundle,
     EncodedCandidate,
     FeasibilityPosterior,
+    FrontierCandidate,
     GeneStateRef,
     ObjectivePosterior,
     RankedCandidate,
@@ -87,6 +88,7 @@ def rank_candidates(
     objective_posterior: ObjectivePosterior,
     feasibility_posterior: FeasibilityPosterior,
     compiled_priors: CompiledPriorBundle | None = None,
+    frontier_candidates: Mapping[str, FrontierCandidate] | None = None,
     config: BayesLayerConfig | None = None,
 ) -> tuple[RankedCandidate, ...]:
     active_config = config or load_bayes_layer_config()
@@ -121,6 +123,11 @@ def rank_candidates(
         return tuple(summaries)
 
     for candidate_id, genotype in candidates:
+        frontier_candidate = (
+            None
+            if frontier_candidates is None
+            else frontier_candidates.get(candidate_id)
+        )
         encoded, predicted_utility, uncertainty = encode_and_score_candidate(
             candidate_id,
             genotype,
@@ -151,6 +158,35 @@ def rank_candidates(
                 acquisition_score=acquisition_score,
                 rationale=tuple(rationale),
                 influence_summary=candidate_influence_summary(encoded),
+                family_id=(
+                    None if frontier_candidate is None else frontier_candidate.family_id
+                ),
+                origin_kind=(
+                    None
+                    if frontier_candidate is None
+                    else frontier_candidate.origin_kind
+                ),
+                parent_candidate_ids=(
+                    ()
+                    if frontier_candidate is None
+                    else frontier_candidate.parent_candidate_ids
+                ),
+                parent_belief_ids=(
+                    ()
+                    if frontier_candidate is None
+                    else frontier_candidate.parent_belief_ids
+                ),
+                origin_query_ids=(
+                    ()
+                    if frontier_candidate is None
+                    else frontier_candidate.origin_query_ids
+                ),
+                notes=None if frontier_candidate is None else frontier_candidate.notes,
+                budget_weight=(
+                    None
+                    if frontier_candidate is None
+                    else frontier_candidate.budget_weight
+                ),
             )
         )
     return tuple(

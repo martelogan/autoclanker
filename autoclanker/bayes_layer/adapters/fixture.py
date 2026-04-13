@@ -6,8 +6,12 @@ from collections.abc import Mapping, Sequence
 
 from autoclanker.bayes_layer.adapters.protocols import AdapterProbeResult
 from autoclanker.bayes_layer.config import BayesLayerConfig, load_bayes_layer_config
+from autoclanker.bayes_layer.eval_contract import capture_eval_contract
 from autoclanker.bayes_layer.registry import GeneRegistry, build_fixture_registry
 from autoclanker.bayes_layer.types import (
+    EvalContractSnapshot,
+    EvalExecutionContext,
+    EvalExecutionMetadata,
     GeneStateRef,
     JsonValue,
     ValidAdapterConfig,
@@ -41,6 +45,9 @@ class FixtureAdapter:
     def build_registry(self) -> GeneRegistry:
         return self._registry
 
+    def capture_eval_contract(self) -> EvalContractSnapshot:
+        return capture_eval_contract(self.config, kind=self.kind)
+
     def materialize_candidate(
         self,
         genotype: Sequence[GeneStateRef],
@@ -61,9 +68,11 @@ class FixtureAdapter:
         genotype: Sequence[GeneStateRef],
         seed: int = 0,
         replication_index: int = 0,
+        execution_context: EvalExecutionContext | None = None,
     ) -> ValidEvalResult:
         ordered = self._registry.canonicalize_members(genotype)
         state_keys = {ref.canonical_key for ref in ordered}
+        contract = self.capture_eval_contract()
 
         delta_perf = 0.0
         peak_vram_mb = 18_000.0
@@ -152,6 +161,11 @@ class FixtureAdapter:
                 "score": round(0.55 + delta_perf, 6),
                 "nondefault_gene_count": nondefault_gene_count,
                 "seed": seed,
+                "workspace_root": (
+                    None
+                    if execution_context is None
+                    else execution_context.workspace_root
+                ),
             },
             delta_perf=delta_perf,
             utility=utility,
@@ -160,6 +174,21 @@ class FixtureAdapter:
             stderr_digest="stderr:clean" if status == "valid" else f"stderr:{status}",
             artifact_paths=(f"artifacts/{era_id}/{candidate_id}/metrics.json",),
             failure_metadata=failure_metadata,
+            eval_contract=contract,
+            execution_metadata=EvalExecutionMetadata(
+                isolation_mode=(
+                    "fixture"
+                    if execution_context is None
+                    else execution_context.isolation_mode
+                ),
+                workspace_root=(
+                    None
+                    if execution_context is None
+                    else execution_context.workspace_root
+                ),
+                workspace_snapshot_id=contract.workspace_snapshot_id,
+                contract_digest=contract.contract_digest,
+            ),
         )
 
     def commit_candidate(self, candidate_id: str) -> Mapping[str, JsonValue]:

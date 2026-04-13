@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from autoclanker.bayes_layer.adapters.fixture import FixtureAdapter
 from autoclanker.bayes_layer.adapters.protocols import AdapterProbeResult
 from autoclanker.bayes_layer.config import load_bayes_layer_config
+from autoclanker.bayes_layer.eval_contract import capture_eval_contract
 from autoclanker.bayes_layer.types import (
+    EvalContractSnapshot,
+    EvalExecutionContext,
     GeneStateRef,
     JsonValue,
     ValidAdapterConfig,
@@ -53,6 +57,9 @@ class ContractShimAdapter:
     def build_registry(self):  # pragma: no cover - structural helper
         return self._fixture.build_registry()
 
+    def capture_eval_contract(self) -> EvalContractSnapshot:
+        return capture_eval_contract(self.config, kind=self.kind)
+
     def materialize_candidate(
         self,
         genotype: Sequence[GeneStateRef],
@@ -70,13 +77,20 @@ class ContractShimAdapter:
         genotype: Sequence[GeneStateRef],
         seed: int = 0,
         replication_index: int = 0,
+        execution_context: EvalExecutionContext | None = None,
     ) -> ValidEvalResult:
+        contract = (
+            self.capture_eval_contract()
+            if execution_context is None
+            else execution_context.contract
+        )
         base = self._fixture.evaluate_candidate(
             era_id=era_id,
             candidate_id=candidate_id,
             genotype=genotype,
             seed=seed,
             replication_index=replication_index,
+            execution_context=execution_context,
         )
         return ValidEvalResult(
             era_id=base.era_id,
@@ -100,6 +114,16 @@ class ContractShimAdapter:
             stderr_digest=base.stderr_digest,
             artifact_paths=base.artifact_paths,
             failure_metadata=base.failure_metadata,
+            eval_contract=contract,
+            execution_metadata=(
+                base.execution_metadata
+                if base.execution_metadata is None
+                else replace(
+                    base.execution_metadata,
+                    contract_digest=contract.contract_digest,
+                    workspace_snapshot_id=contract.workspace_snapshot_id,
+                )
+            ),
         )
 
     def commit_candidate(self, candidate_id: str) -> Mapping[str, JsonValue]:
