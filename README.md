@@ -35,6 +35,8 @@ the underlying loop.
 - Keep several candidate lanes explicit so an outer harness can explore them in parallel when practical.
 - Add inspectable human & LLM beliefs instead of relying on prompt-only steering.
 - Preview compiled priors before they affect a session.
+- Fit an exact joint linear posterior over explicit main and screened pair features when that math is safe, then fall back automatically when it is not.
+- Use real finite-pool Thompson-style sampling when the posterior is sampleable, with an optimistic deterministic fallback when it is not.
 - Separate utility and feasibility so risky candidates stay visible but bounded.
 - Persist surface snapshots, append-only eval observations, canonicalization summaries, and influence summaries to disk.
 - Work with generic external adapters, plus built-in `autoresearch` and `cevolve` integrations.
@@ -69,6 +71,20 @@ parallel when practical, and the session keeps a locked eval contract plus each
 observed eval result on disk so the same comparison can be revisited later
 without quietly drifting the benchmark surface.
 
+When enough typed signal and usable explicit features are present, the objective
+model is a small exact joint Bayesian linear posterior over explicit candidate
+features: main effects, screened pair effects, and compact metadata like
+active-gene count. When that feature set is empty, or when the exact solve or
+its sampling path is numerically unsafe, `autoclanker` records the reason and
+falls back to the earlier heuristic objective path instead of failing the
+session.
+
+Likewise, `constrained_thompson_sampling` is now a real sampled finite-pool
+acquisition path over the explicit candidate frontier once there is observed
+signal to sample against. Prior-only cold starts and numerically unsafe sampling
+paths fall back to the deterministic optimistic scorer, and that backend choice
+is reported in JSON artifacts.
+
 The outer-layer adapter and session-boundary outer loop over
 [Autoresearch](https://github.com/karpathy/autoresearch) here was inspired by
 [cEvolve](https://github.com/jnormore/cevolve), which remains a first-party
@@ -79,7 +95,8 @@ integration target.
 - A non-interactive `autoclanker` CLI.
 - A typed belief schema with beginner and expert lanes.
 - Deterministic and model-assisted canonicalization for rough ideas.
-- Era-local Bayesian objective and feasibility models.
+- Era-local objective and feasibility models with an exact explicit-feature
+  posterior when safe, plus explicit fallback metadata when not.
 - A filesystem-backed session store.
 - Public examples for Bayes-first, `autoresearch`, and `cevolve` workflows.
 
@@ -235,6 +252,15 @@ rough ideas
 → suggest against an explicit candidate pool or frontier
 → recommend-commit
 ```
+
+The important additive behavior in this phase is:
+
+- `fit` now records whether the objective backend was the exact joint linear
+  posterior or the heuristic fallback, plus condition diagnostics and fit time;
+- `suggest` records whether acquisition used real constrained Thompson sampling
+  or the optimistic fallback path;
+- `query.json` now prefers concrete candidate or family comparison prompts when
+  uncertainty is localized enough to ask a clean lane-vs-lane question.
 
 A minimal session kickoff looks like:
 

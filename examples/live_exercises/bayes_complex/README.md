@@ -75,6 +75,8 @@ Expected outcome:
 - after `apply-beliefs`, the cold-start suggestion should rank `cand_c_compiled_context_pair` first,
 - the risky OOM candidate should stay at the bottom with a visibly worse feasibility score,
 - after ingesting the three named observations from `expected_outcome.json`, the Bayes-guided session should give `cand_c_compiled_context_pair` a material uplift versus control,
-- the Bayes-guided session should recommend commit while the control session should not.
+- the Bayes-guided session should stay materially stronger than control, but the
+  more exact posterior may still keep both sessions below the final commit
+  threshold until more evidence is gathered.
 
 Use this when you want the cleanest end-to-end autoclanker exercise without live upstream dependencies.

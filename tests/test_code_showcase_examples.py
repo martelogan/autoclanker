@@ -263,5 +263,5 @@ def test_bayes_code_showcase_replay_script_runs() -> None:
     assert "manual_replay_commands" in payload
     assert observed["cold_beliefs_top_candidate"] == "cand_c_compiled_context_pair"
     assert observed["cold_control_top_candidate"] == "cand_a_default"
-    assert observed["belief_commit_recommended"] is True
+    assert observed["belief_commit_recommended"] is False
     assert observed["control_commit_recommended"] is False

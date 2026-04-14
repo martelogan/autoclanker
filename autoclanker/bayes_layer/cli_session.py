@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import sys
+import time
 
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -285,25 +286,53 @@ def _compute_summary(
     observations: tuple[ValidEvalResult, ...],
     compiled: CompiledPriorBundle,
 ) -> PosteriorSummary:
+    active_config = load_bayes_layer_config()
+    started = time.perf_counter()
     objective = fit_objective_surrogate(
         observations,
         registry=registry,
         compiled_priors=compiled,
         era_state=era_state,
+        config=active_config,
     )
     feasibility = fit_feasibility_surrogate(
         observations,
         registry=registry,
         compiled_priors=compiled,
         era_state=era_state,
+        config=active_config,
     )
     ranked = rank_candidates(
         generate_candidate_pool(registry, compiled_priors=compiled),
         registry=registry,
         objective_posterior=objective,
         feasibility_posterior=feasibility,
+        config=active_config,
     )
+    fit_runtime_ms = (time.perf_counter() - started) * 1000.0
     graph = build_posterior_graph(objective, compiled)
+    acquisition_backend = (
+        ranked[0].acquisition_backend
+        if ranked
+        else (
+            "constrained_thompson_sampling"
+            if (
+                active_config.acquisition.kind == "constrained_thompson_sampling"
+                and objective.backend == "exact_joint_linear"
+                and objective.sampleable
+            )
+            else "optimistic_upper_confidence"
+        )
+    )
+    main_feature_count = sum(
+        1 for feature in objective.features if feature.target_kind == "main_effect"
+    )
+    pair_feature_count = sum(
+        1 for feature in objective.features if feature.target_kind == "pair_effect"
+    )
+    acquisition_fallback_reason = (
+        ranked[0].acquisition_fallback_reason if ranked else None
+    )
     return PosteriorSummary(
         era_id=era_state.era_id,
         observation_count=objective.observation_count,
@@ -313,6 +342,19 @@ def _compute_summary(
         top_features=objective.features[:8],
         top_candidates=ranked[:5],
         graph=graph,
+        objective_backend=objective.backend,
+        acquisition_backend=acquisition_backend,
+        acquisition_fallback_reason=acquisition_fallback_reason,
+        objective_sampleable=objective.sampleable,
+        objective_effective_observation_count=objective.effective_observation_count,
+        objective_feature_count=len(objective.features),
+        objective_main_feature_count=main_feature_count,
+        objective_pair_feature_count=pair_feature_count,
+        objective_condition_number=objective.condition_number,
+        objective_used_jitter=objective.used_jitter,
+        objective_observation_noise=objective.observation_noise,
+        objective_fallback_reason=objective.fallback_reason,
+        fit_runtime_ms=fit_runtime_ms,
         influence_summary=tuple(
             InfluenceSummary(
                 source_belief_id=spec.source_belief_id,
@@ -428,6 +470,7 @@ def _suggest_from_frontier(
     frontier: FrontierDocument,
     observations: tuple[ValidEvalResult, ...],
 ) -> tuple[tuple[RankedCandidate, ...], tuple[QuerySuggestion, ...], FrontierSummary]:
+    active_config = load_bayes_layer_config()
     era_state = EraState(
         era_id=manifest.era_id,
         observation_count=len(observations),
@@ -437,12 +480,14 @@ def _suggest_from_frontier(
         registry=registry,
         compiled_priors=compiled,
         era_state=era_state,
+        config=active_config,
     )
     feasibility = fit_feasibility_surrogate(
         observations,
         registry=registry,
         compiled_priors=compiled,
         era_state=era_state,
+        config=active_config,
     )
     ranked = rank_candidates(
         frontier_candidates_payload(frontier),
@@ -451,11 +496,13 @@ def _suggest_from_frontier(
         feasibility_posterior=feasibility,
         compiled_priors=compiled,
         frontier_candidates=_frontier_lookup(frontier),
+        config=active_config,
     )
     queries = suggest_queries(
         objective,
         beliefs=beliefs,
         ranked_candidates=ranked,
+        config=active_config,
     )
     frontier_summary = summarize_frontier(
         frontier,

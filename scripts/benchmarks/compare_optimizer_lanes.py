@@ -4,11 +4,29 @@ import argparse
 import io
 import json
 import tempfile
+import time
 
 from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
+from autoclanker.bayes_layer import (
+    EraState,
+    acquisition as acquisition_module,
+    compile_beliefs,
+    ingest_human_beliefs,
+    load_bayes_layer_config,
+    load_serialized_payload,
+)
+from autoclanker.bayes_layer.acquisition import rank_candidates
+from autoclanker.bayes_layer.adapters.fixture import FixtureAdapter
+from autoclanker.bayes_layer.surrogate_feasibility import fit_feasibility_surrogate
+from autoclanker.bayes_layer.surrogate_objective import (
+    _heuristic_fit_objective_surrogate,
+    fit_objective_surrogate,
+)
+from autoclanker.bayes_layer.types import GeneStateRef, ValidAdapterConfig
 from autoclanker.cli import main
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -56,6 +74,239 @@ def _require_sequence(value: object, *, label: str) -> list[object]:
     return cast(list[object], value)
 
 
+def _fixture_adapter() -> FixtureAdapter:
+    return FixtureAdapter(
+        ValidAdapterConfig(
+            kind="fixture",
+            mode="fixture",
+            session_root=".autoclanker",
+        )
+    )
+
+
+def _candidate_with_overrides(
+    adapter: FixtureAdapter,
+    *,
+    matcher: str | None = None,
+    plan: str | None = None,
+    window: str | None = None,
+    chunk: str | None = None,
+) -> tuple[GeneStateRef, ...]:
+    registry = adapter.build_registry()
+    genotype = {ref.gene_id: ref for ref in registry.default_genotype()}
+    if matcher is not None:
+        genotype["parser.matcher"] = GeneStateRef(
+            gene_id="parser.matcher",
+            state_id=matcher,
+        )
+    if plan is not None:
+        genotype["parser.plan"] = GeneStateRef(
+            gene_id="parser.plan",
+            state_id=plan,
+        )
+    if window is not None:
+        genotype["capture.window"] = GeneStateRef(
+            gene_id="capture.window",
+            state_id=window,
+        )
+    if chunk is not None:
+        genotype["io.chunk"] = GeneStateRef(
+            gene_id="io.chunk",
+            state_id=chunk,
+        )
+    return tuple(genotype.values())
+
+
+def _backend_comparison_report() -> dict[str, object]:
+    adapter = _fixture_adapter()
+    registry = adapter.build_registry()
+    beliefs = ingest_human_beliefs(
+        load_serialized_payload(
+            ROOT / "examples" / "human_beliefs" / "expert_session.json"
+        )
+    )
+    compiled = compile_beliefs(
+        beliefs,
+        registry,
+        EraState(era_id=beliefs.session_context.era_id),
+    )
+    observations = (
+        adapter.evaluate_candidate(
+            era_id="era_003",
+            candidate_id="baseline",
+            genotype=registry.default_genotype(),
+            seed=1,
+        ),
+        adapter.evaluate_candidate(
+            era_id="era_003",
+            candidate_id="compiled_only",
+            genotype=_candidate_with_overrides(
+                adapter,
+                matcher="matcher_compiled",
+            ),
+            seed=2,
+        ),
+        adapter.evaluate_candidate(
+            era_id="era_003",
+            candidate_id="compiled_pair_a",
+            genotype=_candidate_with_overrides(
+                adapter,
+                matcher="matcher_compiled",
+                plan="plan_context_pair",
+            ),
+            seed=3,
+        ),
+        adapter.evaluate_candidate(
+            era_id="era_003",
+            candidate_id="compiled_pair_b",
+            genotype=_candidate_with_overrides(
+                adapter,
+                matcher="matcher_compiled",
+                plan="plan_context_pair",
+            ),
+            seed=4,
+        ),
+        adapter.evaluate_candidate(
+            era_id="era_003",
+            candidate_id="wide_window",
+            genotype=_candidate_with_overrides(
+                adapter,
+                window="window_wide",
+                chunk="chunk_large",
+            ),
+            seed=5,
+        ),
+    )
+    candidate_pool = (
+        ("cand_a_default", registry.default_genotype()),
+        (
+            "cand_b_compiled_matcher",
+            _candidate_with_overrides(adapter, matcher="matcher_compiled"),
+        ),
+        (
+            "cand_c_compiled_context_pair",
+            _candidate_with_overrides(
+                adapter,
+                matcher="matcher_compiled",
+                plan="plan_context_pair",
+            ),
+        ),
+        (
+            "cand_d_wide_window_large_chunk",
+            _candidate_with_overrides(
+                adapter,
+                window="window_wide",
+                chunk="chunk_large",
+            ),
+        ),
+    )
+    config = load_bayes_layer_config()
+    optimistic_config = replace(
+        config,
+        acquisition=replace(config.acquisition, kind="optimistic_upper_confidence"),
+    )
+    era_state = EraState(
+        era_id=beliefs.session_context.era_id,
+        observation_count=len(observations),
+    )
+    feasibility = fit_feasibility_surrogate(
+        observations,
+        registry=registry,
+        compiled_priors=compiled,
+        era_state=era_state,
+        config=config,
+    )
+
+    def lane_payload(objective_mode: str) -> dict[str, object]:
+        fit_started = time.perf_counter()
+        if objective_mode == "heuristic":
+            objective = _heuristic_fit_objective_surrogate(
+                observations,
+                registry=registry,
+                compiled_priors=compiled,
+                era_state=era_state,
+                config=config,
+            )
+            ranking_config = optimistic_config
+        elif objective_mode == "exact_optimistic":
+            objective = fit_objective_surrogate(
+                observations,
+                registry=registry,
+                compiled_priors=compiled,
+                era_state=era_state,
+                config=config,
+            )
+            ranking_config = optimistic_config
+        else:
+            objective = fit_objective_surrogate(
+                observations,
+                registry=registry,
+                compiled_priors=compiled,
+                era_state=era_state,
+                config=config,
+            )
+            ranking_config = config
+        fit_runtime_ms = (time.perf_counter() - fit_started) * 1000.0
+        rank_started = time.perf_counter()
+        original_sample_factor = acquisition_module._sample_factor
+        if objective_mode == "exact_forced_sampling_fallback":
+            acquisition_module._sample_factor = lambda _covariance: None
+        try:
+            ranked = rank_candidates(
+                candidate_pool,
+                registry=registry,
+                objective_posterior=objective,
+                feasibility_posterior=feasibility,
+                compiled_priors=compiled,
+                config=ranking_config,
+            )
+        finally:
+            acquisition_module._sample_factor = original_sample_factor
+        ranking_runtime_ms = (time.perf_counter() - rank_started) * 1000.0
+        return {
+            "objective_backend": objective.backend,
+            "acquisition_backend": ranked[0].acquisition_backend,
+            "acquisition_fallback_reason": ranked[0].acquisition_fallback_reason,
+            "top_candidate": ranked[0].candidate_id,
+            "top_candidate_predicted_utility": ranked[0].predicted_utility,
+            "top_candidate_acquisition_score": ranked[0].acquisition_score,
+            "fit_runtime_ms": round(fit_runtime_ms, 4),
+            "ranking_runtime_ms": round(ranking_runtime_ms, 4),
+            "objective_sampleable": objective.sampleable,
+            "objective_condition_number": objective.condition_number,
+            "objective_fallback_reason": objective.fallback_reason,
+        }
+
+    heuristic_lane = lane_payload("heuristic")
+    exact_optimistic_lane = lane_payload("exact_optimistic")
+    exact_thompson_lane = lane_payload("exact_thompson")
+    exact_forced_fallback_lane = lane_payload("exact_forced_sampling_fallback")
+    return {
+        "comparison_type": "deterministic_backend_comparison",
+        "observation_count": len(observations),
+        "lanes": {
+            "heuristic_objective_optimistic": heuristic_lane,
+            "exact_objective_optimistic": exact_optimistic_lane,
+            "exact_objective_thompson": exact_thompson_lane,
+            "exact_objective_sampling_fallback": exact_forced_fallback_lane,
+        },
+        "conclusion": {
+            "exact_backend_active": exact_optimistic_lane["objective_backend"]
+            == "exact_joint_linear",
+            "thompson_backend_active": exact_thompson_lane["acquisition_backend"]
+            == "constrained_thompson_sampling",
+            "heuristic_backend_active": heuristic_lane["objective_backend"]
+            == "heuristic_independent_normal",
+            "fallback_free_exact_lane": exact_thompson_lane["objective_fallback_reason"]
+            is None,
+            "sampled_fallback_visible": exact_forced_fallback_lane[
+                "acquisition_fallback_reason"
+            ]
+            is not None,
+        },
+    }
+
+
 def _init_and_apply(
     *,
     session_root: Path,
@@ -95,7 +346,7 @@ def _init_and_apply(
     )
 
 
-def _render_report() -> dict[str, object]:
+def build_report() -> dict[str, object]:
     candidates_path = (
         ROOT / "examples" / "live_exercises" / "bayes_quickstart" / "candidates.json"
     )
@@ -335,6 +586,7 @@ def _render_report() -> dict[str, object]:
                     ),
                 },
             },
+            "observed_backend_comparison": _backend_comparison_report(),
         },
     }
 
@@ -352,7 +604,7 @@ def _parse_args() -> argparse.Namespace:
 
 def main_cli() -> int:
     args = _parse_args()
-    report = _render_report()
+    report = build_report()
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output:
         Path(args.output).write_text(rendered, encoding="utf-8")

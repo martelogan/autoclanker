@@ -536,6 +536,7 @@ class PosteriorFeature:
     posterior_variance: float
     support: int
     prior_mean: float
+    prior_variance: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -544,6 +545,17 @@ class ObjectivePosterior:
     baseline_utility: float
     features: tuple[PosteriorFeature, ...]
     observation_count: int
+    backend: str = "heuristic_independent_normal"
+    sampleable: bool = False
+    feature_order: tuple[str, ...] = ()
+    posterior_mean_vector: tuple[float, ...] = ()
+    posterior_covariance: tuple[tuple[float, ...], ...] = ()
+    aggregate_count: int = 0
+    effective_observation_count: float = 0.0
+    condition_number: float | None = None
+    used_jitter: float = 0.0
+    observation_noise: float | None = None
+    fallback_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -607,6 +619,13 @@ class RankedCandidate:
     uncertainty: float
     valid_probability: float
     acquisition_score: float
+    objective_backend: str | None = None
+    acquisition_backend: str = "optimistic_upper_confidence"
+    acquisition_fallback_reason: str | None = None
+    sampled_utility: float | None = None
+    sampled_score_mean: float | None = None
+    sampled_score_std: float | None = None
+    posterior_win_rate: float | None = None
     rationale: tuple[str, ...] = ()
     influence_summary: tuple[str, ...] = ()
     family_id: str | None = None
@@ -626,6 +645,9 @@ class QuerySuggestion:
     target_refs: tuple[str, ...]
     expected_value: float
     confidence_gap: float
+    candidate_ids: tuple[str, ...] = ()
+    family_ids: tuple[str, ...] = ()
+    comparison_scope: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -645,6 +667,20 @@ class PosteriorSummary:
     top_features: tuple[PosteriorFeature, ...]
     top_candidates: tuple[RankedCandidate, ...]
     graph: PosteriorGraph
+    objective_backend: str = "heuristic_independent_normal"
+    acquisition_backend: str = "optimistic_upper_confidence"
+    acquisition_fallback_reason: str | None = None
+    objective_sampleable: bool = False
+    objective_effective_observation_count: float = 0.0
+    objective_feature_count: int = 0
+    objective_main_feature_count: int = 0
+    objective_pair_feature_count: int = 0
+    objective_condition_number: float | None = None
+    objective_used_jitter: float = 0.0
+    objective_observation_noise: float | None = None
+    objective_fallback_reason: str | None = None
+    fit_runtime_ms: float | None = None
+    suggest_runtime_ms: float | None = None
     influence_summary: tuple[InfluenceSummary, ...] = ()
 
 
@@ -710,3 +746,7 @@ class SessionStatus:
     frontier_candidate_count: int = 0
     pending_query_count: int = 0
     pending_merge_suggestion_count: int = 0
+    last_objective_backend: str | None = None
+    last_acquisition_backend: str | None = None
+    last_follow_up_query_type: str | None = None
+    last_follow_up_comparison: str | None = None

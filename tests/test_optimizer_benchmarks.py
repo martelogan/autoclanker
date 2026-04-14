@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import cast
 
 from autoclanker.cli import main
+from scripts.benchmarks.compare_optimizer_lanes import build_report
 from tests.compliance import covers
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -357,3 +358,33 @@ def test_frontier_heavy_parser_lanes_preserve_family_budgeting_and_merge_guidanc
             )
             == 1.0
         )
+
+
+@covers("M7-012")
+def test_benchmark_report_emits_backend_comparison_metadata() -> None:
+    report = _require_mapping(build_report())
+    targets = _require_mapping(report["targets"])
+    backend_comparison = _require_mapping(targets["observed_backend_comparison"])
+    lanes = _require_mapping(backend_comparison["lanes"])
+    heuristic_lane = _require_mapping(lanes["heuristic_objective_optimistic"])
+    exact_optimistic_lane = _require_mapping(lanes["exact_objective_optimistic"])
+    exact_thompson_lane = _require_mapping(lanes["exact_objective_thompson"])
+    exact_fallback_lane = _require_mapping(lanes["exact_objective_sampling_fallback"])
+    conclusion = _require_mapping(backend_comparison["conclusion"])
+
+    assert heuristic_lane["objective_backend"] == "heuristic_independent_normal"
+    assert exact_optimistic_lane["objective_backend"] == "exact_joint_linear"
+    assert exact_thompson_lane["objective_backend"] == "exact_joint_linear"
+    assert exact_thompson_lane["acquisition_backend"] == "constrained_thompson_sampling"
+    assert exact_thompson_lane["acquisition_fallback_reason"] is None
+    assert exact_fallback_lane["objective_backend"] == "exact_joint_linear"
+    assert exact_fallback_lane["acquisition_backend"] == "optimistic_upper_confidence"
+    assert exact_fallback_lane["acquisition_fallback_reason"] == (
+        "sampling_factorization_failed"
+    )
+    assert isinstance(exact_thompson_lane["fit_runtime_ms"], int | float)
+    assert isinstance(exact_thompson_lane["ranking_runtime_ms"], int | float)
+    assert conclusion["exact_backend_active"] is True
+    assert conclusion["thompson_backend_active"] is True
+    assert conclusion["fallback_free_exact_lane"] is True
+    assert conclusion["sampled_fallback_visible"] is True

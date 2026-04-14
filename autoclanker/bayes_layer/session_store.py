@@ -93,6 +93,33 @@ def _require_query_type(value: object, *, label: str) -> QueryType:
     return cast(QueryType, value)
 
 
+def _optional_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    trimmed = value.strip()
+    return trimmed or None
+
+
+def _comparison_focus_from_query_mapping(
+    query_mapping: Mapping[str, object],
+) -> str | None:
+    raw_candidate_ids = query_mapping.get("candidate_ids")
+    if isinstance(raw_candidate_ids, list):
+        candidate_ids = [
+            item for item in cast(list[object], raw_candidate_ids) if isinstance(item, str)
+        ]
+        if len(candidate_ids) >= 2:
+            return f"{candidate_ids[0]} vs {candidate_ids[1]}"
+    raw_family_ids = query_mapping.get("family_ids")
+    if isinstance(raw_family_ids, list):
+        family_ids = [
+            item for item in cast(list[object], raw_family_ids) if isinstance(item, str)
+        ]
+        if len(family_ids) >= 2:
+            return f"{family_ids[0]} vs {family_ids[1]}"
+    return None
+
+
 class SessionStore(Protocol):
     @property
     def artifact_filenames(self) -> SessionArtifactConfig: ...
@@ -432,10 +459,28 @@ class FilesystemSessionStore:
         queries: tuple[QuerySuggestion, ...],
         frontier_summary: FrontierSummary | None = None,
     ) -> Path:
+        first_ranked = ranked_candidates[0] if ranked_candidates else None
+        first_query = queries[0] if queries else None
         payload: dict[str, JsonValue] = {
             "ranked_candidates": cast(JsonValue, list(ranked_candidates)),
             "queries": to_json_value(queries),
         }
+        if first_ranked is not None:
+            objective_backend = _optional_string(first_ranked.get("objective_backend"))
+            acquisition_backend = _optional_string(
+                first_ranked.get("acquisition_backend")
+            )
+            if objective_backend is not None:
+                payload["objective_backend"] = objective_backend
+            if acquisition_backend is not None:
+                payload["acquisition_backend"] = acquisition_backend
+        if first_query is not None:
+            payload["follow_up_query_type"] = first_query.query_type
+            comparison_focus = _comparison_focus_from_query_mapping(
+                cast(Mapping[str, object], to_json_value(first_query))
+            )
+            if comparison_focus is not None:
+                payload["follow_up_comparison"] = comparison_focus
         if frontier_summary is not None:
             payload["frontier_summary"] = to_json_value(frontier_summary)
         return _json_dump(
@@ -502,6 +547,15 @@ class FilesystemSessionStore:
                     item["confidence_gap"],
                     label="pending_queries[].confidence_gap",
                 ),
+                candidate_ids=_require_string_list(
+                    item.get("candidate_ids", []),
+                    label="pending_queries[].candidate_ids",
+                ),
+                family_ids=_require_string_list(
+                    item.get("family_ids", []),
+                    label="pending_queries[].family_ids",
+                ),
+                comparison_scope=cast(str | None, item.get("comparison_scope")),
             )
             for item in _require_object_list(
                 raw.get("pending_queries", []),
@@ -571,6 +625,12 @@ class FilesystemSessionStore:
                 }
             ),
         )
+
+    def _load_query_payload(self, session_id: str) -> Mapping[str, object]:
+        path = self._artifact_path(session_id, self._artifacts.query)
+        if not path.exists():
+            return {}
+        return load_serialized_payload(path)
 
     def write_commit_decision(self, session_id: str, decision: CommitDecision) -> Path:
         return _json_dump(
@@ -667,6 +727,35 @@ class FilesystemSessionStore:
             ),
             "eval_runs": str(self._eval_runs_path(session_id, create=False)),
         }
+        posterior_summary_path = self._artifact_path(
+            session_id, self._artifacts.posterior_summary
+        )
+        posterior_summary = (
+            {}
+            if not posterior_summary_path.exists()
+            else load_serialized_payload(posterior_summary_path)
+        )
+        query_payload = self._load_query_payload(session_id)
+        ranked_candidates_raw = query_payload.get("ranked_candidates", [])
+        first_ranked_candidate = (
+            None
+            if not isinstance(ranked_candidates_raw, list) or not ranked_candidates_raw
+            else (
+                cast(dict[str, object], ranked_candidates_raw[0])
+                if isinstance(ranked_candidates_raw[0], dict)
+                else None
+            )
+        )
+        queries_raw = query_payload.get("queries", [])
+        first_query = (
+            None
+            if not isinstance(queries_raw, list) or not queries_raw
+            else (
+                cast(dict[str, object], queries_raw[0])
+                if isinstance(queries_raw[0], dict)
+                else None
+            )
+        )
         return SessionStatus(
             session_id=session_id,
             era_id=manifest.era_id,
@@ -710,5 +799,41 @@ class FilesystemSessionStore:
                 0
                 if frontier_status is None
                 else len(frontier_status.pending_merge_suggestions)
+            ),
+            last_objective_backend=(
+                _optional_string(query_payload.get("objective_backend"))
+                or (
+                    None
+                    if first_ranked_candidate is None
+                    else _optional_string(first_ranked_candidate.get("objective_backend"))
+                )
+                or _optional_string(posterior_summary.get("objective_backend"))
+            ),
+            last_acquisition_backend=(
+                _optional_string(query_payload.get("acquisition_backend"))
+                or (
+                    None
+                    if first_ranked_candidate is None
+                    else _optional_string(
+                        first_ranked_candidate.get("acquisition_backend")
+                    )
+                )
+                or _optional_string(posterior_summary.get("acquisition_backend"))
+            ),
+            last_follow_up_query_type=(
+                _optional_string(query_payload.get("follow_up_query_type"))
+                or (
+                    None
+                    if first_query is None
+                    else _optional_string(first_query.get("query_type"))
+                )
+            ),
+            last_follow_up_comparison=(
+                _optional_string(query_payload.get("follow_up_comparison"))
+                or (
+                    None
+                    if first_query is None
+                    else _comparison_focus_from_query_mapping(first_query)
+                )
             ),
         )

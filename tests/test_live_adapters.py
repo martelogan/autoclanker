@@ -46,6 +46,12 @@ def _metric_float(result: ValidEvalResult, key: str) -> float:
     return float(cast(float | int | str, result.raw_metrics[key]))
 
 
+def _artifact_metrics(result: ValidEvalResult) -> dict[str, object]:
+    artifact_path = Path(result.artifact_paths[0])
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    return cast(dict[str, object], cast(dict[str, object], payload)["metrics"])
+
+
 def _genotype_from_mapping(
     adapter: _RegistryBuilder,
     mapping: dict[str, object],
@@ -124,9 +130,25 @@ def test_live_autoresearch_adapter_smoke() -> None:
     assert evaluation.candidate_id == "cand_live_autoresearch"
     assert evaluation.raw_metrics["adapter_kind"] == "autoresearch"
     assert evaluation.raw_metrics["execution_mode"] != "fixture_fallback"
+    assert evaluation.raw_metrics["execution_backend"] in {
+        "repo_subprocess_metrics",
+        "repo_subprocess_heuristic_fallback",
+    }
+    assert evaluation.raw_metrics["metric_source"] in {
+        "subprocess_output",
+        "local_heuristic",
+    }
     assert evaluation.delta_perf >= cast(
         float,
         cast(dict[str, object], expected["expectation"])["delta_perf_at_least"],
+    )
+    evaluation_metrics = _artifact_metrics(evaluation)
+    assert (
+        evaluation_metrics["execution_backend"]
+        == evaluation.raw_metrics["execution_backend"]
+    )
+    assert (
+        evaluation_metrics["metric_source"] == evaluation.raw_metrics["metric_source"]
     )
     assert failure.status == cast(
         str,
@@ -203,6 +225,14 @@ def test_live_cevolve_adapter_smoke() -> None:
     assert evaluation.candidate_id == "cand_live_cevolve"
     assert evaluation.raw_metrics["adapter_kind"] == "cevolve"
     assert evaluation.raw_metrics["execution_mode"] != "fixture_fallback"
+    assert evaluation.raw_metrics["execution_backend"] in {
+        "repo_benchmark_subprocess",
+        "private_api_fallback",
+    }
+    assert evaluation.raw_metrics["metric_source"] in {
+        "subprocess_output",
+        "private_api",
+    }
     assert cast(float, baseline.raw_metrics["time_ms"]) - cast(
         float, evaluation.raw_metrics["time_ms"]
     ) >= cast(
@@ -210,6 +240,14 @@ def test_live_cevolve_adapter_smoke() -> None:
         cast(dict[str, object], expected["expectation"])[
             "time_ms_improvement_at_least"
         ],
+    )
+    evaluation_metrics = _artifact_metrics(evaluation)
+    assert (
+        evaluation_metrics["execution_backend"]
+        == evaluation.raw_metrics["execution_backend"]
+    )
+    assert (
+        evaluation_metrics["metric_source"] == evaluation.raw_metrics["metric_source"]
     )
     assert all(
         cast(float, result.raw_metrics["time_ms"])

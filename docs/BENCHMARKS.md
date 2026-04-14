@@ -47,3 +47,61 @@ stays deterministic.
 
 Optional billed-provider and real-upstream demos remain separate live lanes. The
 required benchmark proof stays deterministic on purpose.
+
+## 3. Backend comparison metadata
+
+The deterministic report now also includes an additive backend-comparison
+section. It compares:
+
+- heuristic objective + optimistic acquisition
+- exact joint linear objective + optimistic acquisition
+- exact joint linear objective + constrained Thompson acquisition
+
+For each lane, the report records:
+
+- top-ranked candidate
+- objective backend used
+- acquisition backend used
+- whether the objective posterior was sampleable
+- fit runtime and suggest runtime overhead
+- condition number when the exact backend is active
+- fallback reason when the exact or sampled path was abandoned
+
+That section is the honest proof for this phase. It shows whether the new math
+was actually used, how much overhead it added, and whether the engine had to
+fall back to the older heuristic or optimistic paths.
+
+## 4. What the deterministic benchmark proves
+
+The required deterministic lane proves:
+
+- typed canonical beliefs shift ranking where the shipped parser targets were
+  designed to make that useful;
+- explicit frontier family state survives round-trips through `suggest` and
+  `frontier-status`;
+- the exact objective posterior and sampled acquisition paths can be observed in
+  outputs when the problem is numerically safe;
+- the fallback path is machine-readable when the exact or sampled path is not
+  safe, including a forced exact-objective / optimistic-acquisition comparison
+  lane that makes sampled-acquisition fallback explicit.
+
+It does **not** prove:
+
+- that every upstream binding is running a fully native upstream search loop;
+- that local performance numbers are universally scheduler-clean under arbitrary
+  machine load;
+- that billed model-provider behavior is deterministic.
+
+Those broader claims remain in the optional live lanes.
+
+## 5. Optional live lanes
+
+When the environment supports them:
+
+- `./bin/dev test-upstream-live` exercises the real-upstream adapter bindings
+  under the same hardened eval-contract and isolated-execution model
+- `./bin/dev test-live` exercises the billed provider-backed canonicalization
+  path
+
+Those lanes are intentionally separate from the required deterministic proof so
+the core gate remains self-contained and non-billed.

@@ -43,13 +43,13 @@ belief compiler                  │
     ↓                           │
 prior store ────────────────────┤
                                 ↓
-frontier-aware outer-loop adapter → feature encoder → objective surrogate
+frontier-aware outer-loop adapter → feature encoder → exact joint linear objective posterior
                              ↓                ↓
                              └────────────→ feasibility surrogate
                                               ↓
                                  posterior interaction graph
                                               ↓
-                        acquisition + family-aware query policy
+              sampled-or-optimistic acquisition + family-aware query policy
                                               ↓
                  session store + CLI JSON outputs + eval run records
 ```
@@ -58,6 +58,16 @@ The key layering is:
 - **library core** for all real logic,
 - **thin CLI** for humans and scripts,
 - **thin adapters** for autoresearch / cevolve / future wrappers.
+
+The exact objective path is intentionally narrow:
+- explicit main effects,
+- screened pair effects,
+- compact metadata features already supported by the feature encoder.
+
+There are no embedding features, latent prompt-state features, or attempts to
+model provider hidden state. If the exact solve or posterior sampling path
+becomes ill-conditioned, the engine falls back to the heuristic objective path
+and records why in machine-readable artifacts.
 
 Important constraint:
 
@@ -250,6 +260,12 @@ When the active eval policy is measurement-sensitive, the measured phase should
 also take a contract-scoped advisory lease and record soft-stabilization
 metadata so local performance runs do not silently overlap.
 
+`suggest` remains finite-pool only. When the objective posterior is sampleable,
+the configured constrained Thompson path samples explicit utility over the
+current candidate pool and combines that with the feasibility model. When
+sampling is unavailable or unsafe, the CLI records that it used the optimistic
+fallback path instead.
+
 ## 8. User-lane design
 
 ### 8.1 Simple lane
@@ -290,6 +306,10 @@ flat list input. The current frontier state preserves:
 - parent candidate and parent belief lineage metadata,
 - heuristic pending merge suggestions when two frontier families remain strong,
 - unresolved cross-family queries.
+
+When uncertainty is localized enough to ask a clean question, the follow-up
+query path should prefer concrete candidate or family comparisons instead of
+abstract coefficient-sign prompts.
 
 ### 8.5 Common assistant-authoring workflow
 

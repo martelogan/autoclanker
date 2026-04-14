@@ -272,6 +272,11 @@ def test_autoresearch_live_upstream_adapter_unit_exercise(tmp_path: Path) -> Non
     }
     assert _metric_float(baseline, "val_bpb") > _metric_float(improved, "val_bpb")
     assert improved.delta_perf >= 0.015
+    assert (
+        improved.raw_metrics["execution_backend"]
+        == "repo_subprocess_heuristic_fallback"
+    )
+    assert improved.raw_metrics["metric_source"] == "local_heuristic"
     assert failure.status == "oom"
     assert failure.failure_metadata == {"reason": "simulated_hopper_vram_overage"}
     assert commit["applied"] is False
@@ -325,6 +330,8 @@ def test_cevolve_live_upstream_adapter_unit_exercise(tmp_path: Path) -> None:
     }
     assert _metric_float(baseline, "time_ms") > _metric_float(improved, "time_ms")
     assert improved.delta_perf >= 20.0
+    assert improved.raw_metrics["execution_backend"] == "repo_benchmark_subprocess"
+    assert improved.raw_metrics["metric_source"] == "subprocess_output"
     assert commit["applied"] is False
     assert "INSERTION_THRESHOLD = 16" in workspace_text
     assert Path(improved.artifact_paths[0]).exists()

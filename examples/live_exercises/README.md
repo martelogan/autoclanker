@@ -31,7 +31,7 @@ For exact field bounds and which fields are human-language versus strict enums, 
    This is a mostly main-effect landscape, so greedy search and simple Bayesian priors both do well.
 
 3. `cevolve_synergy`
-   Uses the real `jnormore/cevolve` session machinery against a deterministic interaction-heavy target.
+   Uses the first-party `cevolve` adapter against a real `jnormore/cevolve` checkout and deterministic interaction-heavy target, preferring the repo benchmark subprocess and only falling back to the thinner private-session shim when needed.
    This highlights where evolutionary combination search is stronger than one-change-at-a-time reasoning.
 
 4. `bayes_complex`

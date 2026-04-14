@@ -158,20 +158,42 @@ performance probes do not silently overlap.
 tests against them.
 
 That lane exists to prove that the first-party adapters can bind to real upstream
-source trees without fixture fallback. It is intentionally separate from the more
+source trees without fixture fallback and surface the execution backend and
+metric source they actually used. It is intentionally separate from the more
 general installed-module and runnable-command integrations described above.
 
 It is a real-upstream contract smoke test, not a claim that every scoring path
 is fully upstream-native end to end.
 
-## 8. Environment passthrough
+## 8. Stronger native-ish first-party paths
+
+The first-party adapters still stay thin, but the preferred live path is now
+more legitimate than a pure fixture shim:
+
+- `autoresearch`: when a real binding is available, the adapter prefers a repo
+  subprocess under the locked eval contract and isolated workspace. Metrics come
+  from actual subprocess output when available and are otherwise marked as a
+  repo-subprocess heuristic fallback.
+- `cevolve`: the shipped smoke lane prefers a repo benchmark subprocess against
+  the checked-out target and only falls back to the thinner private-session shim
+  when that subprocess path is unavailable. A configured public command may also
+  be used through adapter metadata, but the smoke lane does not overclaim that.
+
+Both integrations reuse the shared trust boundary:
+- isolated workspace execution,
+- contract digests,
+- measurement policy,
+- lease and stabilization metadata,
+- non-destructive default behavior.
+
+## 9. Environment passthrough
 
 When an upstream adapter resolves to an importable module or subprocess command,
 `autoclanker` passes through the normal process environment. That means upstream
 provider auth and model selection keep working the way the underlying engine expects,
 instead of being remapped by `autoclanker`.
 
-## 9. Future-proofing
+## 10. Future-proofing
 
 This boundary is meant to stay extension-friendly:
 

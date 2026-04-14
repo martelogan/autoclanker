@@ -465,6 +465,10 @@ def test_session_suggest_and_frontier_status_preserve_frontier_metadata(
     query_artifact = _require_mapping(
         json.loads((session_root / "frontier_demo" / "query.json").read_text("utf-8"))
     )
+    assert query_artifact["objective_backend"] == "heuristic_independent_normal"
+    assert query_artifact["acquisition_backend"] == "optimistic_upper_confidence"
+    assert query_artifact["follow_up_query_type"] == "pairwise_preference"
+    assert isinstance(query_artifact["follow_up_comparison"], str)
     persisted_ranked = cast(list[object], query_artifact["ranked_candidates"])
     persisted_compiled = next(
         _require_mapping(item)
@@ -472,6 +476,22 @@ def test_session_suggest_and_frontier_status_preserve_frontier_metadata(
         if _require_mapping(item)["candidate_id"] == "cand_compiled"
     )
     assert persisted_compiled["parent_belief_ids"] == ["belief_compiled"]
+    status = _run_cli(
+        [
+            "session",
+            "status",
+            "--session-id",
+            "frontier_demo",
+            "--session-root",
+            str(session_root),
+            "--adapter-config",
+            str(adapter_config),
+        ]
+    )
+    assert status["last_objective_backend"] == "heuristic_independent_normal"
+    assert status["last_acquisition_backend"] == "optimistic_upper_confidence"
+    assert status["last_follow_up_query_type"] == "pairwise_preference"
+    assert isinstance(status["last_follow_up_comparison"], str)
 
 
 @covers("M3-012", "M4-006")

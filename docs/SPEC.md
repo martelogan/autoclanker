@@ -16,10 +16,12 @@ This file is normative. Code should match this behavior unless the repository co
    - rough ideas that must canonicalize into typed beliefs or remain metadata-only.
 8. Free text must never directly influence the posterior.
 9. Require a **compiled-prior preview / round-trip** before applying belief batches.
-10. Default to a sparse Bayesian interaction model for objective utility.
+10. Default to an exact joint linear posterior over bounded explicit objective
+    features when numerically safe, with a heuristic fallback when it is not.
 11. Use a separate feasibility model.
 12. Use decayed human priors.
-13. Use bounded active querying.
+13. Use bounded active querying that prefers concrete lane or family
+    comparisons when uncertainty is localized enough to ask them cleanly.
 14. Emit structured eval results and structured session artifacts.
 15. Separate deterministic tests from noisy benchmark logic.
 16. Support a generic adapter contract plus first-party adapters for `autoresearch` and `cevolve`.
@@ -250,6 +252,32 @@ Requirements:
 - persist a stable `frontier_status.json` artifact;
 - expose frontier summaries through `session suggest` and `session frontier-status`;
 - keep legacy candidate pools valid by normalizing them into a default frontier family.
+
+### 3.7a Objective posterior and acquisition honesty
+
+The objective backend should be mathematically honest about what it is doing.
+
+Requirements:
+- compile typed priors into a diagonal Gaussian prior over explicit objective
+  coefficients;
+- fit an exact Bayesian linear posterior over bounded explicit features when the
+  linear system is numerically safe;
+- fall back to the heuristic objective path when the exact feature set is empty,
+  ill-conditioned, or otherwise not sampleable enough to support the exact path
+  honestly;
+- use only explicit main effects, screened pair effects, and compact metadata
+  features already present in the design;
+- record additive diagnostics including backend choice, condition number,
+  observation count, effective observation count, and fallback reason when the
+  exact path is abandoned;
+- keep unresolved free text metadata-only unless it already canonicalized into
+  typed beliefs.
+
+When the objective posterior is sampleable and the session has observed signal,
+`constrained_thompson_sampling` must perform real finite-pool sampling over the
+explicit candidate pool. Prior-only cold starts and numerically unsafe sampling
+paths must fall back automatically to the deterministic optimistic scorer and
+surface that backend choice in machine-readable outputs.
 
 ### 3.8 Generic adapter protocol
 

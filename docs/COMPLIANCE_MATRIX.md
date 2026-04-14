@@ -36,8 +36,8 @@ This document mirrors the machine-readable acceptance matrix at [`tests/complian
 | `M5-001` | `required` | The first-party autoresearch adapter uses a real contract target when present. |
 | `M5-002` | `required` | The first-party cevolve adapter uses a real contract target when present. |
 | `M1-LIVE-001` | `live` | A billed model-provider canonicalization lane can resolve rough parser ideas into typed beliefs through the public CLI. |
-| `M5-LIVE-001` | `live` | The live autoresearch lane runs against a real upstream checkout through the first-party adapter without fixture fallback, using the repo-native contract exercise harness. |
-| `M5-LIVE-002` | `live` | The live cevolve lane runs against a real upstream checkout through the first-party adapter without fixture fallback, using the repo-native contract exercise harness. |
+| `M5-LIVE-001` | `live` | The live autoresearch lane binds a real upstream checkout through the first-party adapter without fixture fallback and surfaces whether metrics came from repo subprocess output or the repo-subprocess heuristic fallback. |
+| `M5-LIVE-002` | `live` | The live cevolve lane binds a real upstream checkout through the first-party adapter without fixture fallback and surfaces whether evaluation used the repo benchmark subprocess or the private-session fallback. |
 | `M6-001` | `required` | Session workflows enforce a preview-then-apply gate before beliefs become active. |
 | `M6-002` | `required` | CLI failures return stable JSON errors and nonzero exit codes. |
 | `M6-003` | `required` | session apply-beliefs is available as a non-interactive CLI command. |

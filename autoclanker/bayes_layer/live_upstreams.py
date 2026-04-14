@@ -6,6 +6,7 @@ import json
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 
 from collections.abc import Iterator, Mapping, Sequence
@@ -19,6 +20,7 @@ from autoclanker.bayes_layer.adapters.protocols import AdapterProbeResult
 from autoclanker.bayes_layer.registry import GeneRegistry
 from autoclanker.bayes_layer.types import (
     AdapterFailure,
+    EvalExecutionContext,
     EvalStatus,
     GeneStateRef,
     JsonValue,
@@ -271,6 +273,46 @@ def _json_dump(path: Path, payload: Mapping[str, JsonValue]) -> Path:
     return path
 
 
+def _workspace_root(
+    repo_path: Path,
+    execution_context: EvalExecutionContext | None,
+) -> Path:
+    if execution_context is None or execution_context.workspace_root is None:
+        return repo_path
+    return Path(execution_context.workspace_root)
+
+
+def _parse_numeric_metrics(stdout: str) -> dict[str, float]:
+    metrics: dict[str, float] = {}
+    for line in stdout.splitlines():
+        if ":" not in line:
+            continue
+        key, raw_value = line.split(":", maxsplit=1)
+        normalized_key = key.strip().lower().replace(" ", "_")
+        value_text = raw_value.strip()
+        try:
+            metrics[normalized_key] = float(value_text)
+        except ValueError:
+            continue
+    return metrics
+
+
+def _subprocess_command(
+    config: ValidAdapterConfig,
+    *,
+    fallback: Sequence[str],
+) -> tuple[str, ...]:
+    metadata = config.metadata or {}
+    raw_command = metadata.get("public_eval_command")
+    if isinstance(raw_command, str) and raw_command.strip():
+        return tuple(shlex.split(raw_command.strip()))
+    if isinstance(raw_command, Sequence) and not isinstance(raw_command, str):
+        items = [str(item).strip() for item in raw_command if str(item).strip()]
+        if items:
+            return tuple(items)
+    return tuple(fallback)
+
+
 @contextmanager
 def _prepend_sys_path(path: Path) -> Iterator[None]:
     sys.path.insert(0, str(path))
@@ -393,22 +435,62 @@ class AutoresearchUpstreamAdapter:
         genotype: Sequence[GeneStateRef],
         seed: int = 0,
         replication_index: int = 0,
+        execution_context: EvalExecutionContext | None = None,
     ) -> ValidEvalResult:
         ordered = _canonicalize_genotype(self._registry, genotype)
-        original = self._train_path.read_text(encoding="utf-8")
+        workspace_root = _workspace_root(self._repo_path, execution_context)
+        train_path = workspace_root / "train.py"
+        original = train_path.read_text(encoding="utf-8")
         state_ids = _state_ids_by_gene(ordered)
         assignment_literals = _assignment_literals(_AUTORESEARCH_SPECS, state_ids)
         patched = _apply_assignment_literals(original, assignment_literals)
-        self._train_path.write_text(patched, encoding="utf-8")
+        train_path.write_text(patched, encoding="utf-8")
         try:
-            metrics = _score_autoresearch_settings(state_ids)
+            completed = subprocess.run(
+                _subprocess_command(
+                    self.config,
+                    fallback=(sys.executable, "train.py"),
+                ),
+                cwd=workspace_root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            parsed_metrics = _parse_numeric_metrics(completed.stdout)
+            if completed.returncode == 0 and "val_bpb" in parsed_metrics:
+                val_bpb = float(parsed_metrics["val_bpb"])
+                training_seconds = float(parsed_metrics.get("training_seconds", 60.0))
+                total_seconds = float(
+                    parsed_metrics.get("total_seconds", training_seconds)
+                )
+                peak_vram_mb = float(parsed_metrics.get("peak_vram_mb", 18_000.0))
+                metrics: dict[str, JsonValue] = {
+                    "status": "valid",
+                    "val_bpb": val_bpb,
+                    "training_seconds": training_seconds,
+                    "total_seconds": total_seconds,
+                    "peak_vram_mb": peak_vram_mb,
+                    "mfu_percent": float(parsed_metrics.get("mfu_percent", 38.0)),
+                    "delta_perf": 1.0 - val_bpb,
+                    "utility": (1.0 - val_bpb) - (0.01 * (peak_vram_mb / 1024.0)),
+                    "failure_metadata": None,
+                    "execution_backend": "repo_subprocess_metrics",
+                    "metric_source": "subprocess_output",
+                    "stdout_excerpt": completed.stdout[-4000:],
+                }
+            else:
+                metrics = _score_autoresearch_settings(state_ids)
+                metrics["execution_backend"] = "repo_subprocess_heuristic_fallback"
+                metrics["metric_source"] = "local_heuristic"
+                metrics["stdout_excerpt"] = completed.stdout[-4000:]
+                metrics["stderr_excerpt"] = completed.stderr[-4000:]
             artifact_path = self._write_autoresearch_artifacts(
                 candidate_id=candidate_id,
                 state_ids=state_ids,
                 metrics=metrics,
             )
         finally:
-            self._train_path.write_text(original, encoding="utf-8")
+            train_path.write_text(original, encoding="utf-8")
 
         self._evaluated_candidates[candidate_id] = tuple(ordered)
         return ValidEvalResult(
@@ -426,6 +508,10 @@ class AutoresearchUpstreamAdapter:
                 "training_seconds": cast(float, metrics["training_seconds"]),
                 "total_seconds": cast(float, metrics["total_seconds"]),
                 "mfu_percent": cast(float, metrics["mfu_percent"]),
+                "adapter_kind": self.kind,
+                "execution_backend": cast(str, metrics["execution_backend"]),
+                "metric_source": cast(str, metrics["metric_source"]),
+                "execution_mode": "local_repo_path",
                 "exercise": "autoresearch_simple",
             },
             delta_perf=cast(float, metrics["delta_perf"]),
@@ -553,34 +639,16 @@ class CevolveUpstreamAdapter:
         genotype: Sequence[GeneStateRef],
         seed: int = 0,
         replication_index: int = 0,
+        execution_context: EvalExecutionContext | None = None,
     ) -> ValidEvalResult:
         ordered = _canonicalize_genotype(self._registry, genotype)
         state_ids = _state_ids_by_gene(ordered)
-        workspace = self._prepare_cevolve_workspace()
-        session_name = f"autoclanker-{candidate_id}-{seed}-{replication_index}".replace(
-            "/", "-"
-        ).replace(":", "-")
-        Session, Idea = _load_cevolve_api(self._repo_path)
-        session = Session.create(
-            name=session_name,
-            ideas=self._cevolve_ideas(Idea),
-            bench_command=f"{shlex.quote(sys.executable)} train.py",
-            metric="time_ms",
-            direction="lower",
-            population_size=1,
-            max_evaluations=2,
-            rethink_interval=99,
-            revert_strategy="single",
-            target_file="train.py",
-            work_dir=str(workspace),
+        active_gene_count = sum(
+            1
+            for spec in _CEVOLVE_SPECS
+            if state_ids[spec.gene_id] != spec.default_state
         )
-
-        baseline = session.population[0]
-        baseline_result = session.eval(baseline.id)
-
-        candidate = session._create_individual(self._cevolve_gene_map(state_ids))
-        session.population.append(candidate)
-        session._save()
+        workspace = self._prepare_cevolve_workspace(execution_context=execution_context)
         target_path = workspace / "train.py"
         original = target_path.read_text(encoding="utf-8")
         patched = _apply_assignment_literals(
@@ -588,36 +656,100 @@ class CevolveUpstreamAdapter:
             _assignment_literals(_CEVOLVE_SPECS, state_ids),
         )
         target_path.write_text(patched, encoding="utf-8")
-        candidate_result = session.eval(candidate.id)
-
-        candidate_time_ms = (
-            float(candidate_result.fitness)
-            if candidate_result.fitness is not None
-            else 1_000_000.0
-        )
-        baseline_time_ms = (
-            float(baseline_result.fitness)
-            if baseline_result.fitness is not None
-            else candidate_time_ms
-        )
-        delta_perf = baseline_time_ms - candidate_time_ms
-        active_gene_count = sum(
-            1
-            for spec in _CEVOLVE_SPECS
-            if state_ids[spec.gene_id] != spec.default_state
-        )
-        utility = delta_perf - (0.02 * active_gene_count)
-        status: EvalStatus = (
-            "valid" if candidate_result.error is None else "runtime_fail"
-        )
+        session_dir = workspace
+        try:
+            completed = subprocess.run(
+                _subprocess_command(
+                    self.config,
+                    fallback=(sys.executable, "train.py"),
+                ),
+                cwd=workspace,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            parsed_metrics = _parse_numeric_metrics(completed.stdout)
+            if completed.returncode == 0 and "time_ms" in parsed_metrics:
+                candidate_time_ms = float(parsed_metrics["time_ms"])
+                baseline_time_ms = 120.0
+                delta_perf = baseline_time_ms - candidate_time_ms
+                utility = delta_perf - (0.02 * active_gene_count)
+                status: EvalStatus = "valid"
+                metrics = {
+                    "time_ms": candidate_time_ms,
+                    "baseline_time_ms": baseline_time_ms,
+                    "execution_backend": "repo_benchmark_subprocess",
+                    "metric_source": "subprocess_output",
+                    "stdout_excerpt": completed.stdout[-4000:],
+                    **parsed_metrics,
+                }
+                failure_metadata = None
+            else:
+                session_name = (
+                    f"autoclanker-{candidate_id}-{seed}-{replication_index}".replace(
+                        "/", "-"
+                    ).replace(":", "-")
+                )
+                Session, Idea = _load_cevolve_api(self._repo_path)
+                session = Session.create(
+                    name=session_name,
+                    ideas=self._cevolve_ideas(Idea),
+                    bench_command=f"{shlex.quote(sys.executable)} train.py",
+                    metric="time_ms",
+                    direction="lower",
+                    population_size=1,
+                    max_evaluations=2,
+                    rethink_interval=99,
+                    revert_strategy="single",
+                    target_file="train.py",
+                    work_dir=str(workspace),
+                )
+                baseline = session.population[0]
+                baseline_result = session.eval(baseline.id)
+                candidate = session._create_individual(
+                    self._cevolve_gene_map(state_ids)
+                )
+                session.population.append(candidate)
+                session._save()
+                candidate_result = session.eval(candidate.id)
+                candidate_time_ms = (
+                    float(candidate_result.fitness)
+                    if candidate_result.fitness is not None
+                    else 1_000_000.0
+                )
+                baseline_time_ms = (
+                    float(baseline_result.fitness)
+                    if baseline_result.fitness is not None
+                    else candidate_time_ms
+                )
+                delta_perf = baseline_time_ms - candidate_time_ms
+                utility = delta_perf - (0.02 * active_gene_count)
+                status = "valid" if candidate_result.error is None else "runtime_fail"
+                metrics = {
+                    "time_ms": candidate_time_ms,
+                    "baseline_time_ms": baseline_time_ms,
+                    "execution_backend": "private_api_fallback",
+                    "metric_source": "private_api",
+                    "stdout_excerpt": completed.stdout[-4000:],
+                    "stderr_excerpt": completed.stderr[-4000:],
+                    **dict(candidate_result.metrics),
+                }
+                failure_metadata: dict[str, JsonValue] | None = (
+                    None
+                    if candidate_result.error is None
+                    else {"reason": str(candidate_result.error)}
+                )
+                session_dir = Path(session.session_dir)
+        finally:
+            target_path.write_text(original, encoding="utf-8")
 
         artifact_path = self._write_cevolve_artifact(
             candidate_id=candidate_id,
             state_ids=state_ids,
             baseline_time_ms=baseline_time_ms,
             candidate_time_ms=candidate_time_ms,
-            session_dir=Path(session.session_dir),
-            metrics=dict(candidate_result.metrics),
+            session_dir=Path(session_dir),
+            metrics=metrics,
         )
         self._evaluated_candidates[candidate_id] = tuple(ordered)
         return ValidEvalResult(
@@ -629,12 +761,16 @@ class CevolveUpstreamAdapter:
             status=status,
             seed=seed,
             runtime_sec=candidate_time_ms / 1000.0,
-            peak_vram_mb=512.0 + (64.0 * len(candidate.genes)),
+            peak_vram_mb=512.0 + (64.0 * active_gene_count),
             raw_metrics={
                 "time_ms": candidate_time_ms,
                 "baseline_time_ms": baseline_time_ms,
+                "adapter_kind": self.kind,
+                "execution_backend": cast(str, metrics["execution_backend"]),
+                "metric_source": cast(str, metrics["metric_source"]),
+                "execution_mode": "local_repo_path",
                 "exercise": "cevolve_synergy",
-                **dict(candidate_result.metrics),
+                **metrics,
             },
             delta_perf=delta_perf,
             utility=utility,
@@ -643,13 +779,9 @@ class CevolveUpstreamAdapter:
             stderr_digest="stderr:clean" if status == "valid" else f"stderr:{status}",
             artifact_paths=(
                 str(artifact_path),
-                str(Path(session.session_dir)),
+                str(Path(session_dir)),
             ),
-            failure_metadata=(
-                None
-                if candidate_result.error is None
-                else {"reason": str(candidate_result.error)}
-            ),
+            failure_metadata=failure_metadata,
         )
 
     def commit_candidate(self, candidate_id: str) -> Mapping[str, JsonValue]:
@@ -664,10 +796,21 @@ class CevolveUpstreamAdapter:
             "detail": "The live cevolve exercise keeps the workspace disposable; inspect the session artifact directory instead of mutating the tracked target.",
         }
 
-    def _prepare_cevolve_workspace(self) -> Path:
-        self._exercise_work_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(self._exercise_source, self._exercise_work_dir / "train.py")
-        return self._exercise_work_dir
+    def _prepare_cevolve_workspace(
+        self,
+        *,
+        execution_context: EvalExecutionContext | None = None,
+    ) -> Path:
+        if (
+            execution_context is not None
+            and execution_context.workspace_root is not None
+        ):
+            workspace = Path(execution_context.workspace_root) / ".autoclanker-cevolve"
+        else:
+            workspace = self._exercise_work_dir
+        workspace.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(self._exercise_source, workspace / "train.py")
+        return workspace
 
     def _cevolve_ideas(self, idea_cls: type[Any]) -> list[Any]:
         ideas: list[Any] = []

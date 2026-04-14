@@ -25,7 +25,7 @@ The deterministic cost model is shaped so that:
 
 That makes this a good exercise for:
 
-- validating the real `cevolve` session runner,
+- validating the first-party `cevolve` adapter against a real checkout-backed target,
 - showing why evolutionary search can outperform greedy one-change-at-a-time updates,
 - demonstrating how Bayesian pair priors can reinforce the right interaction.
 

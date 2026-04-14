@@ -188,13 +188,13 @@
   {
     "requirement_id": "M5-LIVE-001",
     "gate": "live",
-    "description": "The live autoresearch lane runs against a real upstream checkout through the first-party adapter without fixture fallback, using the repo-native contract exercise harness.",
+    "description": "The live autoresearch lane binds a real upstream checkout through the first-party adapter without fixture fallback and surfaces whether metrics came from repo subprocess output or the repo-subprocess heuristic fallback.",
     "status": "active"
   },
   {
     "requirement_id": "M5-LIVE-002",
     "gate": "live",
-    "description": "The live cevolve lane runs against a real upstream checkout through the first-party adapter without fixture fallback, using the repo-native contract exercise harness.",
+    "description": "The live cevolve lane binds a real upstream checkout through the first-party adapter without fixture fallback and surfaces whether evaluation used the repo benchmark subprocess or the private-session fallback.",
     "status": "active"
   },
   {

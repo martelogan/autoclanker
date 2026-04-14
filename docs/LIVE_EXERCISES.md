@@ -34,8 +34,9 @@ into `.local/real-upstreams/`, then targets them through the built-in
 `autoclanker.bayes_layer.live_upstreams` contract module.
 
 This lane is a real-upstream contract smoke test. It proves that the first-party
-adapters bind to real upstream checkouts without fixture fallback, while keeping the
-exercise scoring harness repo-native and deterministic enough for repeatable coverage.
+adapters bind to real upstream checkouts without fixture fallback and surface the
+execution backend and metric source they actually used, while keeping the exercise
+scoring harness repo-native and deterministic enough for repeatable coverage.
 
 Outside this smoke lane, first-party adapters do not require a checkout path. Normal
 usage can use `mode: auto` plus `python_module` or `command` when the upstream
@@ -206,7 +207,7 @@ What it shows:
 - a deterministic interaction-heavy landscape,
 - single moves help a little,
 - the best result comes from combining them,
-- this is the cleanest case for the real `cevolve` runner.
+- this is the cleanest case for the first-party `cevolve` adapter over a real checkout-backed benchmark target.
 
 Expected live outcome:
 
@@ -241,7 +242,7 @@ Interpretation:
 
 - this is also an upstream-backed contract-smoke adapter demo rather than a native `autoclanker session` walkthrough;
 - the replay script evaluates baseline, single-change, and combined candidates against the real `cevolve` checkout;
-- the outer session machinery is real `cevolve`, while the target benchmark remains the repo-native exercise file;
+- the preferred successful path is the repo benchmark subprocess against the checked-out `cevolve` repo and exercise target, with a thinner private-session fallback only when that subprocess path is unavailable;
 - the companion toy code lives in `docs/toy_examples/cevolve_sort_partition/`.
 
 ### 3.4 Bayes Complex
@@ -294,12 +295,14 @@ Expected outcome:
 - cold start: the Bayes-guided session ranks `cand_c_compiled_context_pair` first, while the control session stays flat and falls back to candidate ordering;
 - the risky `cand_d_wide_window_large_chunk` branch stays at the bottom with a lower feasibility score than the default candidate;
 - after ingesting the three deterministic evals, the Bayes-guided session gives `cand_c_compiled_context_pair` a material uplift versus control;
-- the Bayes-guided session recommends commit while the control session does not.
+- the more exact posterior keeps the Bayes-guided session ahead of control, but
+  may still leave both sessions below the final commit threshold until more
+  evidence is ingested.
 
 ## 4. Why the exercises are split this way
 
-- `autoresearch` is a real upstream repo but not a composable optimization library, so the upstream-live exercise is upstream-anchored and lightweight.
-- `cevolve` is a composable real upstream, so the upstream-live exercise uses its real session machinery while still keeping the target benchmark repo-native.
+- `autoresearch` is a real upstream repo but not a composable optimization library, so the upstream-live exercise is upstream-anchored and lightweight, with explicit repo-subprocess-vs-heuristic metric-source labeling.
+- `cevolve` is a composable real upstream, so the upstream-live exercise uses a repo benchmark subprocess when available and only falls back to the thinner private-session shim when needed.
 - `bayes_quickstart` is the recommended entry point for ordinary human-authored Bayes beliefs.
 - the complex Bayes exercise focuses on `autoclanker` itself, where the Bayesian layer is the primary subject.
 

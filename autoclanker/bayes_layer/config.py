@@ -108,6 +108,12 @@ class FeasibilitySurrogateConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class AcquisitionConfig:
+    kind: str
+    score_formula: str
+
+
+@dataclass(frozen=True, slots=True)
 class QueryPolicyConfig:
     enabled: bool
     max_queries_per_era: int
@@ -159,6 +165,7 @@ class BayesLayerConfig:
     utility: UtilityConfig
     objective_surrogate: ObjectiveSurrogateConfig
     feasibility_surrogate: FeasibilitySurrogateConfig
+    acquisition: AcquisitionConfig
     query_policy: QueryPolicyConfig
     commit: CommitPolicyConfig
     session_store: SessionStoreConfig
@@ -213,6 +220,7 @@ def load_bayes_layer_config(path: Path | None = None) -> BayesLayerConfig:
         feasibility_mapping.get("surrogate"),
         "feasibility.surrogate",
     )
+    acquisition_mapping = _require_mapping(document.get("acquisition"), "acquisition")
     query_policy_mapping = _require_mapping(
         document.get("query_policy"), "query_policy"
     )
@@ -290,6 +298,10 @@ def load_bayes_layer_config(path: Path | None = None) -> BayesLayerConfig:
                 feasibility_surrogate_mapping,
                 "enable_failure_modes",
             ),
+        ),
+        acquisition=AcquisitionConfig(
+            kind=_require_str(acquisition_mapping, "kind"),
+            score_formula=_require_str(acquisition_mapping, "score_formula"),
         ),
         query_policy=QueryPolicyConfig(
             enabled=_require_bool(query_policy_mapping, "enabled"),

@@ -12,10 +12,10 @@
       "cand_b_compiled_matcher": 13,
       "cand_d_wide_window_large_chunk": 17
     },
-    "min_good_pair_uplift_over_control": 0.9,
-    "beliefs_recommended": true,
+    "min_good_pair_uplift_over_control": 0.8,
+    "beliefs_recommended": false,
     "control_recommended": false,
-    "min_beliefs_gain_probability": 0.9,
-    "max_control_gain_probability": 0.9
+    "min_beliefs_gain_probability": 0.45,
+    "max_control_gain_probability": 0.6
   }
 }
