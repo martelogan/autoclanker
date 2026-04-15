@@ -132,6 +132,9 @@ def test_belief_input_reference_documents_minimum_files_and_bounds() -> None:
 
     for token in (
         "Smallest runnable files",
+        "optimization lever (gene)",
+        "candidate lane",
+        "comparison query",
         "session_context.era_id",
         "confidence_level",
         "minimal.json",

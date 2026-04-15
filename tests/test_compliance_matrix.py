@@ -222,9 +222,11 @@ def test_docs_distinguish_upstream_live_from_billed_model_live() -> None:
 
     assert "./bin/dev test-upstream-live" in readme
     assert "AUTOCLANKER_ENABLE_LLM_LIVE=1 ./bin/dev test-live" in readme
+    assert "optimization lever (gene)" in readme
     assert "non-billed" in readme
     assert "billed real-model-provider lane" in readme
     assert "AUTOCLANKER_ENABLE_LLM_LIVE=1 ./bin/dev test-live" in reference
+    assert "optimization lever (gene)" in reference
     assert "real-upstream contract smoke test" in exercises
 
 

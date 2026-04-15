@@ -100,6 +100,23 @@ integration target.
 - A filesystem-backed session store.
 - Public examples for Bayes-first, `autoresearch`, and `cevolve` workflows.
 
+## Plain-Language Vocabulary
+
+The smallest useful mental model is:
+
+- `optimization lever (gene)`: one explicit upstream knob the adapter exposes
+- `setting (state)`: one concrete value of that lever
+- `candidate lane` or `pathway`: one concrete combination being evaluated
+- `frontier`: the explicit set of lanes under comparison
+- `belief`: a typed claim about one lever, relation, risk, or preference
+- `fit`: update the era-local model from eval observations
+- `suggest`: rank the current frontier and ask what to test next
+- `comparison query`: a concrete lane-vs-lane or family-vs-family question that
+  would reduce uncertainty next
+
+The important honesty boundary is that `autoclanker` learns over explicit
+candidate features and typed relations, not hidden prompt state.
+
 ## Installation
 
 From a source checkout:
@@ -348,6 +365,13 @@ The key files are:
   beliefs
 - `belief_graph_posterior.png`: the posterior interaction structure learned from
   the current era
+
+Treat those charts as evidence views:
+
+- prior graph: what the session believed before evidence
+- posterior graph: what still looks plausible after evals
+- candidate rankings: which lanes currently look strongest
+- convergence: whether new evals are still changing the picture
 
 You can refresh that bundle explicitly at any point:
 

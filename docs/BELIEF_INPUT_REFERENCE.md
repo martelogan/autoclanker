@@ -17,6 +17,22 @@ The short answer for new users:
 - when `option` is omitted, `autoclanker` tries to auto-canonicalize the idea against registry descriptions and aliases
 - `beliefs canonicalize-ideas` and `beliefs expand-ideas` currently produce the same normalized typed belief payload; `canonicalize-ideas` is the more intention-revealing name when you care about provenance metadata
 
+## Plain-language mental model
+
+The same vocabulary should stay legible whether you start in `autoclanker`
+directly or through a thin wrapper:
+
+- `optimization lever (gene)`: one explicit upstream knob
+- `setting (state)`: one concrete value of that knob
+- `candidate lane` or `pathway`: one concrete combination being compared
+- `frontier`: the explicit set of lanes under comparison
+- `belief`: a typed claim about one lever, relation, risk, or preference
+- `comparison query`: the next concrete lane-vs-lane or family-vs-family
+  question worth asking
+
+The engine learns over explicit candidate features and typed relations, not
+hidden prompt state.
+
 ## No-file path
 
 All beginner belief commands accept stdin with `--input -`, and `session init`
