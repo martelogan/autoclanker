@@ -4,7 +4,7 @@ import json
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Literal, Protocol, cast
 
 import yaml
 
@@ -20,6 +20,8 @@ from autoclanker.bayes_layer.config import (
 )
 from autoclanker.bayes_layer.registry import GeneRegistry
 from autoclanker.bayes_layer.types import (
+    BeliefDeltaEntry,
+    BeliefDeltaSummary,
     BeliefsStatus,
     CanonicalizationMode,
     CommitDecision,
@@ -31,6 +33,9 @@ from autoclanker.bayes_layer.types import (
     JsonValue,
     MergeSuggestion,
     PosteriorSummary,
+    ProposalLedger,
+    ProposalLedgerEntry,
+    ProposalReadinessState,
     QuerySuggestion,
     QueryType,
     SessionFailure,
@@ -106,7 +111,9 @@ def _comparison_focus_from_query_mapping(
     raw_candidate_ids = query_mapping.get("candidate_ids")
     if isinstance(raw_candidate_ids, list):
         candidate_ids = [
-            item for item in cast(list[object], raw_candidate_ids) if isinstance(item, str)
+            item
+            for item in cast(list[object], raw_candidate_ids)
+            if isinstance(item, str)
         ]
         if len(candidate_ids) >= 2:
             return f"{candidate_ids[0]} vs {candidate_ids[1]}"
@@ -176,6 +183,14 @@ class SessionStore(Protocol):
         self, session_id: str, summary: PosteriorSummary
     ) -> Path: ...
 
+    def write_belief_delta_summary(
+        self, session_id: str, summary: BeliefDeltaSummary
+    ) -> Path: ...
+
+    def load_belief_delta_summary(
+        self, session_id: str
+    ) -> BeliefDeltaSummary | None: ...
+
     def write_query_artifact(
         self,
         session_id: str,
@@ -194,6 +209,14 @@ class SessionStore(Protocol):
     def write_commit_decision(
         self, session_id: str, decision: CommitDecision
     ) -> Path: ...
+
+    def load_commit_decision(self, session_id: str) -> CommitDecision | None: ...
+
+    def write_proposal_ledger(
+        self, session_id: str, ledger: ProposalLedger
+    ) -> Path: ...
+
+    def load_proposal_ledger(self, session_id: str) -> ProposalLedger | None: ...
 
     def write_influence_summary(
         self,
@@ -451,6 +474,74 @@ class FilesystemSessionStore:
             cast(Mapping[str, JsonValue], to_json_value(summary)),
         )
 
+    def write_belief_delta_summary(
+        self, session_id: str, summary: BeliefDeltaSummary
+    ) -> Path:
+        return _json_dump(
+            self._artifact_path(session_id, self._artifacts.belief_delta_summary),
+            cast(Mapping[str, JsonValue], to_json_value(summary)),
+        )
+
+    def load_belief_delta_summary(self, session_id: str) -> BeliefDeltaSummary | None:
+        path = self._artifact_path(session_id, self._artifacts.belief_delta_summary)
+        if not path.exists():
+            return None
+        raw = load_serialized_payload(path)
+
+        def _entry(item: Mapping[str, object]) -> BeliefDeltaEntry:
+            return BeliefDeltaEntry(
+                source_belief_id=str(item["source_belief_id"]),
+                target_ref=str(item["target_ref"]),
+                target_kind=str(item["target_kind"]),
+                change_kind=cast(
+                    Literal["strengthened", "weakened", "uncertain"],
+                    item["change_kind"],
+                ),
+                prior_mean=_require_number(item["prior_mean"], label="prior_mean"),
+                posterior_mean=_require_number(
+                    item["posterior_mean"], label="posterior_mean"
+                ),
+                posterior_variance=_require_number(
+                    item["posterior_variance"], label="posterior_variance"
+                ),
+                support=_require_int(item["support"], label="support"),
+                summary=str(item["summary"]),
+            )
+
+        return BeliefDeltaSummary(
+            era_id=str(raw["era_id"]),
+            strengthened=tuple(
+                _entry(item)
+                for item in _require_object_list(
+                    raw.get("strengthened", []),
+                    label="strengthened",
+                )
+            ),
+            weakened=tuple(
+                _entry(item)
+                for item in _require_object_list(
+                    raw.get("weakened", []),
+                    label="weakened",
+                )
+            ),
+            uncertain=tuple(
+                _entry(item)
+                for item in _require_object_list(
+                    raw.get("uncertain", []),
+                    label="uncertain",
+                )
+            ),
+            promoted_candidate_ids=_require_string_list(
+                raw.get("promoted_candidate_ids", []),
+                label="promoted_candidate_ids",
+            ),
+            dropped_family_ids=_require_string_list(
+                raw.get("dropped_family_ids", []),
+                label="dropped_family_ids",
+            ),
+            notes=_require_string_list(raw.get("notes", []), label="notes"),
+        )
+
     def write_query_artifact(
         self,
         session_id: str,
@@ -638,6 +729,99 @@ class FilesystemSessionStore:
             cast(Mapping[str, JsonValue], to_json_value(decision)),
         )
 
+    def load_commit_decision(self, session_id: str) -> CommitDecision | None:
+        path = self._artifact_path(session_id, self._artifacts.commit_decision)
+        if not path.exists():
+            return None
+        raw = load_serialized_payload(path)
+        thresholds_raw = raw.get("thresholds")
+        thresholds = (
+            {}
+            if not isinstance(thresholds_raw, Mapping)
+            else {
+                str(key): _require_number(value, label=f"thresholds[{key}]")
+                for key, value in cast(Mapping[object, object], thresholds_raw).items()
+            }
+        )
+        return CommitDecision(
+            era_id=str(raw["era_id"]),
+            session_id=str(raw["session_id"]),
+            recommended=bool(raw["recommended"]),
+            candidate_id=cast(str | None, raw.get("candidate_id")),
+            predicted_gain=_require_number(
+                raw["predicted_gain"], label="predicted_gain"
+            ),
+            gain_probability=_require_number(
+                raw["gain_probability"], label="gain_probability"
+            ),
+            valid_probability=_require_number(
+                raw["valid_probability"], label="valid_probability"
+            ),
+            reason=str(raw["reason"]),
+            thresholds=thresholds,
+            influence_summary=(),
+        )
+
+    def write_proposal_ledger(self, session_id: str, ledger: ProposalLedger) -> Path:
+        return _json_dump(
+            self._artifact_path(session_id, self._artifacts.proposal_ledger),
+            cast(Mapping[str, JsonValue], to_json_value(ledger)),
+        )
+
+    def load_proposal_ledger(self, session_id: str) -> ProposalLedger | None:
+        path = self._artifact_path(session_id, self._artifacts.proposal_ledger)
+        if not path.exists():
+            return None
+        raw = load_serialized_payload(path)
+        entries = tuple(
+            ProposalLedgerEntry(
+                proposal_id=str(item["proposal_id"]),
+                session_id=str(item["session_id"]),
+                era_id=str(item["era_id"]),
+                candidate_id=str(item["candidate_id"]),
+                family_id=cast(str | None, item.get("family_id")),
+                readiness_state=cast(ProposalReadinessState, item["readiness_state"]),
+                evidence_summary=str(item["evidence_summary"]),
+                unresolved_risks=_require_string_list(
+                    item.get("unresolved_risks", []),
+                    label="unresolved_risks",
+                ),
+                approval_required=bool(item.get("approval_required", False)),
+                updated_at=cast(str | None, item.get("updated_at")),
+                artifact_refs=(
+                    None
+                    if item.get("artifact_refs") is None
+                    else {
+                        str(key): str(value)
+                        for key, value in _require_object_mapping(
+                            item["artifact_refs"],
+                            label="artifact_refs",
+                        ).items()
+                    }
+                ),
+                resume_token=cast(str | None, item.get("resume_token")),
+                source_candidate_ids=_require_string_list(
+                    item.get("source_candidate_ids", []),
+                    label="source_candidate_ids",
+                ),
+                supersedes=_require_string_list(
+                    item.get("supersedes", []),
+                    label="supersedes",
+                ),
+                recommendation_reason=cast(
+                    str | None, item.get("recommendation_reason")
+                ),
+            )
+            for item in _require_object_list(raw.get("entries", []), label="entries")
+        )
+        return ProposalLedger(
+            session_id=str(raw["session_id"]),
+            era_id=str(raw["era_id"]),
+            current_proposal_id=cast(str | None, raw.get("current_proposal_id")),
+            entries=entries,
+            updated_at=cast(str | None, raw.get("updated_at")),
+        )
+
     def write_influence_summary(
         self,
         session_id: str,
@@ -666,6 +850,7 @@ class FilesystemSessionStore:
         manifest = self.load_manifest(session_id)
         observations = self.read_observations(session_id)
         frontier_status = self.load_frontier_status(session_id)
+        proposal_ledger = self.load_proposal_ledger(session_id)
         last_execution = (
             None
             if not observations or observations[-1].execution_metadata is None
@@ -700,12 +885,18 @@ class FilesystemSessionStore:
             "posterior_summary": str(
                 self._artifact_path(session_id, self._artifacts.posterior_summary)
             ),
+            "belief_delta_summary": str(
+                self._artifact_path(session_id, self._artifacts.belief_delta_summary)
+            ),
             "query": str(self._artifact_path(session_id, self._artifacts.query)),
             "frontier_status": str(
                 self._artifact_path(session_id, self._artifacts.frontier_status)
             ),
             "commit_decision": str(
                 self._artifact_path(session_id, self._artifacts.commit_decision)
+            ),
+            "proposal_ledger": str(
+                self._artifact_path(session_id, self._artifacts.proposal_ledger)
             ),
             "influence_summary": str(
                 self._artifact_path(session_id, self._artifacts.influence_summary)
@@ -754,6 +945,18 @@ class FilesystemSessionStore:
                 cast(dict[str, object], queries_raw[0])
                 if isinstance(queries_raw[0], dict)
                 else None
+            )
+        )
+        latest_proposal = (
+            None
+            if proposal_ledger is None or proposal_ledger.current_proposal_id is None
+            else next(
+                (
+                    entry
+                    for entry in proposal_ledger.entries
+                    if entry.proposal_id == proposal_ledger.current_proposal_id
+                ),
+                None,
             )
         )
         return SessionStatus(
@@ -805,7 +1008,9 @@ class FilesystemSessionStore:
                 or (
                     None
                     if first_ranked_candidate is None
-                    else _optional_string(first_ranked_candidate.get("objective_backend"))
+                    else _optional_string(
+                        first_ranked_candidate.get("objective_backend")
+                    )
                 )
                 or _optional_string(posterior_summary.get("objective_backend"))
             ),
@@ -835,5 +1040,14 @@ class FilesystemSessionStore:
                     if first_query is None
                     else _comparison_focus_from_query_mapping(first_query)
                 )
+            ),
+            proposal_entry_count=(
+                0 if proposal_ledger is None else len(proposal_ledger.entries)
+            ),
+            latest_proposal_id=(
+                None if latest_proposal is None else latest_proposal.proposal_id
+            ),
+            latest_proposal_state=(
+                None if latest_proposal is None else latest_proposal.readiness_state
             ),
         )

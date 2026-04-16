@@ -198,8 +198,10 @@ Default session layout:
   observations.jsonl
   frontier_status.json
   posterior_summary.json
+  belief_delta_summary.json
   query.json
   commit_decision.json
+  proposal_ledger.json
   influence_summary.json
   eval_runs/
   RESULTS.md
@@ -208,6 +210,16 @@ Default session layout:
   belief_graph_prior.png
   belief_graph_posterior.png
 ```
+
+`belief_delta_summary.json` and `proposal_ledger.json` stay deliberately small:
+they give downstream wrappers or dashboards an honest, machine-readable
+before-vs-after summary plus current proposal state without moving wrapper UX
+logic into the engine.
+
+For review-oriented consumers, `autoclanker session review-bundle` derives one
+normalized JSON shape over those existing artifacts. That bundle is ephemeral by
+default: it is meant to drive `RESULTS.md`, wrappers, dashboards, or exports
+without adding another default session JSON file.
 
 The same store must be relocatable under another parent path, e.g.:
 

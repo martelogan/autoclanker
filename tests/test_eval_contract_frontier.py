@@ -162,6 +162,103 @@ def test_session_init_persists_eval_contract_and_reports_drift(
     assert drifted["eval_contract_matches_current"] is False
 
 
+@covers("M3-015")
+def test_review_bundle_uses_same_eval_contract_drift_truth_as_status(
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    _init_git_workspace(workspace_root)
+    adapter_config = tmp_path / "adapter.json"
+    session_root = tmp_path / "sessions"
+    _write_fixture_adapter_config(adapter_config, workspace_root=workspace_root)
+
+    _run_cli(
+        [
+            "session",
+            "init",
+            "--session-id",
+            "review_contract_demo",
+            "--era-id",
+            "era_review_contract_v1",
+            "--session-root",
+            str(session_root),
+            "--adapter-config",
+            str(adapter_config),
+        ]
+    )
+    review_bundle = _run_cli(
+        [
+            "session",
+            "review-bundle",
+            "--session-id",
+            "review_contract_demo",
+            "--session-root",
+            str(session_root),
+            "--adapter-config",
+            str(adapter_config),
+        ]
+    )
+    status = _run_cli(
+        [
+            "session",
+            "status",
+            "--session-id",
+            "review_contract_demo",
+            "--session-root",
+            str(session_root),
+            "--adapter-config",
+            str(adapter_config),
+        ]
+    )
+    assert _require_mapping(review_bundle["trust"])["status"] == "locked"
+    assert _require_mapping(review_bundle["trust"])[
+        "locked_eval_contract_digest"
+    ] == status["eval_contract_digest"]
+    assert _require_mapping(review_bundle["trust"])[
+        "current_eval_contract_digest"
+    ] == status["current_eval_contract_digest"]
+    assert _require_mapping(review_bundle["trust"])[
+        "status"
+    ] == status["eval_contract_drift_status"]
+
+    (workspace_root / "benchmarks" / "fixture.txt").write_text(
+        "benchmark:v2\n",
+        encoding="utf-8",
+    )
+    drifted_review_bundle = _run_cli(
+        [
+            "session",
+            "review-bundle",
+            "--session-id",
+            "review_contract_demo",
+            "--session-root",
+            str(session_root),
+            "--adapter-config",
+            str(adapter_config),
+        ]
+    )
+    drifted_status = _run_cli(
+        [
+            "session",
+            "status",
+            "--session-id",
+            "review_contract_demo",
+            "--session-root",
+            str(session_root),
+            "--adapter-config",
+            str(adapter_config),
+        ]
+    )
+    assert _require_mapping(drifted_review_bundle["trust"])["status"] == "drifted"
+    assert _require_mapping(drifted_review_bundle["trust"])[
+        "status"
+    ] == drifted_status["eval_contract_drift_status"]
+    assert _require_mapping(drifted_review_bundle["trust"])[
+        "eval_contract_matches_current"
+    ] is False
+
+
 @covers("M3-009", "M3-011", "M3-013")
 def test_session_run_eval_uses_isolated_worktree_and_records_eval_run_artifact(
     tmp_path: Path,
@@ -462,6 +559,30 @@ def test_session_suggest_and_frontier_status_preserve_frontier_metadata(
         "plan_family",
     }
     assert (session_root / "frontier_demo" / "frontier_status.json").exists()
+    proposal_ledger = _require_mapping(
+        json.loads(
+            (session_root / "frontier_demo" / "proposal_ledger.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    )
+    assert (
+        proposal_ledger["current_proposal_id"]
+        == f"proposal_{top_candidate['candidate_id']}"
+    )
+    proposal_entries = cast(list[object], proposal_ledger["entries"])
+    assert any(
+        _require_mapping(item)["readiness_state"] in {"candidate", "deferred"}
+        for item in proposal_entries
+    )
+    delta_summary = _require_mapping(
+        json.loads(
+            (session_root / "frontier_demo" / "belief_delta_summary.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    )
+    assert "notes" in delta_summary
     query_artifact = _require_mapping(
         json.loads((session_root / "frontier_demo" / "query.json").read_text("utf-8"))
     )
@@ -492,6 +613,9 @@ def test_session_suggest_and_frontier_status_preserve_frontier_metadata(
     assert status["last_acquisition_backend"] == "optimistic_upper_confidence"
     assert status["last_follow_up_query_type"] == "pairwise_preference"
     assert isinstance(status["last_follow_up_comparison"], str)
+    assert cast(int, status["proposal_entry_count"]) >= 1
+    assert status["latest_proposal_id"] == f"proposal_{top_candidate['candidate_id']}"
+    assert status["latest_proposal_state"] in {"candidate", "deferred"}
 
 
 @covers("M3-012", "M4-006")

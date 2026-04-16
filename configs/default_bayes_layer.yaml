@@ -105,9 +105,11 @@ session_store:
     compiled_priors: compiled_priors.json
     observations: observations.jsonl
     posterior_summary: posterior_summary.json
+    belief_delta_summary: belief_delta_summary.json
     query: query.json
     frontier_status: frontier_status.json
     commit_decision: commit_decision.json
+    proposal_ledger: proposal_ledger.json
     influence_summary: influence_summary.json
     eval_runs_dir: eval_runs
     results_markdown: RESULTS.md

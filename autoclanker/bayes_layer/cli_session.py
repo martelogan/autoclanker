@@ -36,7 +36,6 @@ from autoclanker.bayes_layer.config import (
 )
 from autoclanker.bayes_layer.eval_contract import (
     compare_eval_contracts,
-    drift_status_for_contracts,
     hardened_eval_result,
     isolated_execution_workspace,
     measured_execution_window,
@@ -52,6 +51,10 @@ from autoclanker.bayes_layer.posterior_graph import build_posterior_graph
 from autoclanker.bayes_layer.query_policy import suggest_queries
 from autoclanker.bayes_layer.registry import GeneRegistry
 from autoclanker.bayes_layer.reporting import render_session_report_bundle
+from autoclanker.bayes_layer.review_bundle import (
+    build_review_bundle,
+    normalized_session_status,
+)
 from autoclanker.bayes_layer.session_store import FilesystemSessionStore
 from autoclanker.bayes_layer.surrogate_feasibility import fit_feasibility_surrogate
 from autoclanker.bayes_layer.surrogate_objective import fit_objective_surrogate
@@ -74,6 +77,10 @@ from autoclanker.bayes_layer.types import (
     ValidationFailure,
     ValidEvalResult,
     to_json_value,
+)
+from autoclanker.bayes_layer.ux_artifacts import (
+    build_belief_delta_summary,
+    build_proposal_ledger,
 )
 
 
@@ -372,15 +379,12 @@ def _status_payload(
     manifest: SessionManifest,
     adapter_config: ValidAdapterConfig,
 ) -> dict[str, JsonValue]:
-    payload = cast(
-        dict[str, JsonValue], to_json_value(store.status(manifest.session_id))
+    status, expected_contract, current_contract = normalized_session_status(
+        store=store,
+        session_id=manifest.session_id,
+        adapter_config=adapter_config,
     )
-    expected_contract = store.load_eval_contract(manifest.session_id)
-    current_contract = None
-    try:
-        current_contract = load_adapter(adapter_config).capture_eval_contract()
-    except Exception:  # pragma: no cover - status remains readable without live probe
-        current_contract = None
+    payload = cast(dict[str, JsonValue], to_json_value(status))
     if expected_contract is not None:
         payload["eval_contract"] = cast(
             dict[str, JsonValue], to_json_value(expected_contract)
@@ -390,15 +394,6 @@ def _status_payload(
             dict[str, JsonValue], to_json_value(current_contract)
         )
         payload["current_eval_contract_digest"] = current_contract.contract_digest
-    payload["eval_contract_matches_current"] = (
-        None
-        if expected_contract is None or current_contract is None
-        else not compare_eval_contracts(expected_contract, current_contract)
-    )
-    payload["eval_contract_drift_status"] = drift_status_for_contracts(
-        expected_contract,
-        current_contract,
-    )
     return payload
 
 
@@ -518,6 +513,24 @@ def _suggest_from_frontier(
     )
     store.write_frontier_status(manifest.session_id, frontier_summary)
     return ranked[:8], queries, frontier_summary
+
+
+def _proposal_artifact_refs(
+    store: FilesystemSessionStore,
+    session_id: str,
+) -> dict[str, str]:
+    artifact_paths = store.status(session_id).artifact_paths
+    return {
+        key: artifact_paths[key]
+        for key in (
+            "posterior_summary",
+            "belief_delta_summary",
+            "query",
+            "frontier_status",
+            "commit_decision",
+            "results_markdown",
+        )
+    }
 
 
 def handle_init(args: argparse.Namespace) -> dict[str, JsonValue]:
@@ -740,6 +753,13 @@ def handle_fit(args: argparse.Namespace) -> dict[str, JsonValue]:
         compiled=compiled,
     )
     store.write_posterior_summary(args.session_id, summary)
+    store.write_belief_delta_summary(
+        args.session_id,
+        build_belief_delta_summary(
+            compiled=compiled,
+            summary=summary,
+        ),
+    )
     store.write_influence_summary(
         args.session_id,
         payload={
@@ -752,6 +772,7 @@ def handle_fit(args: argparse.Namespace) -> dict[str, JsonValue]:
         store=store,
         session_id=args.session_id,
         manifest=manifest,
+        adapter_config=adapter_config,
         compiled=compiled,
         observations=observations,
         summary=summary,
@@ -800,10 +821,33 @@ def handle_suggest(args: argparse.Namespace) -> dict[str, JsonValue]:
         observations=observations,
         compiled=compiled,
     )
+    store.write_posterior_summary(args.session_id, summary)
+    store.write_belief_delta_summary(
+        args.session_id,
+        build_belief_delta_summary(
+            compiled=compiled,
+            summary=summary,
+            frontier_summary=frontier_summary,
+            ranked_candidates=ranked,
+        ),
+    )
+    store.write_proposal_ledger(
+        args.session_id,
+        build_proposal_ledger(
+            session_id=args.session_id,
+            era_id=manifest.era_id,
+            ranked_candidates=ranked,
+            frontier_summary=frontier_summary,
+            decision=None,
+            previous=store.load_proposal_ledger(args.session_id),
+            artifact_refs=_proposal_artifact_refs(store, args.session_id),
+        ),
+    )
     report_artifacts = render_session_report_bundle(
         store=store,
         session_id=args.session_id,
         manifest=manifest,
+        adapter_config=adapter_config,
         compiled=compiled,
         observations=observations,
         summary=summary,
@@ -973,6 +1017,7 @@ def handle_recommend_commit(args: argparse.Namespace) -> dict[str, JsonValue]:
         registry=registry,
     )
     store.write_commit_decision(args.session_id, decision)
+    frontier_summary = store.load_frontier_status(args.session_id)
     store.write_influence_summary(
         args.session_id,
         payload={
@@ -987,10 +1032,33 @@ def handle_recommend_commit(args: argparse.Namespace) -> dict[str, JsonValue]:
         observations=observations,
         compiled=compiled,
     )
+    store.write_posterior_summary(args.session_id, summary)
+    store.write_belief_delta_summary(
+        args.session_id,
+        build_belief_delta_summary(
+            compiled=compiled,
+            summary=summary,
+            frontier_summary=frontier_summary,
+            ranked_candidates=ranked,
+        ),
+    )
+    store.write_proposal_ledger(
+        args.session_id,
+        build_proposal_ledger(
+            session_id=args.session_id,
+            era_id=manifest.era_id,
+            ranked_candidates=ranked,
+            frontier_summary=frontier_summary,
+            decision=decision,
+            previous=store.load_proposal_ledger(args.session_id),
+            artifact_refs=_proposal_artifact_refs(store, args.session_id),
+        ),
+    )
     report_artifacts = render_session_report_bundle(
         store=store,
         session_id=args.session_id,
         manifest=manifest,
+        adapter_config=adapter_config,
         compiled=compiled,
         observations=observations,
         summary=summary,
@@ -1031,6 +1099,7 @@ def handle_render_report(args: argparse.Namespace) -> dict[str, JsonValue]:
         store=store,
         session_id=args.session_id,
         manifest=manifest,
+        adapter_config=adapter_config,
         compiled=compiled,
         observations=observations,
         summary=summary,
@@ -1039,6 +1108,18 @@ def handle_render_report(args: argparse.Namespace) -> dict[str, JsonValue]:
         "session_id": args.session_id,
         "report_artifacts": cast(dict[str, JsonValue], to_json_value(report_artifacts)),
     }
+
+
+def handle_review_bundle(args: argparse.Namespace) -> dict[str, JsonValue]:
+    adapter_config = _load_adapter_config(args.adapter_config)
+    store = _store(args.session_root, adapter_config)
+    manifest = store.load_manifest(args.session_id)
+    return build_review_bundle(
+        store=store,
+        session_id=args.session_id,
+        manifest=manifest,
+        adapter_config=adapter_config,
+    )
 
 
 def handle_status(args: argparse.Namespace) -> dict[str, JsonValue]:
@@ -1219,6 +1300,25 @@ def register_session_commands(subparsers: Any) -> None:
     )
     frontier_status_parser.add_argument("--session-root", help="Override session root.")
     frontier_status_parser.set_defaults(handler=handle_frontier_status)
+
+    review_bundle_parser = session_subparsers.add_parser(
+        "review-bundle",
+        help="Derive a normalized review bundle from the current session artifacts.",
+    )
+    review_bundle_parser.add_argument(
+        "--session-id", required=True, help="Target session id."
+    )
+    review_bundle_parser.add_argument(
+        "--format",
+        choices=("json",),
+        default="json",
+        help="Output format for the derived bundle.",
+    )
+    review_bundle_parser.add_argument(
+        "--adapter-config", help="Optional adapter config path."
+    )
+    review_bundle_parser.add_argument("--session-root", help="Override session root.")
+    review_bundle_parser.set_defaults(handler=handle_review_bundle)
 
     render_parser = session_subparsers.add_parser(
         "render-report",

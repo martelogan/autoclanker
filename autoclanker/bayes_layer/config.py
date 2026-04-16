@@ -140,9 +140,11 @@ class SessionArtifactConfig:
     compiled_priors: str
     observations: str
     posterior_summary: str
+    belief_delta_summary: str
     query: str
     frontier_status: str
     commit_decision: str
+    proposal_ledger: str
     influence_summary: str
     eval_runs_dir: str
     results_markdown: str
@@ -345,9 +347,13 @@ def load_bayes_layer_config(path: Path | None = None) -> BayesLayerConfig:
                 compiled_priors=_require_str(artifact_mapping, "compiled_priors"),
                 observations=_require_str(artifact_mapping, "observations"),
                 posterior_summary=_require_str(artifact_mapping, "posterior_summary"),
+                belief_delta_summary=_require_str(
+                    artifact_mapping, "belief_delta_summary"
+                ),
                 query=_require_str(artifact_mapping, "query"),
                 frontier_status=_require_str(artifact_mapping, "frontier_status"),
                 commit_decision=_require_str(artifact_mapping, "commit_decision"),
+                proposal_ledger=_require_str(artifact_mapping, "proposal_ledger"),
                 influence_summary=_require_str(artifact_mapping, "influence_summary"),
                 eval_runs_dir=_require_str(artifact_mapping, "eval_runs_dir"),
                 results_markdown=_require_str(artifact_mapping, "results_markdown"),

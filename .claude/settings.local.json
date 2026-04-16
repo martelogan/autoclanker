@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(brew list:*)",
+      "Bash(brew install:*)",
+      "Bash(gpgconf:*)"
+    ]
+  }
+}

@@ -29,7 +29,7 @@ def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(to_json_value(payload), indent=2), encoding="utf-8")
 
 
-@covers("M3-002", "M6-001", "M6-003")
+@covers("M3-002", "M3-014", "M6-001", "M6-003")
 def test_session_manifest_and_status_record_preview_gate_state(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -104,6 +104,8 @@ def test_session_manifest_and_status_record_preview_gate_state(
     assert artifact_paths["candidate_rankings_plot"].endswith("candidate_rankings.png")
     assert artifact_paths["prior_graph_plot"].endswith("belief_graph_prior.png")
     assert artifact_paths["posterior_graph_plot"].endswith("belief_graph_posterior.png")
+    assert artifact_paths["belief_delta_summary"].endswith("belief_delta_summary.json")
+    assert artifact_paths["proposal_ledger"].endswith("proposal_ledger.json")
 
 
 @covers("M3-004", "M6-002")

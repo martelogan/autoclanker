@@ -26,6 +26,8 @@ This document mirrors the machine-readable acceptance matrix at [`tests/complian
 | `M3-011` | `required` | Per-candidate eval run artifacts persist under eval_runs/ with echoed eval-contract metadata. |
 | `M3-012` | `required` | session run-frontier executes a frontier batch under the locked eval contract and persists the resulting frontier state. |
 | `M3-013` | `required` | session run-eval records contract-scoped lease and soft-stabilization metadata for measured execution when the active eval policy requires it. |
+| `M3-014` | `required` | Session artifacts expose belief-delta and proposal-ledger JSON outputs through status artifact paths, and `RESULTS.md` renders matching belief-change and proposal sections. |
+| `M3-015` | `required` | session review-bundle derives a normalized prior/run/posterior/proposal review model from existing session artifacts, and `RESULTS.md` renders matching review sections without persisting a default review-bundle JSON artifact. |
 | `M4-001` | `required` | The fixture adapter exercises the full loop without external dependencies. |
 | `M4-002` | `required` | Generic python_module adapters can probe and execute without fixture fallback. |
 | `M4-003` | `required` | Generic subprocess adapters can probe and execute through JSON-over-stdio. |

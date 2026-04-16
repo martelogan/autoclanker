@@ -78,6 +78,7 @@ autoclanker session run-frontier
 autoclanker session fit
 autoclanker session suggest
 autoclanker session frontier-status
+autoclanker session review-bundle
 autoclanker session recommend-commit
 autoclanker session render-report
 autoclanker session status
@@ -105,9 +106,10 @@ Requirements:
 - default root `.autoclanker/`;
 - support alternate placement under another tool’s session directory;
 - append-only observation logging via `observations.jsonl`;
-- structured JSON or YAML artifacts for session manifest, locked eval contract, belief batch, preview, compiled priors, posterior summary, query, frontier status, and commit decision;
+- structured JSON or YAML artifacts for session manifest, locked eval contract, belief batch, preview, compiled priors, posterior summary, belief-delta summary, query, frontier status, proposal ledger, and commit decision;
 - per-eval execution records under `eval_runs/` when the session itself executes candidates;
-- a human-readable `RESULTS.md` artifact describing the current run state;
+- a human-readable `RESULTS.md` artifact describing the current run state, including belief-change and proposal summaries when that evidence exists;
+- a derived `session review-bundle` JSON surface that normalizes Prior / Run / Posterior / Proposal briefs plus lane, proposal, lineage, trust, evidence, and next-action state without creating a default persisted JSON artifact;
 - rendered report artifacts for convergence, candidate rankings, and prior-vs-posterior graph views.
 
 The adapter boundary must make it trivial for a future wrapper or companion tool to place session files under:

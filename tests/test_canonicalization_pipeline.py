@@ -181,7 +181,7 @@ def test_llm_mode_is_model_first_with_explicit_deterministic_fallback() -> None:
     assert outcome.beliefs.beliefs[0].kind == "idea"
 
 
-@covers("M3-005")
+@covers("M3-005", "M3-014")
 def test_hybrid_session_persists_surface_and_influence_artifacts(
     tmp_path: Path,
 ) -> None:
@@ -276,13 +276,26 @@ def test_hybrid_session_persists_surface_and_influence_artifacts(
     )
     commit_report_artifacts = _require_mapping(commit_output["report_artifacts"])
     results_path = Path(str(commit_report_artifacts["results_markdown"]))
-    assert "Session Results" in results_path.read_text(encoding="utf-8")
-    assert "Follow-up queries" in results_path.read_text(encoding="utf-8")
-    assert "Commit recommendation" in results_path.read_text(encoding="utf-8")
+    results_text = results_path.read_text(encoding="utf-8")
+    assert "Session Results" in results_text
+    assert "Follow-up queries" in results_text
+    assert "Belief changes" in results_text
+    assert "Proposal summary" in results_text
+    assert "Commit recommendation" in results_text
     _assert_png(Path(str(commit_report_artifacts["convergence_plot"])))
     _assert_png(Path(str(commit_report_artifacts["candidate_rankings_plot"])))
     _assert_png(Path(str(commit_report_artifacts["prior_graph_plot"])))
     _assert_png(Path(str(commit_report_artifacts["posterior_graph_plot"])))
+    delta_artifact = _require_mapping(
+        json.loads(
+            (session_path / "belief_delta_summary.json").read_text(encoding="utf-8")
+        )
+    )
+    assert delta_artifact["era_id"] == "era_log_parser_v1"
+    proposal_artifact = _require_mapping(
+        json.loads((session_path / "proposal_ledger.json").read_text(encoding="utf-8"))
+    )
+    assert proposal_artifact["current_proposal_id"] is not None
     influence_artifact = _require_mapping(
         json.loads(
             (session_path / "influence_summary.json").read_text(encoding="utf-8")
@@ -334,3 +347,193 @@ def test_session_render_report_refreshes_visual_artifacts(tmp_path: Path) -> Non
     _assert_png(Path(str(report_artifacts["candidate_rankings_plot"])))
     _assert_png(Path(str(report_artifacts["prior_graph_plot"])))
     _assert_png(Path(str(report_artifacts["posterior_graph_plot"])))
+
+
+@covers("M3-015")
+def test_hybrid_session_review_bundle_derives_four_briefs_without_extra_artifacts(
+    tmp_path: Path,
+) -> None:
+    session_root = tmp_path / "sessions"
+    session_id = "review_bundle_demo"
+    candidates_path = (
+        ROOT / "examples" / "live_exercises" / "bayes_quickstart" / "candidates.json"
+    )
+
+    init_output = _run_cli(
+        [
+            "session",
+            "init",
+            "--session-id",
+            session_id,
+            "--era-id",
+            "era_review_bundle_v1",
+            "--session-root",
+            str(session_root),
+            "--ideas-json",
+            '["A repeated-format fast path probably helps this parser."]',
+            "--canonicalization-model",
+            "stub",
+        ]
+    )
+    preview_digest = str(init_output["preview_digest"])
+    session_path = Path(str(init_output["session_path"]))
+
+    _run_cli(
+        [
+            "session",
+            "apply-beliefs",
+            "--session-id",
+            session_id,
+            "--preview-digest",
+            preview_digest,
+            "--session-root",
+            str(session_root),
+        ]
+    )
+    _run_cli(
+        [
+            "session",
+            "suggest",
+            "--session-id",
+            session_id,
+            "--session-root",
+            str(session_root),
+            "--candidates-input",
+            str(candidates_path),
+        ]
+    )
+
+    review_bundle = _run_cli(
+        [
+            "session",
+            "review-bundle",
+            "--session-id",
+            session_id,
+            "--session-root",
+            str(session_root),
+            "--format",
+            "json",
+        ]
+    )
+    assert sorted(
+        {
+            "session",
+            "prior_brief",
+            "run_brief",
+            "posterior_brief",
+            "proposal_brief",
+            "lanes",
+            "proposals",
+            "lineage",
+            "trust",
+            "evidence",
+            "next_action",
+        }
+    ) == sorted(review_bundle.keys())
+    assert _require_mapping(review_bundle["session"])["session_id"] == session_id
+    assert _require_mapping(review_bundle["run_brief"])["summary"]
+    assert cast(list[object], review_bundle["lanes"])
+    assert cast(list[object], review_bundle["proposals"])
+
+    results_text = (session_path / "RESULTS.md").read_text(encoding="utf-8")
+    assert "## Prior Brief" in results_text
+    assert "## Run Brief" in results_text
+    assert "## Posterior Brief" in results_text
+    assert "## Proposal Brief" in results_text
+    assert "## Lane Decisions" in results_text
+    assert "## Proposal Recommendations" in results_text
+    assert "## How to read the evidence views" in results_text
+    assert not (session_path / "review_bundle.json").exists()
+
+
+@covers("M3-015")
+def test_review_bundle_infers_lane_and_proposal_lineage_from_candidate_genotype(
+    tmp_path: Path,
+) -> None:
+    session_root = tmp_path / "sessions"
+    session_id = "review_lineage_demo"
+    frontier_path = tmp_path / "frontier.json"
+    frontier_path.write_text(
+        json.dumps(
+            {
+                "candidates": [
+                    {
+                        "candidate_id": "cand_lineage",
+                        "family_id": "family_lineage",
+                        "origin_kind": "seed",
+                        "genotype": [
+                            {
+                                "gene_id": "search.repeated_format_fast_path",
+                                "state_id": "path_compiled_context",
+                            }
+                        ],
+                    }
+                ]
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    init_output = _run_cli(
+        [
+            "session",
+            "init",
+            "--session-id",
+            session_id,
+            "--era-id",
+            "era_review_lineage_v1",
+            "--session-root",
+            str(session_root),
+            "--ideas-json",
+            '["A repeated-format fast path probably helps this parser."]',
+            "--canonicalization-model",
+            "stub",
+        ]
+    )
+    preview_digest = str(init_output["preview_digest"])
+
+    _run_cli(
+        [
+            "session",
+            "apply-beliefs",
+            "--session-id",
+            session_id,
+            "--preview-digest",
+            preview_digest,
+            "--session-root",
+            str(session_root),
+        ]
+    )
+    _run_cli(
+        [
+            "session",
+            "suggest",
+            "--session-id",
+            session_id,
+            "--session-root",
+            str(session_root),
+            "--candidates-input",
+            str(frontier_path),
+        ]
+    )
+
+    review_bundle = _run_cli(
+        [
+            "session",
+            "review-bundle",
+            "--session-id",
+            session_id,
+            "--session-root",
+            str(session_root),
+        ]
+    )
+    lane = _require_mapping(cast(list[object], review_bundle["lanes"])[0])
+    proposal = _require_mapping(cast(list[object], review_bundle["proposals"])[0])
+    lineage = _require_mapping(review_bundle["lineage"])
+    recommended = _require_mapping(lineage["recommended_proposal"])
+
+    assert lane["source_idea_ids"] == ["idea_001"]
+    assert "idea_001" in cast(list[object], lane["source_belief_ids"])
+    assert proposal["source_idea_ids"] == ["idea_001"]
+    assert recommended["source_idea_ids"] == ["idea_001"]
+    assert recommended["candidate_id"] == "cand_lineage"

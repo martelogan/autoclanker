@@ -3,9 +3,10 @@ from __future__ import annotations
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 import math
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import matplotlib
 
@@ -13,15 +14,20 @@ matplotlib.use("Agg")
 
 from matplotlib import pyplot as plt
 
+from autoclanker.bayes_layer.review_bundle import build_review_bundle
 from autoclanker.bayes_layer.session_store import FilesystemSessionStore
 from autoclanker.bayes_layer.types import (
+    BeliefDeltaSummary,
     CommitDecision,
     CompiledPriorBundle,
+    JsonValue,
     PosteriorGraph,
     PosteriorSummary,
+    ProposalLedger,
     QuerySuggestion,
     RankedCandidate,
     SessionManifest,
+    ValidAdapterConfig,
     ValidEvalResult,
 )
 
@@ -322,6 +328,132 @@ def _posterior_graph_edges(graph: PosteriorGraph) -> tuple[ReportGraphEdge, ...]
     )
 
 
+def _bundle_mapping(value: object | None) -> Mapping[str, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return cast(Mapping[str, object], value)
+
+
+def _bundle_sequence(value: object | None) -> tuple[object, ...]:
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+        return ()
+    return tuple(cast(Sequence[object], value))
+
+
+def _bundle_string(value: object | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _bundle_brief_lines(
+    title: str,
+    payload: Mapping[str, object] | None,
+) -> list[str]:
+    lines = ["", f"## {title}"]
+    if payload is None:
+        lines.append("- not available")
+        return lines
+    summary = _bundle_string(payload.get("summary"))
+    if summary is not None:
+        lines.append(summary)
+    bullets = [
+        item
+        for item in _bundle_sequence(payload.get("bullets"))
+        if _bundle_string(item) is not None
+    ]
+    if bullets:
+        lines.extend(f"- {_bundle_string(item)}" for item in bullets)
+    elif summary is None:
+        lines.append("- not available")
+    return lines
+
+
+def _lane_decision_lines(review_bundle: Mapping[str, object]) -> list[str]:
+    lines = ["", "## Lane Decisions"]
+    lanes = [
+        _bundle_mapping(item) for item in _bundle_sequence(review_bundle.get("lanes"))
+    ]
+    lane_rows = [item for item in lanes if item is not None]
+    if not lane_rows:
+        lines.append("- no explicit lane decisions are recorded yet")
+        return lines
+    lines.extend(
+        [
+            "| Lane | Family | Decision | Proposal | Next Action |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+    )
+    for lane in lane_rows[:8]:
+        lines.append(
+            "| "
+            f"`{_bundle_string(lane.get('lane_id')) or 'unknown'}` | "
+            f"`{_bundle_string(lane.get('family_id')) or 'family_default'}` | "
+            f"`{_bundle_string(lane.get('decision_status')) or 'hold'}` | "
+            f"`{_bundle_string(lane.get('proposal_status')) or 'not_ready'}` | "
+            f"{_bundle_string(lane.get('next_step')) or 'review evidence'} |"
+        )
+        evidence_summary = _bundle_string(lane.get("evidence_summary"))
+        if evidence_summary is not None:
+            lines.append(f"  evidence: {evidence_summary}")
+    return lines
+
+
+def _proposal_recommendation_lines(review_bundle: Mapping[str, object]) -> list[str]:
+    lines = ["", "## Proposal Recommendations"]
+    proposals = [
+        _bundle_mapping(item)
+        for item in _bundle_sequence(review_bundle.get("proposals"))
+    ]
+    proposal_rows = [item for item in proposals if item is not None]
+    if not proposal_rows:
+        lines.append("- no durable proposal recommendations are recorded yet")
+        return lines
+    lines.extend(
+        [
+            "| Proposal | Readiness | Source Lane | Resume |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    for proposal in proposal_rows[:6]:
+        lines.append(
+            "| "
+            f"`{_bundle_string(proposal.get('proposal_id')) or 'proposal'}` | "
+            f"`{_bundle_string(proposal.get('readiness')) or 'not_ready'}` | "
+            f"`{_bundle_string(proposal.get('source_lane_id')) or 'lane'}` | "
+            f"`{_bundle_string(proposal.get('resume_hint')) or 'none'}` |"
+        )
+        evidence_basis = _bundle_string(proposal.get("evidence_basis"))
+        if evidence_basis is not None:
+            lines.append(f"  evidence: {evidence_basis}")
+    return lines
+
+
+def _evidence_explainer_lines(review_bundle: Mapping[str, object]) -> list[str]:
+    lines = ["", "## How to read the evidence views"]
+    evidence = _bundle_mapping(review_bundle.get("evidence"))
+    if evidence is None:
+        lines.append("- no evidence views are recorded yet")
+        return lines
+    notes = [
+        item
+        for item in _bundle_sequence(evidence.get("notes"))
+        if _bundle_string(item) is not None
+    ]
+    if notes:
+        lines.extend(f"- {_bundle_string(item)}" for item in notes)
+    views = [_bundle_mapping(item) for item in _bundle_sequence(evidence.get("views"))]
+    present_views = [item for item in views if item is not None]
+    if present_views:
+        lines.append("- Key evidence views:")
+        for view in present_views[:5]:
+            label = _bundle_string(view.get("label")) or "view"
+            description = _bundle_string(view.get("description")) or "no description"
+            lines.append(f"  - `{label}`: {description}")
+    return lines
+
+
 def _write_results_markdown(
     path: Path,
     *,
@@ -330,6 +462,9 @@ def _write_results_markdown(
     ranked_candidates: Sequence[RankedCandidate],
     queries: Sequence[QuerySuggestion],
     decision: CommitDecision | None,
+    belief_delta_summary: BeliefDeltaSummary | None,
+    proposal_ledger: ProposalLedger | None,
+    review_bundle: Mapping[str, JsonValue] | None,
     artifact_filenames: Sequence[str],
 ) -> None:
     lines = [
@@ -390,6 +525,45 @@ def _write_results_markdown(
     else:
         lines.append("- none")
 
+    lines.extend(["", "## Belief changes"])
+    if belief_delta_summary is None:
+        lines.append("- no belief delta summary is available yet")
+    else:
+        if belief_delta_summary.strengthened:
+            lines.append("- Strengthened:")
+            lines.extend(
+                f"  - {entry.summary}"
+                for entry in belief_delta_summary.strengthened[:4]
+            )
+        if belief_delta_summary.weakened:
+            lines.append("- Weakened:")
+            lines.extend(
+                f"  - {entry.summary}" for entry in belief_delta_summary.weakened[:4]
+            )
+        if belief_delta_summary.uncertain:
+            lines.append("- Remaining uncertainty:")
+            lines.extend(
+                f"  - {entry.summary}" for entry in belief_delta_summary.uncertain[:3]
+            )
+        if belief_delta_summary.promoted_candidate_ids:
+            lines.append(
+                "- Promoted lanes: "
+                + ", ".join(
+                    f"`{candidate_id}`"
+                    for candidate_id in belief_delta_summary.promoted_candidate_ids
+                )
+            )
+        if belief_delta_summary.dropped_family_ids:
+            lines.append(
+                "- Dropped families: "
+                + ", ".join(
+                    f"`{family_id}`"
+                    for family_id in belief_delta_summary.dropped_family_ids
+                )
+            )
+        if belief_delta_summary.notes:
+            lines.extend(f"- {note}" for note in belief_delta_summary.notes)
+
     lines.extend(["", "## Commit recommendation"])
     if decision is None:
         lines.append("- not generated yet")
@@ -404,6 +578,77 @@ def _write_results_markdown(
             ]
         )
 
+    lines.extend(["", "## Proposal summary"])
+    if proposal_ledger is None or not proposal_ledger.entries:
+        lines.append("- no durable proposal state is available yet")
+    else:
+        current_entry = (
+            None
+            if proposal_ledger.current_proposal_id is None
+            else next(
+                (
+                    entry
+                    for entry in proposal_ledger.entries
+                    if entry.proposal_id == proposal_ledger.current_proposal_id
+                ),
+                None,
+            )
+        )
+        if current_entry is not None:
+            lines.extend(
+                [
+                    f"- Current proposal: `{current_entry.proposal_id}`",
+                    f"- Readiness: `{current_entry.readiness_state}`",
+                    f"- Lane: `{current_entry.candidate_id}`",
+                    f"- Evidence: {current_entry.evidence_summary}",
+                ]
+            )
+            if current_entry.unresolved_risks:
+                lines.extend(
+                    f"- Unresolved risk: {risk}"
+                    for risk in current_entry.unresolved_risks[:3]
+                )
+        alternates = [
+            entry
+            for entry in proposal_ledger.entries
+            if current_entry is None or entry.proposal_id != current_entry.proposal_id
+        ]
+        if alternates:
+            lines.append("- Alternates worth keeping:")
+            lines.extend(
+                f"  - `{entry.proposal_id}` ({entry.readiness_state}): {entry.evidence_summary}"
+                for entry in alternates[:3]
+            )
+
+    if review_bundle is not None:
+        lines.extend(
+            _bundle_brief_lines(
+                "Prior Brief",
+                _bundle_mapping(review_bundle.get("prior_brief")),
+            )
+        )
+        lines.extend(
+            _bundle_brief_lines(
+                "Run Brief",
+                _bundle_mapping(review_bundle.get("run_brief")),
+            )
+        )
+        lines.extend(
+            _bundle_brief_lines(
+                "Posterior Brief",
+                _bundle_mapping(review_bundle.get("posterior_brief")),
+            )
+        )
+        lines.extend(
+            _bundle_brief_lines(
+                "Proposal Brief",
+                _bundle_mapping(review_bundle.get("proposal_brief")),
+            )
+        )
+        lines.extend(_lane_decision_lines(review_bundle))
+        lines.extend(_proposal_recommendation_lines(review_bundle))
+        lines.extend(_evidence_explainer_lines(review_bundle))
+
     lines.extend(["", "## Artifacts"])
     lines.extend(f"- `{filename}`" for filename in artifact_filenames)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -414,6 +659,7 @@ def render_session_report_bundle(
     store: FilesystemSessionStore,
     session_id: str,
     manifest: SessionManifest,
+    adapter_config: ValidAdapterConfig | None = None,
     compiled: CompiledPriorBundle,
     observations: Sequence[ValidEvalResult],
     summary: PosteriorSummary,
@@ -423,6 +669,14 @@ def render_session_report_bundle(
 ) -> dict[str, str]:
     artifacts = store.artifact_filenames
     ranked = tuple(ranked_candidates or summary.top_candidates)
+    belief_delta_summary = store.load_belief_delta_summary(session_id)
+    proposal_ledger = store.load_proposal_ledger(session_id)
+    review_bundle = build_review_bundle(
+        store=store,
+        session_id=session_id,
+        manifest=manifest,
+        adapter_config=adapter_config,
+    )
 
     results_path = store.artifact_path(session_id, artifacts.results_markdown)
     convergence_path = store.artifact_path(session_id, artifacts.convergence_plot)
@@ -443,12 +697,17 @@ def render_session_report_bundle(
         ranked_candidates=ranked,
         queries=queries,
         decision=decision,
+        belief_delta_summary=belief_delta_summary,
+        proposal_ledger=proposal_ledger,
+        review_bundle=review_bundle,
         artifact_filenames=(
             artifacts.results_markdown,
             artifacts.convergence_plot,
             artifacts.candidate_rankings_plot,
             artifacts.prior_graph_plot,
             artifacts.posterior_graph_plot,
+            artifacts.belief_delta_summary,
+            artifacts.proposal_ledger,
         ),
     )
     _write_convergence_plot(

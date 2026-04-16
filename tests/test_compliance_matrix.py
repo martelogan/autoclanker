@@ -34,6 +34,8 @@ _REQUIRES_BEHAVIORAL_EVIDENCE = {
     "M3-011",
     "M3-012",
     "M3-013",
+    "M3-014",
+    "M3-015",
     "M4-004",
     "M4-006",
     "M4-007",
@@ -67,6 +69,13 @@ _FOCUSED_CONTRACT_CHECKS = {
     },
     "M3-013": {
         "tests.test_eval_contract_frontier::test_session_run_eval_uses_isolated_worktree_and_records_eval_run_artifact",
+    },
+    "M3-014": {
+        "tests.test_session_compliance::test_session_manifest_and_status_record_preview_gate_state",
+        "tests.test_canonicalization_pipeline::test_hybrid_session_persists_surface_and_influence_artifacts",
+    },
+    "M3-015": {
+        "tests.test_canonicalization_pipeline::test_hybrid_session_review_bundle_derives_four_briefs_without_extra_artifacts",
     },
     "M4-006": {
         "tests.test_eval_contract_frontier::test_session_suggest_and_frontier_status_preserve_frontier_metadata",

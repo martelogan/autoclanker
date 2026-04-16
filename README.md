@@ -316,11 +316,11 @@ phase behind a contract-scoped lease and record soft-stabilization metadata on
 the eval result.
 
 Once the session has observations, `fit`, `suggest`, `frontier-status`,
-`recommend-commit`, and `render-report` keep a small human-readable report
-bundle refreshed inside the session root. When you have several candidate lanes
-to compare, `suggest` can rank them together from `--candidates-input` while the
-underlying eval runs stay parallelizable in whatever outer harness you already
-trust.
+`review-bundle`, `recommend-commit`, and `render-report` keep a small
+human-readable report bundle refreshed inside the session root. When you have
+several candidate lanes to compare, `suggest` can rank them together from
+`--candidates-input` while the underlying eval runs stay parallelizable in
+whatever outer harness you already trust.
 
 ## Run Artifacts
 
@@ -337,8 +337,10 @@ surface snapshot, append-only eval observations, and a compact report bundle:
   observations.jsonl
   frontier_status.json
   posterior_summary.json
+  belief_delta_summary.json
   query.json
   commit_decision.json
+  proposal_ledger.json
   influence_summary.json
   eval_runs/
   RESULTS.md
@@ -350,13 +352,18 @@ surface snapshot, append-only eval observations, and a compact report bundle:
 
 The key files are:
 
-- `RESULTS.md`: current run summary with top candidates, follow-up queries, and
-  commit state
+- `RESULTS.md`: current run summary with top candidates, belief-change and
+  proposal sections, follow-up queries, and commit state
 - `eval_contract.json`: locked benchmark tree, eval harness, adapter, and
   environment digests for the session, plus the effective measurement policy
 - `observations.jsonl`: append-only eval results recorded for the session
 - `frontier_status.json`: persisted family representatives, pending queries, and
   heuristic merge suggestions for the active frontier
+- `belief_delta_summary.json`: machine-readable prior-vs-posterior change
+  summary for strengthened or weakened features, promoted or dropped lanes, and
+  remaining uncertainty worth highlighting downstream
+- `proposal_ledger.json`: machine-readable per-era proposal state for the
+  current best lane, alternatives, blockers, and recommendation linkage
 - `eval_runs/`: per-candidate execution records written by `run-eval` and
   `run-frontier`, including contract echo and lease/stabilization metadata
 - `convergence.png`: observed utility over time plus best-so-far progress
@@ -365,6 +372,19 @@ The key files are:
   beliefs
 - `belief_graph_posterior.png`: the posterior interaction structure learned from
   the current era
+
+For wrappers or dashboards, you can derive one normalized review surface without
+creating another persisted artifact:
+
+```bash
+autoclanker session review-bundle \
+  --session-id parser-demo \
+  --format json
+```
+
+That derived bundle summarizes the same session as Prior / Run / Posterior /
+Proposal briefs plus lane, proposal, lineage, trust, evidence, and next-action
+state. `RESULTS.md` renders the same review model for human readers.
 
 Treat those charts as evidence views:
 

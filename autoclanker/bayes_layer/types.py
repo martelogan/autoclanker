@@ -81,6 +81,14 @@ FrontierOriginKind: TypeAlias = Literal[
     "merge",
     "seed",
 ]
+ProposalReadinessState: TypeAlias = Literal[
+    "not_ready",
+    "candidate",
+    "recommended",
+    "deferred",
+    "blocked",
+    "superseded",
+]
 EvalDriftStatus: TypeAlias = Literal["locked", "drifted", "unverified"]
 FailureMode: TypeAlias = Literal[
     "valid_run",
@@ -685,6 +693,30 @@ class PosteriorSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class BeliefDeltaEntry:
+    source_belief_id: str
+    target_ref: str
+    target_kind: str
+    change_kind: Literal["strengthened", "weakened", "uncertain"]
+    prior_mean: float
+    posterior_mean: float
+    posterior_variance: float
+    support: int
+    summary: str
+
+
+@dataclass(frozen=True, slots=True)
+class BeliefDeltaSummary:
+    era_id: str
+    strengthened: tuple[BeliefDeltaEntry, ...] = ()
+    weakened: tuple[BeliefDeltaEntry, ...] = ()
+    uncertain: tuple[BeliefDeltaEntry, ...] = ()
+    promoted_candidate_ids: tuple[str, ...] = ()
+    dropped_family_ids: tuple[str, ...] = ()
+    notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class CommitDecision:
     era_id: str
     session_id: str
@@ -696,6 +728,34 @@ class CommitDecision:
     reason: str
     thresholds: dict[str, float]
     influence_summary: tuple[InfluenceSummary, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ProposalLedgerEntry:
+    proposal_id: str
+    session_id: str
+    era_id: str
+    candidate_id: str
+    family_id: str | None
+    readiness_state: ProposalReadinessState
+    evidence_summary: str
+    unresolved_risks: tuple[str, ...] = ()
+    approval_required: bool = False
+    updated_at: str | None = None
+    artifact_refs: dict[str, str] | None = None
+    resume_token: str | None = None
+    source_candidate_ids: tuple[str, ...] = ()
+    supersedes: tuple[str, ...] = ()
+    recommendation_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ProposalLedger:
+    session_id: str
+    era_id: str
+    current_proposal_id: str | None
+    entries: tuple[ProposalLedgerEntry, ...]
+    updated_at: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -750,3 +810,6 @@ class SessionStatus:
     last_acquisition_backend: str | None = None
     last_follow_up_query_type: str | None = None
     last_follow_up_comparison: str | None = None
+    proposal_entry_count: int = 0
+    latest_proposal_id: str | None = None
+    latest_proposal_state: ProposalReadinessState | None = None

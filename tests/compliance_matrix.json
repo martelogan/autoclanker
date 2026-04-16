@@ -132,6 +132,18 @@
     "status": "active"
   },
   {
+    "requirement_id": "M3-014",
+    "gate": "required",
+    "description": "Session artifacts expose belief-delta and proposal-ledger JSON outputs through status artifact paths, and `RESULTS.md` renders matching belief-change and proposal sections.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M3-015",
+    "gate": "required",
+    "description": "session review-bundle derives a normalized prior/run/posterior/proposal review model from existing session artifacts, and `RESULTS.md` renders matching review sections without persisting a default review-bundle JSON artifact.",
+    "status": "active"
+  },
+  {
     "requirement_id": "M4-001",
     "gate": "required",
     "description": "The fixture adapter exercises the full loop without external dependencies.",
