@@ -22,12 +22,13 @@
 
 </div>
 
-*Guide the search you already trust with typed, previewable Bayesian priors.*
+*Guide the search you already trust with typed, previewable Bayesian priors and locked eval feedback.*
 
 `autoclanker` sits between an outer search or evolutionary loop and an eval
 harness. It turns rough optimization ideas into typed, previewable priors that
 can influence ranking, active querying, and commit decisions without replacing
-the underlying loop.
+the underlying loop, so explicit candidate lanes can stay inspectable instead of
+getting buried inside prompt history.
 
 ## Why autoclanker
 
@@ -35,6 +36,7 @@ the underlying loop.
 - Keep several candidate lanes explicit so an outer harness can explore them in parallel when practical.
 - Add inspectable human & LLM beliefs instead of relying on prompt-only steering.
 - Preview compiled priors before they affect a session.
+- Lock the eval contract for a session so benchmark drift is visible instead of implicit.
 - Fit an exact joint linear posterior over explicit main and screened pair features when that math is safe, then fall back automatically when it is not.
 - Use real finite-pool Thompson-style sampling when the posterior is sampleable, with an optimistic deterministic fallback when it is not.
 - Separate utility and feasibility so risky candidates stay visible but bounded.
@@ -188,6 +190,11 @@ The smallest reusable input in the repo is:
 That is the exact shape from
 [`examples/idea_inputs/minimal.json`](examples/idea_inputs/minimal.json).
 
+This intake stays intentionally small: plain rough ideas plus optional light
+directional hints. Keep the first preview easy to author, then introduce an
+explicit candidate pool or frontier only when you are actually ready to compare
+lanes.
+
 Inspect the available optimization surface:
 
 ```bash
@@ -228,6 +235,11 @@ autoclanker beliefs canonicalize-ideas \
 If you prefer a reusable file, start from
 [`examples/idea_inputs/minimal.json`](examples/idea_inputs/minimal.json) or
 [`examples/idea_inputs/minimal.yaml`](examples/idea_inputs/minimal.yaml).
+
+That beginner path works well when the underlying harness may later evaluate
+several explicit lanes in parallel under the same locked eval contract. The
+belief intake stays small; the comparison surface grows only when the search
+needs it.
 
 ## Demo Paths
 
@@ -314,6 +326,11 @@ boundary. They isolate the candidate workspace, and when the active eval policy
 marks the benchmark as measurement-sensitive they also serialize the measured
 phase behind a contract-scoped lease and record soft-stabilization metadata on
 the eval result.
+
+That is the intended operational shape: keep the eval surface fixed, let the
+outer harness parallelize what it safely can, and let `autoclanker` preserve
+the trust boundary plus the belief-aware ranking and query state around those
+results.
 
 Once the session has observations, `fit`, `suggest`, `frontier-status`,
 `review-bundle`, `recommend-commit`, and `render-report` keep a small
