@@ -493,6 +493,10 @@ def load_canonicalization_model(model_name: str | None) -> CanonicalizationModel
         return StubCanonicalizationModel()
     if normalized == "anthropic":
         normalized = "autoclanker.bayes_layer.providers.anthropic_canonicalizer"
+    if normalized in {"openai", "openai-compatible", "openai_compatible"}:
+        normalized = (
+            "autoclanker.bayes_layer.providers.openai_compatible_canonicalizer"
+        )
     module = importlib.import_module(normalized)
     builder = getattr(module, "build_autoclanker_canonicalization_model", None)
     if not callable(builder):

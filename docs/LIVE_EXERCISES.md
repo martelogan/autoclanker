@@ -52,7 +52,7 @@ AUTOCLANKER_ENABLE_LLM_LIVE=1 ./bin/dev test-live
 ```
 
 That lane keeps the same CLI flow but swaps the canonicalization provider to a real
-LLM. The bundled provider alias is `anthropic`.
+LLM. Bundled provider aliases are `anthropic` and `openai-compatible`.
 
 Smallest direct command:
 
@@ -62,6 +62,10 @@ autoclanker beliefs canonicalize-ideas \
   --canonicalization-model anthropic \
   --ideas-json '["When the same incident family keeps appearing, bias the search toward reusing the parse path and stitching each incident to the clue line beside it."]'
 ```
+
+For OpenAI-compatible gateways, set `OPENAI_API_KEY` (or
+`AUTOCLANKER_OPENAI_API_KEY`) and optionally `AUTOCLANKER_OPENAI_API_URL`,
+`AUTOCLANKER_OPENAI_MODEL`, and `AUTOCLANKER_OPENAI_MAX_TOKENS_FIELD`.
 
 ## 3. Exercise menu
 

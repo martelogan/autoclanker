@@ -1161,7 +1161,7 @@ def register_session_commands(subparsers: Any) -> None:
     )
     init_parser.add_argument(
         "--canonicalization-model",
-        help="Optional provider-agnostic canonicalization model identifier. Use 'stub' for the built-in test model, 'anthropic' for the bundled Anthropic provider, or an import path exposing build_autoclanker_canonicalization_model().",
+        help="Optional provider-agnostic canonicalization model identifier. Use 'stub' for the built-in test model, 'anthropic' for the bundled Anthropic provider, 'openai-compatible' for a generic OpenAI-compatible chat endpoint, or an import path exposing build_autoclanker_canonicalization_model().",
     )
     init_parser.add_argument("--adapter-config", help="Optional adapter config path.")
     init_parser.add_argument("--session-root", help="Override session root.")

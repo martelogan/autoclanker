@@ -434,6 +434,22 @@ autoclanker beliefs canonicalize-ideas \
   ]'
 ```
 
+With any OpenAI-compatible chat endpoint configured:
+
+```bash
+export OPENAI_API_KEY="..."
+export AUTOCLANKER_OPENAI_MODEL="gpt-5.5"
+# Optional for proxies or self-hosted gateways:
+export AUTOCLANKER_OPENAI_API_URL="https://api.openai.com/v1/chat/completions"
+
+autoclanker beliefs canonicalize-ideas \
+  --era-id era_log_parser_v1 \
+  --canonicalization-model openai-compatible \
+  --ideas-json '[
+    "Bias the search toward reusing the parse path for recurring incident families."
+  ]'
+```
+
 ## Advanced Beliefs
 
 The beginner lane is intentionally small. When you need direct prior geometry or
