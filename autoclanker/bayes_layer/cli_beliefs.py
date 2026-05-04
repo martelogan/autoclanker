@@ -193,7 +193,7 @@ def _add_beginner_context_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--canonicalization-model",
-        help="Optional provider-agnostic canonicalization model identifier. Use 'stub' for the built-in test model, 'anthropic' for the bundled Anthropic provider, or an import path exposing build_autoclanker_canonicalization_model().",
+        help="Optional provider-agnostic canonicalization model identifier. Use 'stub' for the built-in test model, 'anthropic' for the bundled Anthropic provider, 'openai-compatible' for a generic OpenAI-compatible chat endpoint, or an import path exposing build_autoclanker_canonicalization_model().",
     )
 
 

@@ -4,7 +4,7 @@ import io
 import json
 import sys
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
@@ -22,7 +22,7 @@ def _read_stdout(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
 
 
 @contextmanager
-def _patched_stdin(text: str) -> Iterator[None]:
+def _patched_stdin(text: str) -> Generator[None]:
     original = sys.stdin
     sys.stdin = io.StringIO(text)
     try:

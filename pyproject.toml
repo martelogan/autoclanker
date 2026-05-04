@@ -63,6 +63,20 @@ include-package-data = true
 [tool.setuptools.package-data]
 "autoclanker" = ["py.typed"]
 
+[tool.setuptools.data-files]
+"configs" = [
+    "configs/default_adapter.yaml",
+    "configs/default_bayes_layer.yaml",
+]
+"schemas" = [
+    "schemas/adapter_config.schema.json",
+    "schemas/compiled_prior_preview.schema.json",
+    "schemas/eval_result.schema.json",
+    "schemas/frontier_input.schema.json",
+    "schemas/human_belief.schema.json",
+    "schemas/idea_belief.schema.json",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]

@@ -7,7 +7,7 @@ import json
 import subprocess
 import sys
 
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from pathlib import Path
 from types import ModuleType
@@ -55,7 +55,7 @@ def _module_candidates(
 
 
 @contextmanager
-def _prepend_sys_path(path: Path) -> Iterator[None]:
+def _prepend_sys_path(path: Path) -> Generator[None]:
     sys.path.insert(0, str(path))
     try:
         yield

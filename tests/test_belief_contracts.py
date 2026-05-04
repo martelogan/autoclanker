@@ -148,3 +148,27 @@ def test_validate_eval_result_preserves_genotype_order() -> None:
         "capture.window",
         "parser.matcher",
     )
+
+
+@covers("M2-003")
+def test_validate_eval_result_normalizes_array_raw_metrics_to_counts() -> None:
+    payload = load_serialized_payload(
+        ROOT / "examples/eval_results/valid_eval_result.json"
+    )
+    payload["raw_metrics"] = {
+        "score": 0.72,
+        "empty_samples": [],
+        "sample_ids": ["a", "b"],
+    }
+
+    result = validate_eval_result(payload)
+
+    assert result.raw_metrics["score"] == 0.72
+    assert result.raw_metrics["empty_samples_count"] == 0
+    assert result.raw_metrics["sample_ids_count"] == 2
+    assert "empty_samples" not in result.raw_metrics
+    assert result.failure_metadata is not None
+    assert result.failure_metadata["raw_metrics_array_fields_normalized"] == [
+        "empty_samples",
+        "sample_ids",
+    ]

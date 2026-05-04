@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import sys
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -314,7 +314,7 @@ def _subprocess_command(
 
 
 @contextmanager
-def _prepend_sys_path(path: Path) -> Iterator[None]:
+def _prepend_sys_path(path: Path) -> Generator[None]:
     sys.path.insert(0, str(path))
     try:
         yield
@@ -324,7 +324,7 @@ def _prepend_sys_path(path: Path) -> Iterator[None]:
 
 
 @contextmanager
-def _isolated_package_import(package_name: str) -> Iterator[None]:
+def _isolated_package_import(package_name: str) -> Generator[None]:
     prefix = f"{package_name}."
     removed = {
         name: module

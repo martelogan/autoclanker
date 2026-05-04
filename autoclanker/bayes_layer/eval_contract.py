@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 import time
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -499,7 +499,7 @@ def _lease_directory() -> Path:
 @contextmanager
 def measured_execution_window(
     contract: EvalContractSnapshot,
-) -> Iterator[EvalMeasurementState]:
+) -> Generator[EvalMeasurementState]:
     measurement_mode = contract.measurement_mode or "parallel_ok"
     stabilization_mode = contract.stabilization_mode or "off"
     lease_scope = contract.lease_scope
@@ -560,7 +560,7 @@ def measured_execution_window(
 @contextmanager
 def isolated_execution_workspace(
     contract: EvalContractSnapshot,
-) -> Iterator[tuple[IsolationMode, str | None]]:
+) -> Generator[tuple[IsolationMode, str | None]]:
     source_root = execution_workspace_root(contract)
     if contract.workspace_snapshot_mode == "fixture" or source_root is None:
         yield ("fixture", None)

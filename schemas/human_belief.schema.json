@@ -70,6 +70,23 @@
           }
         ]
       }
+    },
+    "surface_overlay": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "registry"
+      ],
+      "properties": {
+        "registry": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "surface_summary": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
     }
   },
   "$defs": {

@@ -112,6 +112,11 @@ deterministic path, the shortest opt-in setup is:
 AUTOCLANKER_ENABLE_LLM_LIVE=1 ./bin/dev test-live
 ```
 
+The direct CLI provider aliases are `anthropic` and `openai-compatible`. The
+OpenAI-compatible provider reads `OPENAI_API_KEY` or
+`AUTOCLANKER_OPENAI_API_KEY`; use `AUTOCLANKER_OPENAI_API_URL` for proxy
+endpoints and `AUTOCLANKER_OPENAI_MODEL` for provider-specific model handles.
+
 ## Smallest valid beginner belief batch
 
 This is the smallest useful shape for most users:

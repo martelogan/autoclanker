@@ -617,6 +617,20 @@ def _is_retryable_url_error(exc: URLError) -> bool:
     )
 
 
+belief_from_mapping = _belief_from_mapping
+bool_or_default = _bool_or_default
+extract_json_object = _extract_json_object
+float_or_none = _float_or_none
+is_retryable_http_error = _is_retryable_http_error
+is_retryable_url_error = _is_retryable_url_error
+mapping_to_overlay_gene = _mapping_to_overlay_gene
+normalize_provider_belief_mapping = _normalize_provider_belief_mapping
+require_string = _require_string
+string_list = _string_list
+system_prompt = _system_prompt
+user_prompt = _user_prompt
+
+
 class AnthropicCanonicalizationModel:
     def __init__(self, config: AnthropicCanonicalizationConfig) -> None:
         self._config = config

@@ -161,20 +161,48 @@ def _overlay_registry(
     )
 
 
-def _overlay_payload(
-    overlay_genes: Sequence[SurfaceOverlayGene],
+def _surface_overlay_payload_from_registry(
+    overlay_registry: GeneRegistry | None,
 ) -> dict[str, JsonValue] | None:
-    if not overlay_genes:
-        return None
-    overlay = _overlay_registry(overlay_genes)
-    if overlay is None:
+    if overlay_registry is None:
         return None
     return {
-        "registry": cast(dict[str, JsonValue], to_json_value(overlay.to_dict())),
+        "registry": cast(dict[str, JsonValue], to_json_value(overlay_registry.to_dict())),
         "surface_summary": cast(
             dict[str, JsonValue],
-            to_json_value(overlay.surface_summary()),
+            to_json_value(overlay_registry.surface_summary()),
         ),
+    }
+
+
+def _surface_overlay_from_payload(
+    payload: Mapping[str, object],
+) -> tuple[GeneRegistry | None, dict[str, JsonValue] | None]:
+    raw_overlay = payload.get("surface_overlay")
+    if raw_overlay is None:
+        return None, None
+    if not isinstance(raw_overlay, Mapping):
+        raise ValidationFailure("surface_overlay must be a mapping.")
+    overlay_mapping = cast(Mapping[str, object], raw_overlay)
+    raw_registry = overlay_mapping.get("registry")
+    if not isinstance(raw_registry, Mapping):
+        raise ValidationFailure("surface_overlay.registry must be a mapping.")
+
+    overlay_registry = GeneRegistry.from_serialized_dict(
+        cast(Mapping[str, object], raw_registry)
+    )
+    raw_summary = overlay_mapping.get("surface_summary")
+    surface_summary = (
+        cast(dict[str, JsonValue], to_json_value(cast(Mapping[str, object], raw_summary)))
+        if isinstance(raw_summary, Mapping)
+        else cast(dict[str, JsonValue], to_json_value(overlay_registry.surface_summary()))
+    )
+    payload_from_registry = _surface_overlay_payload_from_registry(overlay_registry)
+    if payload_from_registry is None:
+        return overlay_registry, None
+    return overlay_registry, {
+        **payload_from_registry,
+        "surface_summary": surface_summary,
     }
 
 
@@ -493,6 +521,10 @@ def load_canonicalization_model(model_name: str | None) -> CanonicalizationModel
         return StubCanonicalizationModel()
     if normalized == "anthropic":
         normalized = "autoclanker.bayes_layer.providers.anthropic_canonicalizer"
+    if normalized in {"openai", "openai-compatible", "openai_compatible"}:
+        normalized = (
+            "autoclanker.bayes_layer.providers.openai_compatible_canonicalizer"
+        )
     module = importlib.import_module(normalized)
     builder = getattr(module, "build_autoclanker_canonicalization_model", None)
     if not callable(builder):
@@ -527,11 +559,15 @@ def canonicalize_belief_input(
 ) -> CanonicalizationOutcome:
     if "beliefs" in payload:
         beliefs = ingest_human_beliefs(payload)
+        overlay_registry, surface_overlay_payload = _surface_overlay_from_payload(payload)
+        active_registry = registry or GeneRegistry(genes={})
+        if overlay_registry is not None:
+            active_registry = active_registry.with_overlay(overlay_registry)
         return CanonicalizationOutcome(
             beliefs=beliefs,
-            registry=registry or GeneRegistry(genes={}),
+            registry=active_registry,
             summary=None,
-            surface_overlay_payload=None,
+            surface_overlay_payload=surface_overlay_payload,
         )
     if "ideas" not in payload:
         raise ValidationFailure("Expected top-level 'beliefs' or 'ideas'.")
@@ -540,25 +576,30 @@ def canonicalize_belief_input(
             "canonicalization mode 'llm' requires --canonicalization-model or AUTOCLANKER_CANONICALIZATION_MODEL."
         )
 
-    base_registry = registry
+    input_overlay_registry, input_surface_overlay_payload = _surface_overlay_from_payload(
+        payload
+    )
+    base_registry = registry or GeneRegistry(genes={})
+    if input_overlay_registry is not None:
+        base_registry = base_registry.with_overlay(input_overlay_registry)
     deterministic = _deterministic_ingest(
         payload,
         fallback_session_context=fallback_session_context,
         registry=base_registry,
     )
-    if base_registry is None or mode == "deterministic" or model is None:
+    if mode == "deterministic" or model is None:
         deterministic_records: tuple[CanonicalizationRecord, ...] = tuple(
             _deterministic_summary(belief) for belief in deterministic.beliefs
         )
         return CanonicalizationOutcome(
             beliefs=deterministic,
-            registry=base_registry or GeneRegistry(genes={}),
+            registry=base_registry,
             summary=CanonicalizationSummary(
                 mode="deterministic",
                 model_name=None,
                 records=deterministic_records,
             ),
-            surface_overlay_payload=None,
+            surface_overlay_payload=input_surface_overlay_payload,
         )
 
     session_context, idea_items = _idea_request_items(
@@ -587,7 +628,7 @@ def canonicalize_belief_input(
                 model_name=model.name,
                 records=deterministic_records,
             ),
-            surface_overlay_payload=None,
+            surface_overlay_payload=input_surface_overlay_payload,
         )
 
     suggestions = model.canonicalize(
@@ -606,6 +647,11 @@ def canonicalize_belief_input(
         base_registry.with_overlay(overlay_registry)
         if overlay_registry is not None
         else base_registry
+    )
+    output_overlay_registry = (
+        input_overlay_registry.with_overlay(overlay_registry)
+        if input_overlay_registry is not None and overlay_registry is not None
+        else overlay_registry or input_overlay_registry
     )
     replaced_beliefs: list[Belief] = []
     records: list[CanonicalizationRecord] = []
@@ -691,5 +737,7 @@ def canonicalize_belief_input(
             model_name=model.name,
             records=tuple(records),
         ),
-        surface_overlay_payload=_overlay_payload(overlay_genes),
+        surface_overlay_payload=_surface_overlay_payload_from_registry(
+            output_overlay_registry
+        ),
     )

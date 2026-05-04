@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,7 +13,17 @@ from autoclanker.bayes_layer.types import JsonValue, ValidationFailure
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    source_root = Path(__file__).resolve().parents[2]
+    if (source_root / "configs").is_dir() and (source_root / "schemas").is_dir():
+        return source_root
+
+    # Wheels install shared config/schema data under the environment prefix.
+    # uv tool installs do not preserve the source repo layout beside the package.
+    prefix_root = Path(sys.prefix)
+    if (prefix_root / "configs").is_dir() and (prefix_root / "schemas").is_dir():
+        return prefix_root
+
+    return source_root
 
 
 def _require_mapping(value: object, label: str) -> Mapping[str, object]:
