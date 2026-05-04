@@ -1206,31 +1206,74 @@ idea_relation_strength = _idea_relation_strength
 idea_joint_effect_strength = _idea_joint_effect_strength
 
 
+def _normalize_eval_payload_raw_metrics(
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    raw_metrics = payload.get("raw_metrics")
+    if not isinstance(raw_metrics, Mapping):
+        return dict(payload)
+    raw_metrics_mapping = cast(Mapping[str, object], raw_metrics)
+    array_metric_keys: list[str] = []
+    for key, value in raw_metrics_mapping.items():
+        if isinstance(value, list):
+            array_metric_keys.append(str(key))
+    if not array_metric_keys:
+        return dict(payload)
+
+    normalized_raw_metrics: dict[str, object] = {}
+    for key, value in raw_metrics_mapping.items():
+        metric_key = str(key)
+        if isinstance(value, list):
+            normalized_raw_metrics[f"{metric_key}_count"] = len(cast(list[object], value))
+        else:
+            normalized_raw_metrics[metric_key] = value
+
+    failure_metadata = payload.get("failure_metadata")
+    normalized_failure_metadata = (
+        dict(cast(Mapping[str, object], failure_metadata))
+        if isinstance(failure_metadata, Mapping)
+        else {}
+    )
+    normalized_failure_metadata["raw_metrics_array_fields_normalized"] = [
+        str(key) for key in array_metric_keys
+    ]
+    return {
+        **dict(payload),
+        "raw_metrics": normalized_raw_metrics,
+        "failure_metadata": normalized_failure_metadata,
+    }
+
+
 def validate_eval_result(payload: Mapping[str, object]) -> ValidEvalResult:
-    validate_payload_against_schema(payload, "eval_result.schema.json")
+    normalized_payload = _normalize_eval_payload_raw_metrics(payload)
+    validate_payload_against_schema(normalized_payload, "eval_result.schema.json")
     intended = parse_gene_state_refs(
-        payload.get("intended_genotype"),
+        normalized_payload.get("intended_genotype"),
         "intended_genotype",
         preserve_order=True,
     )
     realized = parse_gene_state_refs(
-        payload.get("realized_genotype"),
+        normalized_payload.get("realized_genotype"),
         "realized_genotype",
         preserve_order=True,
     )
-    raw_metrics_mapping = _require_mapping(payload.get("raw_metrics"), "raw_metrics")
+    raw_metrics_mapping = _require_mapping(
+        normalized_payload.get("raw_metrics"), "raw_metrics"
+    )
     raw_metrics = {
         key: to_json_value(value) for key, value in raw_metrics_mapping.items()
     }
     failure_metadata_raw = _optional_mapping(
-        payload.get("failure_metadata"), "failure_metadata"
+        normalized_payload.get("failure_metadata"), "failure_metadata"
     )
     failure_metadata = (
         None
         if failure_metadata_raw is None
         else {key: to_json_value(value) for key, value in failure_metadata_raw.items()}
     )
-    eval_contract_raw = _optional_mapping(payload.get("eval_contract"), "eval_contract")
+    eval_contract_raw = _optional_mapping(
+        normalized_payload.get("eval_contract"), "eval_contract"
+    )
     eval_contract = None
     if eval_contract_raw is not None:
         captured_paths_raw = _optional_mapping(
@@ -1274,7 +1317,7 @@ def validate_eval_result(payload: Mapping[str, object]) -> ValidEvalResult:
             captured_at=_optional_string(eval_contract_raw, "captured_at"),
         )
     execution_metadata_raw = _optional_mapping(
-        payload.get("execution_metadata"),
+        normalized_payload.get("execution_metadata"),
         "execution_metadata",
     )
     execution_metadata = None
@@ -1311,22 +1354,22 @@ def validate_eval_result(payload: Mapping[str, object]) -> ValidEvalResult:
             ),
         )
     return ValidEvalResult(
-        era_id=_require_string(payload, "era_id"),
-        candidate_id=_require_string(payload, "candidate_id"),
+        era_id=_require_string(normalized_payload, "era_id"),
+        candidate_id=_require_string(normalized_payload, "candidate_id"),
         intended_genotype=intended,
         realized_genotype=realized,
-        patch_hash=_require_string(payload, "patch_hash"),
-        status=cast(EvalStatus, _require_string(payload, "status")),
-        seed=_require_int(payload, "seed"),
-        runtime_sec=_require_float(payload, "runtime_sec"),
-        peak_vram_mb=_require_float(payload, "peak_vram_mb"),
+        patch_hash=_require_string(normalized_payload, "patch_hash"),
+        status=cast(EvalStatus, _require_string(normalized_payload, "status")),
+        seed=_require_int(normalized_payload, "seed"),
+        runtime_sec=_require_float(normalized_payload, "runtime_sec"),
+        peak_vram_mb=_require_float(normalized_payload, "peak_vram_mb"),
         raw_metrics=raw_metrics,
-        delta_perf=_require_float(payload, "delta_perf"),
-        utility=_require_float(payload, "utility"),
-        replication_index=_require_int(payload, "replication_index"),
-        stdout_digest=_optional_string(payload, "stdout_digest"),
-        stderr_digest=_optional_string(payload, "stderr_digest"),
-        artifact_paths=_optional_path_list(payload, "artifact_paths"),
+        delta_perf=_require_float(normalized_payload, "delta_perf"),
+        utility=_require_float(normalized_payload, "utility"),
+        replication_index=_require_int(normalized_payload, "replication_index"),
+        stdout_digest=_optional_string(normalized_payload, "stdout_digest"),
+        stderr_digest=_optional_string(normalized_payload, "stderr_digest"),
+        artifact_paths=_optional_path_list(normalized_payload, "artifact_paths"),
         failure_metadata=failure_metadata,
         eval_contract=eval_contract,
         execution_metadata=execution_metadata,

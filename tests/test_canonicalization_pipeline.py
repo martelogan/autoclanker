@@ -13,7 +13,7 @@ from autoclanker.bayes_layer.canonicalization import (
     canonicalize_belief_input,
 )
 from autoclanker.bayes_layer.registry import build_fixture_registry
-from autoclanker.bayes_layer.types import SessionContext
+from autoclanker.bayes_layer.types import GeneStateRef, SessionContext
 from autoclanker.cli import main
 from tests.compliance import covers
 
@@ -103,6 +103,86 @@ def test_hybrid_canonicalization_emits_overlay_and_provenance() -> None:
     assert first_record["status"] == "resolved"
     assert first_record["source"] == "hybrid"
     assert overlay_registry["search.repeated_format_fast_path"]
+
+
+@covers("M1-005")
+def test_precanonicalized_beliefs_preserve_surface_overlay() -> None:
+    canonicalized = _run_cli(
+        [
+            "beliefs",
+            "canonicalize-ideas",
+            "--ideas-json",
+            '["A repeated-format fast path probably helps this parser."]',
+            "--era-id",
+            "era_demo_v1",
+            "--canonicalization-model",
+            "stub",
+        ]
+    )
+    surface_overlay = _require_mapping(canonicalized["surface_overlay"])
+
+    outcome = canonicalize_belief_input(
+        {
+            "session_context": canonicalized["session_context"],
+            "beliefs": canonicalized["beliefs"],
+            "surface_overlay": surface_overlay,
+        },
+        registry=build_fixture_registry(),
+    )
+
+    assert outcome.surface_overlay_payload is not None
+    assert outcome.registry.has_ref(
+        GeneStateRef(
+            gene_id="search.repeated_format_fast_path",
+            state_id="path_compiled_context",
+        )
+    )
+
+
+@covers("M1-005")
+def test_beginner_ideas_can_canonicalize_against_input_surface_overlay() -> None:
+    outcome = canonicalize_belief_input(
+        {
+            "ideas": [
+                {
+                    "id": "domain_aot",
+                    "idea": "Move money formatting to the request boundary.",
+                    "confidence": 3,
+                    "option": "domain.settings=aot_money_format",
+                }
+            ],
+            "surface_overlay": {
+                "registry": {
+                    "domain.settings": {
+                        "states": ["baseline", "aot_money_format"],
+                        "default_state": "baseline",
+                        "description": "Domain-local settings optimization lane.",
+                        "state_descriptions": {
+                            "baseline": "Keep current runtime behavior.",
+                            "aot_money_format": "Precompute money format settings at the request boundary.",
+                        },
+                        "surface_kind": "mutation_family",
+                        "semantic_level": "strategy",
+                        "materializable": False,
+                        "origin": "idea_file",
+                    }
+                }
+            },
+        },
+        registry=build_fixture_registry(),
+        fallback_session_context=SessionContext(era_id="era_domain_v1"),
+    )
+
+    assert outcome.surface_overlay_payload is not None
+    assert outcome.registry.has_ref(
+        GeneStateRef(
+            gene_id="domain.settings",
+            state_id="aot_money_format",
+        )
+    )
+    belief = outcome.beliefs.beliefs[0]
+    assert belief.kind == "idea"
+    assert _require_mapping(outcome.beliefs.canonical_payload)["beliefs"]
 
 
 @covers("M1-005")
