@@ -433,7 +433,7 @@ def render_mermaid(registry: BigBetsRegistry) -> str:
     ]
     by_wave = _big_bets_by_wave(registry)
     for wave, bets in by_wave.items():
-        lines.append(f"  subgraph wave_{wave}[Wave {wave}]")
+        lines.append(f"  subgraph wave_{wave}[{_priority_for_wave(wave)}]")
         for bet in bets:
             label = _mermaid_label(bet, registry)
             lines.append(f'    {_node_id(bet.id)}["{label}"]')
@@ -460,8 +460,8 @@ def render_markdown(registry: BigBetsRegistry, mermaid: str | None = None) -> st
         [
             "## Priority Queue",
             "",
-            "| Priority | Order | Wave | Big bet | Status | Idea families | Next action |",
-            "| --- | --- | --- | --- | --- | --- | --- |",
+            "| P layer | Big bet | Status | Idea families | Next action |",
+            "| --- | --- | --- | --- | --- |",
         ]
     )
     families_by_bet = _families_by_bet(registry)
@@ -474,8 +474,6 @@ def render_markdown(registry: BigBetsRegistry, mermaid: str | None = None) -> st
             + " | ".join(
                 [
                     bet.priority,
-                    str(bet.rank or "-"),
-                    str(bet.wave),
                     _escape_markdown_table(bet.title),
                     bet.status,
                     family_links or "-",
@@ -488,7 +486,7 @@ def render_markdown(registry: BigBetsRegistry, mermaid: str | None = None) -> st
     for bet in registry.big_bets:
         lines.extend(
             [
-                f"### {bet.priority} / Wave {bet.wave}: {bet.title}",
+                f"### {bet.priority}: {bet.title}",
                 "",
                 bet.narrative,
                 "",
@@ -524,19 +522,21 @@ def render_svg(registry: BigBetsRegistry) -> str:
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-label="{_xml(registry.title)}">',
         f"<metadata>{_xml(json.dumps(_artifact_metadata(), sort_keys=True))}</metadata>",
         "<defs>",
-        '<pattern id="grid" width="56" height="56" patternUnits="userSpaceOnUse"><path d="M 56 0 L 0 0 0 56" fill="none" stroke="#eadfce" stroke-width="0.9"/></pattern>',
-        '<filter id="shadow" x="-8%" y="-8%" width="116%" height="132%"><feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#1e1e1e" flood-opacity="0.06"/></filter>',
-        '<marker id="arrow" viewBox="0 0 10 10" refX="8.7" refY="5" markerWidth="5.6" markerHeight="5.6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#1e1e1e"/></marker>',
+        '<pattern id="grid" width="56" height="56" patternUnits="userSpaceOnUse"><path d="M 56 0 L 0 0 0 56" fill="none" stroke="#ece5d8" stroke-width="0.9"/></pattern>',
+        '<filter id="shadow" x="-8%" y="-8%" width="116%" height="132%"><feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#1e1e1e" flood-opacity="0.105"/></filter>',
+        '<marker id="arrow" viewBox="0 0 10 10" refX="8.7" refY="5" markerWidth="6.2" markerHeight="6.2" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#1e1e1e"/></marker>',
         "</defs>",
-        '<rect width="100%" height="100%" fill="#fffaf0"/>',
-        '<rect width="100%" height="100%" fill="url(#grid)" opacity="0.62"/>',
+        '<rect width="100%" height="100%" fill="#fdfbf4"/>',
+        '<circle cx="190" cy="135" r="230" fill="#dbeafe" opacity="0.22"/>',
+        f'<circle cx="{width - 170}" cy="145" r="250" fill="#d8f3dc" opacity="0.21"/>',
+        '<rect width="100%" height="100%" fill="url(#grid)" opacity="0.66"/>',
         f'<text x="{_MARGIN_X}" y="52" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="31" font-weight="400" fill="#1e1e1e">{_xml(registry.title)}</text>',
-        f'<text x="{_MARGIN_X}" y="82" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="16" fill="#4b5563">Wave depth is big-bet priority. Order is left-to-right within a wave. Arrows are explicit dependencies.</text>',
+        f'<text x="{_MARGIN_X}" y="82" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="16" fill="#4b5563">Priority layers flow top-down. Dragging changes layer placement; arrows are explicit dependencies.</text>',
     ]
     for wave_index, (wave, bets) in enumerate(by_wave.items()):
         y = _MARGIN_Y + wave_index * (_CARD_HEIGHT + _WAVE_GAP)
         parts.append(
-            f'<text x="{_MARGIN_X}" y="{y - 22}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="16" font-weight="400" fill="#4b5563">Wave {wave} / {_xml(_priority_for_wave(wave))}</text>'
+            f'<text x="{_MARGIN_X}" y="{y - 22}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="18" font-weight="400" fill="#4b5563">{_xml(_priority_for_wave(wave))}</text>'
         )
         for card_index, bet in enumerate(bets):
             x = _MARGIN_X + card_index * (_CARD_WIDTH + _CARD_GAP)
@@ -637,7 +637,7 @@ def render_excalidraw(registry: BigBetsRegistry) -> str:
                     "updated": 1,
                     "link": None,
                     "locked": False,
-                    "fontSize": 15,
+                    "fontSize": 16,
                     "fontFamily": 5,
                     "text": text,
                     "rawText": text,
@@ -699,7 +699,7 @@ def render_excalidraw(registry: BigBetsRegistry) -> str:
         "source": f"bigbets {BIGBETS_VERSION}",
         "elements": elements,
         "appState": {
-            "viewBackgroundColor": "#fffaf0",
+            "viewBackgroundColor": "#fdfbf4",
             "gridSize": 56,
             "currentItemFontFamily": 5,
         },
@@ -722,7 +722,7 @@ def render_html(
         cards.append(
             f"""
 <section class="card priority-{_attr(bet.priority.lower())}">
-  <div class="card-meta">{_xml(bet.priority)} · Wave {bet.wave} · {_xml(bet.status)}</div>
+  <div class="card-meta">{_xml(bet.priority)} · {_xml(bet.status)}</div>
   <h2>{_xml(bet.title)}</h2>
   <p>{_xml(bet.narrative)}</p>
   <dl>
@@ -919,7 +919,7 @@ def _normalized_edges(registry: BigBetsRegistry) -> list[dict[str, str]]:
         for target in bet.unlocks:
             edges[(bet.id, target)] = "unlocks"
         for source in bet.depends_on:
-            edges[(source, bet.id)] = "depends_on"
+            edges.setdefault((source, bet.id), "depends_on")
     return [
         {"from": source, "to": target, "kind": kind}
         for (source, target), kind in sorted(edges.items())
@@ -976,10 +976,10 @@ def _priority_color(priority: str) -> str:
 
 def _priority_fill(priority: str) -> str:
     return {
-        "P0": "#d7f5df",
-        "P1": "#dceafe",
-        "P2": "#fff0c4",
-        "P3": "#eee7ff",
+        "P0": "#d8f3dc",
+        "P1": "#dbeafe",
+        "P2": "#fff0bf",
+        "P3": "#eee6ff",
     }.get(priority, "#e9edf2")
 
 
@@ -994,12 +994,12 @@ def _svg_card(
         f'<g data-bet-id="{_attr(bet.id)}" tabindex="0" role="button" aria-label="{_attr(bet.title)}">',
         f'<path d="{_rounded_rect_path(x, y, _CARD_WIDTH, _CARD_HEIGHT, 27)}" fill="{_priority_fill(bet.priority)}" stroke="none" filter="url(#shadow)"/>',
         *_rough_rect_paths(x, y, _CARD_WIDTH, _CARD_HEIGHT, 27, _stable_seed(bet.id)),
-        f'<path d="{_rough_rect_path(x + 13, y + 13, _CARD_WIDTH - 26, _CARD_HEIGHT - 26, 20, _stable_seed(f"inner:{bet.id}"))}" fill="none" stroke="{color}" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" opacity="0.27"/>',
-        f'<text x="{x + 23}" y="{y + 32}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="12" font-weight="400" fill="{color}">{_xml(bet.priority)} / order {_xml(str(bet.rank or "-"))} / {_xml(bet.status)}</text>',
+        f'<path d="{_rough_rect_path(x + 13, y + 13, _CARD_WIDTH - 26, _CARD_HEIGHT - 26, 20, _stable_seed(f"inner:{bet.id}"))}" fill="none" stroke="{color}" stroke-width="1.05" stroke-linecap="round" stroke-linejoin="round" opacity="0.34"/>',
+        f'<text x="{x + 23}" y="{y + 32}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="12" font-weight="400" fill="{color}">{_xml(bet.priority)} / {_xml(bet.status)}</text>',
     ]
     for index, line in enumerate(title_lines):
         parts.append(
-            f'<text x="{x + 23}" y="{y + 61 + index * 19}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="15" font-weight="400" fill="#1e1e1e">{_xml(line)}</text>'
+            f'<text x="{x + 23}" y="{y + 61 + index * 19}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="16" font-weight="400" fill="#1e1e1e">{_xml(line)}</text>'
         )
     parts.append(
         f'<text x="{x + 23}" y="{y + _CARD_HEIGHT - 20}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="12" fill="#4b5563">{_xml(family_label or "No mapped idea families")}</text>'
@@ -1022,8 +1022,8 @@ def _svg_edge(
     first = _edge_path(sx, sy, tx, ty, bend, seed)
     second = _edge_path(sx, sy, tx, ty, bend, seed + 17)
     return [
-        f'<path d="{first}" fill="none" stroke="#1e1e1e" stroke-width="1.08" stroke-linecap="round" stroke-linejoin="round"{dash} marker-end="url(#arrow)"/>',
-        f'<path d="{second}" fill="none" stroke="#1e1e1e" stroke-width="0.55" stroke-linecap="round" stroke-linejoin="round" opacity="0.42"{dash}/>',
+        f'<path d="{first}" fill="none" stroke="#1e1e1e" stroke-width="1.42" stroke-linecap="round" stroke-linejoin="round"{dash} marker-end="url(#arrow)"/>',
+        f'<path d="{second}" fill="none" stroke="#1e1e1e" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round" opacity="0.28"{dash}/>',
     ]
 
 
@@ -1053,8 +1053,8 @@ def _rough_rect_paths(
     seed: int,
 ) -> list[str]:
     return [
-        f'<path class="card-outline" d="{_rough_rect_path(x, y, width, height, radius, seed)}" fill="none" stroke="#1e1e1e" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>',
-        f'<path d="{_rough_rect_path(x + 1, y - 1, width - 2, height + 1, radius, seed + 31)}" fill="none" stroke="#1e1e1e" stroke-width="0.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.38"/>',
+        f'<path class="card-outline" d="{_rough_rect_path(x, y, width, height, radius, seed)}" fill="none" stroke="#1e1e1e" stroke-width="1.62" stroke-linecap="round" stroke-linejoin="round"/>',
+        f'<path d="{_rough_rect_path(x + 1, y - 1, width - 2, height + 1, radius, seed + 31)}" fill="none" stroke="#1e1e1e" stroke-width="0.75" stroke-linecap="round" stroke-linejoin="round" opacity="0.34"/>',
     ]
 
 
@@ -1103,7 +1103,7 @@ def _rounded_rect_path(x: int, y: int, width: int, height: int, radius: int) -> 
     )
 
 
-def _jitter(seed: int, salt: int, amount: float = 1.7) -> float:
+def _jitter(seed: int, salt: int, amount: float = 0.9) -> float:
     value = (seed ^ (salt * 0x9E3779B1)) & 0xFFFFFFFF
     value ^= value >> 16
     value = (value * 0x7FEB352D) & 0xFFFFFFFF

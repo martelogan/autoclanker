@@ -225,19 +225,19 @@ def _index_html(registry: BigBetsRegistry, app_id: str) -> str:
       <p>{description}</p>
     </div>
     <div class="action-strip" aria-label="Board actions">
-      <button type="button" id="save-button" title="Persist the current canonical board.">Save current board</button>
-      <button type="button" id="snapshot-button" title="Keep a dated restorable copy before larger edits.">Snapshot before editing</button>
+      <button type="button" id="save-button" title="Persist the current canonical board.">Save board</button>
+      <button type="button" id="snapshot-button" title="Keep a dated restorable copy before larger edits.">Snapshot</button>
       <input id="snapshot-name" aria-label="Snapshot name" placeholder="Snapshot name">
       <select id="snapshot-select" aria-label="Plan snapshots">
         <option value="">No snapshots yet</option>
       </select>
       <button type="button" id="restore-snapshot-button">Restore</button>
-      <button type="button" id="add-family-button">Add idea lane</button>
+      <button type="button" id="add-family-button">New lane</button>
       <details class="tool-drawer">
         <summary>More</summary>
         <div>
-          <button type="button" id="add-bet-button">Add bet</button>
-          <button type="button" data-export="excalidraw">Excalidraw</button>
+          <button type="button" id="add-bet-button">New bet</button>
+          <button type="button" data-export="excalidraw">Download Excalidraw</button>
           <button type="button" id="write-artifacts-button">Publish current artifacts</button>
         </div>
       </details>
@@ -247,6 +247,7 @@ def _index_html(registry: BigBetsRegistry, app_id: str) -> str:
       <span id="validation-status">Validation pending</span>
       <span id="saved-status">Not saved yet</span>
       <span id="snapshot-status">No snapshot selected</span>
+      <span id="artifact-status">Artifacts not published</span>
     </div>
   </header>
 
@@ -255,7 +256,7 @@ def _index_html(registry: BigBetsRegistry, app_id: str) -> str:
       <div class="section-heading">
         <div>
           <span class="label">Dependency board</span>
-          <h2>Top-down waves. Wave 1 is P0; drag only changes wave/order, never dependency edges.</h2>
+          <h2>Priority layers. P0 is the current front; drag only changes layer placement, never dependency edges.</h2>
         </div>
         <div class="button-row">
           <button type="button" data-export="svg">Download SVG</button>
@@ -283,14 +284,13 @@ def _index_html(registry: BigBetsRegistry, app_id: str) -> str:
             <tr>
               <th class="w-drag"></th>
               <th class="w-issue">Issue/PR</th>
-              <th class="w-priority">Lane P</th>
-              <th class="w-rank">Order</th>
+              <th class="w-priority">P</th>
               <th class="w-title">Idea family</th>
               <th class="w-state">Status</th>
-              <th class="w-role">Role</th>
+              <th class="w-role" title="Lane type: ideas-lane, wip, evidence, proof, follow-up, blocked, or shipped.">Role</th>
               <th class="w-action">Next action</th>
-              <th class="w-artifact">Artifact</th>
-              <th class="w-actions">Open</th>
+              <th class="w-artifact" title="Optional durable lane artifact, often an *.ideas.json file.">Artifact</th>
+              <th class="w-actions">Edit</th>
             </tr>
           </thead>
           <tbody id="plan-table-body"></tbody>
@@ -437,20 +437,20 @@ _STYLES_CSS = """\
   color-scheme: light;
   --ink: #111827;
   --muted: #5d6c84;
-  --paper: #fffaf0;
-  --grid: #eadfce;
+  --paper: #fdfbf4;
+  --grid: #ece5d8;
   --line: #111827;
   --line-soft: #d8cbb8;
   --blue: #dbeafe;
-  --green: #d9f6e1;
-  --yellow: #fff1c2;
+  --green: #d8f3dc;
+  --yellow: #fff0bf;
   --pink: #f9dadd;
   --lavender: #e9e3ff;
   --white: #fffefa;
   --accent: #0f766e;
   --burnt: #b75b36;
   --danger: #b42318;
-  --shadow: 0 10px 24px rgba(30, 30, 30, 0.08);
+  --shadow: 0 12px 28px rgba(30, 30, 30, 0.095);
   --sketch-font: "Excalifont", "Virgil", "Comic Sans MS", "Marker Felt", cursive;
   --ui-font: "Avenir Next", "Gill Sans", "Trebuchet MS", sans-serif;
 }
@@ -465,8 +465,8 @@ body {
   background:
     linear-gradient(var(--grid) 1px, transparent 1px),
     linear-gradient(90deg, var(--grid) 1px, transparent 1px),
-    radial-gradient(circle at 14% 9%, rgba(219, 234, 254, 0.72), transparent 28rem),
-    radial-gradient(circle at 84% 15%, rgba(217, 246, 225, 0.72), transparent 28rem),
+    radial-gradient(circle at 16% 10%, rgba(219, 234, 254, 0.42), transparent 30rem),
+    radial-gradient(circle at 84% 12%, rgba(216, 243, 220, 0.4), transparent 29rem),
     var(--paper);
   background-size: 56px 56px, 56px 56px, auto, auto, auto;
   font: 15px/1.5 var(--ui-font);
@@ -699,12 +699,12 @@ main {
 }
 
 .paper-board [data-bet-id]:hover .card-outline {
-  stroke-width: 1.8;
+  stroke-width: 2;
 }
 
 .paper-board .selected-card .card-outline {
   stroke: var(--burnt);
-  stroke-width: 2.1;
+  stroke-width: 2.3;
 }
 
 .paper-board .dragging-card {
@@ -822,6 +822,20 @@ main {
   word-break: break-word;
 }
 
+.sheet-select {
+  width: 100%;
+  min-height: 1.55rem;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  padding: 0.03rem 1.2rem 0.03rem 0.14rem;
+}
+
+.sheet-select:focus {
+  background: rgba(15, 118, 110, 0.07);
+}
+
 .sheet-cell.active-cell {
   border-color: var(--accent);
   background: rgba(15, 118, 110, 0.07);
@@ -872,7 +886,6 @@ main {
 .w-drag { width: 2.2rem; }
 .w-issue { width: 4.1rem; }
 .w-priority { width: 3.3rem; }
-.w-rank { width: 3.8rem; }
 .w-title { width: 16rem; }
 .w-state { width: 5.4rem; }
 .w-role { width: 6.8rem; }
@@ -1352,10 +1365,10 @@ function betGroupRow(bet, familyCount) {
   return `
     <tr class="bet-group-row" data-kind="bet" data-id="${escapeAttr(bet.id)}" data-priority="${escapeAttr(bet.priority)}">
       <td><button type="button" class="drag-handle" draggable="true" data-drag-kind="bet" data-drag-id="${escapeAttr(bet.id)}" title="Drag bet">::</button></td>
-      <td colspan="9">
+      <td colspan="8">
         <div class="bet-group">
           <div class="bet-group-main">
-            <span class="mini-meta">Wave ${bet.wave} = ${escapeHtml(bet.priority)} / order ${escapeHtml(bet.rank || "-")} / ${escapeHtml(bet.status)}</span>
+            <span class="mini-meta">${escapeHtml(bet.priority)} / ${escapeHtml(bet.status)}</span>
             <span class="bet-title">${escapeHtml(bet.title)}</span>
             <span class="mini-meta">${familyCount} idea families</span>
           </div>
@@ -1374,16 +1387,15 @@ function familyRow(family) {
     <tr class="family-row" data-kind="family" data-issue="${family.issue}" data-big-bet="${escapeAttr(family.big_bet)}">
       <td><button type="button" class="drag-handle" draggable="true" data-drag-kind="family" data-drag-id="${family.issue}" title="Drag family">::</button></td>
       ${issueCell(family)}
-      ${cell("priority", family.priority, "w-priority", "P0")}
-      ${cell("rank", family.rank || "", "w-rank", "Order")}
+      ${selectCell("priority", family.priority, "w-priority", ["P0", "P1", "P2", "P3"])}
       ${cell("title", family.title, "w-title", "Idea family title")}
-      ${cell("status", family.status, "w-state", "active")}
-      ${cell("role", family.role || "", "w-role", "role")}
+      ${selectCell("status", family.status, "w-state", [...STATUS_VALUES])}
+      ${selectCell("role", family.role || "", "w-role", ["", ...ROLE_VALUES])}
       ${cell("next_action", family.next_action || "", "w-action", "next action")}
-      ${linkCell("artifact", family.artifact || "", "w-artifact", "ideas")}
+      ${linkCell("artifact", family.artifact || "", "w-artifact", "artifact")}
       <td class="row-actions w-actions">
         <button type="button" data-row-action="focus">Edit</button>
-        <button type="button" data-row-action="hydrate">Import</button>
+        <button type="button" data-row-action="hydrate">Autofill</button>
         <button type="button" data-row-action="delete">Remove</button>
       </td>
     </tr>
@@ -1392,6 +1404,13 @@ function familyRow(family) {
 
 function cell(field, value, className, placeholder) {
   return `<td class="${className}"><div class="sheet-cell" contenteditable="true" data-cell data-field="${escapeAttr(field)}" data-placeholder="${escapeAttr(placeholder)}">${escapeHtml(value)}</div></td>`;
+}
+
+function selectCell(field, value, className, options) {
+  const optionHtml = options
+    .map((option) => `<option value="${escapeAttr(option)}"${String(option) === String(value || "") ? " selected" : ""}>${escapeHtml(option || "-")}</option>`)
+    .join("");
+  return `<td class="${className}"><select class="sheet-select" data-cell data-field="${escapeAttr(field)}">${optionHtml}</select></td>`;
 }
 
 function issueCell(family) {
@@ -1431,6 +1450,9 @@ function wirePlanTable() {
       cellNode.classList.remove("active-cell");
       if (cellNode.isContentEditable) applyTableRow(cellNode.closest("tr"));
     });
+    cellNode.addEventListener("change", () => {
+      applyTableRow(cellNode.closest("tr"));
+    });
     cellNode.addEventListener("keydown", handleCellKeydown);
     cellNode.addEventListener("focus", () => {
       document.querySelectorAll(".active-cell").forEach((node) => node.classList.remove("active-cell"));
@@ -1452,6 +1474,14 @@ function wirePlanTable() {
 }
 
 function handleCellKeydown(event) {
+  if (
+    event.currentTarget.tagName === "SELECT" &&
+    ["ArrowLeft", "ArrowRight", "ArrowDown", "ArrowUp", "Enter"].includes(event.key) &&
+    !event.metaKey &&
+    !event.ctrlKey
+  ) {
+    return;
+  }
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
     event.preventDefault();
     openSelection();
@@ -1518,6 +1548,7 @@ function focusVerticalCell(current, delta) {
 
 function focusCell(cellNode) {
   cellNode.focus();
+  if (cellNode.tagName === "SELECT") return;
   const range = document.createRange();
   range.selectNodeContents(cellNode);
   range.collapse(false);
@@ -1597,12 +1628,12 @@ function applyTableRow(row) {
       issue: positiveInt(Number(value("issue")), "family.issue"),
       title: requiredString(value("title"), "family.title"),
       priority: priority(requiredString(value("priority"), "family.priority"), "family.priority"),
-      rank: optionalPositiveInt(value("rank"), "family.rank"),
+      rank: optionalPositiveInt(value("rank"), "family.rank") || existing.rank,
       status: status(requiredString(value("status"), "family.status"), "family.status"),
       role: optionalString(value("role")),
       next_action: optionalString(value("next_action")),
       artifact: optionalString(value("artifact")),
-      url: optionalString(value("url")),
+      url: optionalString(value("url")) || existing.url || null,
     };
     state.registry.idea_families = state.registry.idea_families.filter((family) => family.issue !== previousIssue && family.issue !== updated.issue);
     state.registry.idea_families.push(updated);
@@ -1616,6 +1647,7 @@ function applyTableRow(row) {
 function cellValue(row, name) {
   const node = row.querySelector(`[data-field="${name}"]`);
   if (!node) return "";
+  if (node.tagName === "SELECT") return node.value.trim();
   if (node.dataset.value != null) return node.dataset.value.trim();
   return node.textContent?.trim() || "";
 }
@@ -1647,8 +1679,8 @@ function betToolbar(bet) {
   return `
     <button type="button" data-inspector-action="rank-up">Move left</button>
     <button type="button" data-inspector-action="rank-down">Move right</button>
-    <button type="button" data-inspector-action="wave-earlier">Earlier wave</button>
-    <button type="button" data-inspector-action="wave-later">Later wave</button>
+    <button type="button" data-inspector-action="wave-earlier">Earlier P layer</button>
+    <button type="button" data-inspector-action="wave-later">Later P layer</button>
     <button type="button" data-inspector-action="add-family">Add family to ${escapeHtml(bet.id)}</button>
   `;
 }
@@ -1657,7 +1689,7 @@ function familyToolbar() {
   return `
     <button type="button" data-inspector-action="rank-up">Move up</button>
     <button type="button" data-inspector-action="rank-down">Move down</button>
-    <button type="button" data-inspector-action="hydrate">Import issue</button>
+    <button type="button" data-inspector-action="hydrate">Autofill from links</button>
   `;
 }
 
@@ -1684,7 +1716,7 @@ function handleInspectorAction(action) {
   if (state.selection.kind === "bet" && (action === "wave-earlier" || action === "wave-later")) {
     const bet = findBet(state.selection.id);
     moveBetToWaveRank(bet.id, Math.max(1, bet.wave + (action === "wave-earlier" ? -1 : 1)), bet.rank || 1);
-    commitRegistry("Adjusted bet wave.");
+    commitRegistry("Adjusted bet layer.");
     return;
   }
   if (state.selection.kind === "bet" && action === "add-family") return addFamily(state.selection.id);
@@ -1692,35 +1724,39 @@ function handleInspectorAction(action) {
 }
 
 function betFields(bet) {
+  const betIds = state.registry.big_bets.map((item) => item.id);
   return [
     field("id", "ID", bet.id),
     field("title", "Title", bet.title),
-    field("rank", "Order inside wave", bet.rank || "", "number"),
-    field("wave", "Wave depth (sets P*)", bet.wave, "number"),
+    field("priority", "P layer", bet.priority, "select", ["P0", "P1", "P2", "P3"]),
+    field("rank", "Position inside layer", bet.rank || "", "number"),
     field("status", "Status", bet.status, "select", [...STATUS_VALUES]),
-    field("confidence", "Confidence", bet.confidence || ""),
+    field("confidence", "Confidence", bet.confidence || "", "text", ["high", "medium_high", "medium", "low"]),
     field("narrative", "Narrative", bet.narrative, "textarea wide"),
     field("near_term_win", "Near-term win", bet.near_term_win, "textarea wide"),
     field("long_term_unlock", "Long-term unlock", bet.long_term_unlock, "textarea wide"),
     field("next_action", "Next action", bet.next_action || "", "textarea wide"),
     field("risk", "Risk", bet.risk || "", "textarea wide"),
-    field("depends_on", "Depends on IDs", bet.depends_on.join(", ")),
-    field("unlocks", "Unlocks IDs", bet.unlocks.join(", ")),
+    field("depends_on", "Depends on IDs", bet.depends_on.join(", "), "text", betIds),
+    field("unlocks", "Unlocks IDs", bet.unlocks.join(", "), "text", betIds),
   ].join("");
 }
 
 function familyFields(family) {
+  const artifacts = uniqueOptionValues(state.registry.idea_families.map((item) => item.artifact));
+  const urls = uniqueOptionValues(state.registry.idea_families.map((item) => item.url));
+  const titles = uniqueOptionValues(state.registry.idea_families.map((item) => item.title));
   return [
     field("issue", "Issue", family.issue, "number"),
-    field("title", "Title", family.title),
+    field("title", "Title", family.title, "text", titles),
     field("big_bet", "Big bet", family.big_bet, "select", state.registry.big_bets.map((bet) => bet.id)),
-    field("priority", "Priority", family.priority, "select", ["P0", "P1", "P2", "P3"]),
-    field("rank", "Order inside bet", family.rank || "", "number"),
+    field("priority", "Lane P", family.priority, "select", ["P0", "P1", "P2", "P3"]),
+    field("rank", "Position inside bet", family.rank || "", "number"),
     field("status", "Status", family.status, "select", [...STATUS_VALUES]),
     field("role", "Role", family.role || "", "select", ["", ...ROLE_VALUES]),
     field("next_action", "Next action", family.next_action || "", "textarea wide"),
-    field("artifact", "Artifact URL/path", family.artifact || "", "wide"),
-    field("url", "Issue URL", family.url || "", "wide"),
+    field("artifact", "Lane artifact URL", family.artifact || "", "url wide", artifacts),
+    field("url", "Issue/PR URL", family.url || "", "url wide", urls),
   ].join("");
 }
 
@@ -1731,10 +1767,22 @@ function field(name, label, value, kind = "text", options = []) {
     return `<label class="${className}">${escapeHtml(label)} <textarea data-inspect-field="${escapeAttr(name)}">${escapeHtml(value)}</textarea></label>`;
   }
   if (normalizedKind === "select") {
-    const optionHtml = options.map((option) => `<option value="${escapeAttr(option)}"${option === value ? " selected" : ""}>${escapeHtml(option)}</option>`).join("");
+    const optionHtml = options.map((option) => `<option value="${escapeAttr(option)}"${String(option) === String(value) ? " selected" : ""}>${escapeHtml(option)}</option>`).join("");
     return `<label class="${className}">${escapeHtml(label)} <select data-inspect-field="${escapeAttr(name)}">${optionHtml}</select></label>`;
   }
-  return `<label class="${className}">${escapeHtml(label)} <input data-inspect-field="${escapeAttr(name)}" type="${normalizedKind}" value="${escapeAttr(value)}"></label>`;
+  const inputType = ["number", "text", "url"].includes(normalizedKind) ? normalizedKind : "text";
+  const optionValues = uniqueOptionValues(options);
+  const listId = optionValues.length ? `bigbets-options-${escapeAttr(name)}` : "";
+  const list = optionValues.length
+    ? `<datalist id="${listId}">${optionValues.map((option) => `<option value="${escapeAttr(option)}"></option>`).join("")}</datalist>`
+    : "";
+  const listAttr = listId ? ` list="${listId}"` : "";
+  return `<label class="${className}">${escapeHtml(label)} <input data-inspect-field="${escapeAttr(name)}" type="${inputType}" value="${escapeAttr(value)}"${listAttr}>${list}</label>`;
+}
+
+function uniqueOptionValues(values) {
+  return [...new Set((values || []).map((value) => String(value || "").trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
 }
 
 function applyInspector() {
@@ -1746,9 +1794,9 @@ function applyInspector() {
       const updated = {
         id: identifier(requiredString(value("id"), "bet.id"), "bet.id"),
         title: requiredString(value("title"), "bet.title"),
-        priority: priorityForWave(positiveInt(Number(value("wave")), "bet.wave")),
+        priority: priority(requiredString(value("priority"), "bet.priority"), "bet.priority"),
         rank: optionalPositiveInt(value("rank"), "bet.rank"),
-        wave: positiveInt(Number(value("wave")), "bet.wave"),
+        wave: priorityRank(priority(requiredString(value("priority"), "bet.priority"), "bet.priority")) + 1,
         status: status(requiredString(value("status"), "bet.status"), "bet.status"),
         narrative: requiredString(value("narrative"), "bet.narrative"),
         near_term_win: requiredString(value("near_term_win"), "bet.near_term_win"),
@@ -1796,16 +1844,23 @@ function $inspect(name) {
 async function hydrateIssueFromSelection() {
   if (!state.selection || state.selection.kind !== "family") return;
   const family = findFamily(state.selection.issue);
+  const currentArtifact = $inspect("artifact")?.value || family.artifact || "";
   const parsed = parseIssueUrl($inspect("url")?.value || family.url || "");
   let data = parsed;
   const resolver = adapter.fetchIssue || window.bigbetsIssueResolver;
   if (typeof resolver === "function") {
     data = { ...parsed, ...(await resolver({ url: parsed.url, issue: parsed.issue })) };
   }
+  const inferred = inferFamilyFields({ ...family, artifact: currentArtifact, url: data.url || parsed.url });
   if (data.issue && $inspect("issue")) $inspect("issue").value = String(data.issue);
   if (data.url && $inspect("url")) $inspect("url").value = data.url;
-  if (data.title && $inspect("title") && !$inspect("title").value.trim()) $inspect("title").value = data.title;
-  setLog("Imported available issue fields. Apply changes to persist.", false);
+  if ($inspect("title") && (!isDefaultTitle($inspect("title").value) || data.title || inferred.title)) {
+    $inspect("title").value = data.title || inferred.title || $inspect("title").value;
+  }
+  if ($inspect("role") && !$inspect("role").value && inferred.role) $inspect("role").value = inferred.role;
+  if ($inspect("artifact") && inferred.artifact) $inspect("artifact").value = inferred.artifact;
+  if ($inspect("url") && !($inspect("url").value || "").trim() && inferred.url) $inspect("url").value = inferred.url;
+  setLog("Autofilled fields from issue/artifact links. Apply changes to persist.", false);
 }
 
 function parseIssueUrl(url) {
@@ -1815,6 +1870,39 @@ function parseIssueUrl(url) {
     url: url || null,
     title: null,
   };
+}
+
+function inferFamilyFields(family) {
+  const artifact = family.artifact || "";
+  const url = family.url || "";
+  return {
+    artifact,
+    url,
+    title: isDefaultTitle(family.title) ? titleFromArtifact(artifact) : null,
+    role: family.role || roleFromLinks(url, artifact),
+  };
+}
+
+function isDefaultTitle(value) {
+  return !String(value || "").trim() || String(value).trim() === "New idea family";
+}
+
+function titleFromArtifact(value) {
+  const leaf = String(value || "").split("/").filter(Boolean).at(-1) || "";
+  if (!leaf) return null;
+  return leaf
+    .replace(/\\.autoclanker\\.ideas\\.json$/i, "")
+    .replace(/\\.ideas\\.json$/i, "")
+    .replace(/\\.json$/i, "")
+    .replaceAll("_", " ")
+    .replaceAll("-", " ")
+    .replace(/\\b\\w/g, (char) => char.toUpperCase());
+}
+
+function roleFromLinks(url, artifact) {
+  if (/\\.ideas\\.json(?:\\?|#|$)/i.test(artifact)) return "ideas-lane";
+  if (/\\/pull\\/\\d+(?:\\b|$)/.test(String(url))) return "wip";
+  return null;
 }
 
 function addBet() {
@@ -2073,15 +2161,15 @@ function renderMarkdown(registry, mermaid, familiesByBet) {
   if (registry.metadata.description) lines.push(registry.metadata.description, "");
   if (registry.metadata.updated_at) lines.push(`Updated: \\`${registry.metadata.updated_at}\\``, "");
   lines.push("## Priority Queue", "");
-  lines.push("| Priority | Order | Wave | Big bet | Status | Idea families | Next action |");
-  lines.push("| --- | --- | --- | --- | --- | --- | --- |");
+  lines.push("| P layer | Big bet | Status | Idea families | Next action |");
+  lines.push("| --- | --- | --- | --- | --- |");
   registry.big_bets.forEach((bet) => {
     const familyLinks = (familiesByBet.get(bet.id) || []).map(markdownIssueLink).join(", ") || "-";
-    lines.push(`| ${bet.priority} | ${bet.rank || "-"} | ${bet.wave} | ${escapeMarkdownTable(bet.title)} | ${bet.status} | ${familyLinks} | ${escapeMarkdownTable(bet.next_action || "-")} |`);
+    lines.push(`| ${bet.priority} | ${escapeMarkdownTable(bet.title)} | ${bet.status} | ${familyLinks} | ${escapeMarkdownTable(bet.next_action || "-")} |`);
   });
   lines.push("", "## Big Bets", "");
   registry.big_bets.forEach((bet) => {
-    lines.push(`### ${bet.priority} / Wave ${bet.wave}: ${bet.title}`, "");
+    lines.push(`### ${bet.priority}: ${bet.title}`, "");
     lines.push(bet.narrative, "");
     lines.push(`- **Near-term win:** ${bet.near_term_win}`);
     lines.push(`- **Long-term unlock:** ${bet.long_term_unlock}`);
@@ -2097,7 +2185,7 @@ function renderMarkdown(registry, mermaid, familiesByBet) {
 function renderMermaid(registry, edges, familiesByBet) {
   const lines = [`%% schema_version=${REGISTRY_SCHEMA_VERSION} generator=bigbets@${GENERATOR.version || "unknown"}`, "flowchart TD"];
   waves(registry).forEach(([wave, bets]) => {
-    lines.push(`  subgraph wave_${wave}[Wave ${wave}]`);
+    lines.push(`  subgraph wave_${wave}[${priorityForWave(wave)}]`);
     bets.forEach((bet) => {
       const issueLabel = (familiesByBet.get(bet.id) || []).map((family) => `#${family.issue}`).join(" ");
       lines.push(`    ${nodeId(bet.id)}["${escapeMermaid(`${bet.priority} / ${bet.title}\\\\n${issueLabel}`)}"]`);
@@ -2133,18 +2221,20 @@ function renderSvg(registry, edges, familiesByBet) {
     `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}" role="img" aria-label="${escapeAttr(registry.metadata.title)}">`,
     `<metadata>${escapeHtml(JSON.stringify(artifactMetadata()))}</metadata>`,
     "<defs>",
-    '<pattern id="grid" width="56" height="56" patternUnits="userSpaceOnUse"><path d="M 56 0 L 0 0 0 56" fill="none" stroke="#eadfce" stroke-width="0.9"/></pattern>',
-    '<filter id="shadow" x="-8%" y="-8%" width="116%" height="132%"><feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#1e1e1e" flood-opacity="0.06"/></filter>',
-    '<marker id="arrow" viewBox="0 0 10 10" refX="8.7" refY="5" markerWidth="5.6" markerHeight="5.6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#1e1e1e"/></marker>',
+    '<pattern id="grid" width="56" height="56" patternUnits="userSpaceOnUse"><path d="M 56 0 L 0 0 0 56" fill="none" stroke="#ece5d8" stroke-width="0.9"/></pattern>',
+    '<filter id="shadow" x="-8%" y="-8%" width="116%" height="132%"><feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#1e1e1e" flood-opacity="0.105"/></filter>',
+    '<marker id="arrow" viewBox="0 0 10 10" refX="8.7" refY="5" markerWidth="6.2" markerHeight="6.2" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#1e1e1e"/></marker>',
     "</defs>",
-    '<rect width="100%" height="100%" fill="#fffaf0"/>',
-    '<rect width="100%" height="100%" fill="url(#grid)" opacity="0.62"/>',
+    '<rect width="100%" height="100%" fill="#fdfbf4"/>',
+    '<circle cx="190" cy="135" r="230" fill="#dbeafe" opacity="0.22"/>',
+    `<circle cx="${layout.width - 170}" cy="145" r="250" fill="#d8f3dc" opacity="0.21"/>`,
+    '<rect width="100%" height="100%" fill="url(#grid)" opacity="0.66"/>',
     `<text x="${BOARD.marginX}" y="52" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="31" font-weight="400" fill="#1e1e1e">${escapeHtml(registry.metadata.title)}</text>`,
-    `<text x="${BOARD.marginX}" y="82" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="16" fill="#4b5563">Wave depth is big-bet priority. Order is left-to-right within a wave. Arrows are explicit dependencies.</text>`,
+    `<text x="${BOARD.marginX}" y="82" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="16" fill="#4b5563">Priority layers flow top-down. Dragging changes layer placement; arrows are explicit dependencies.</text>`,
   ];
   layout.grouped.forEach(([wave, bets]) => {
     const first = layout.positions.get(bets[0].id);
-    if (first) parts.push(`<text x="${BOARD.marginX}" y="${first.y - 22}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="16" font-weight="400" fill="#4b5563">Wave ${wave} / ${priorityForWave(wave)}</text>`);
+    if (first) parts.push(`<text x="${BOARD.marginX}" y="${first.y - 22}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="18" font-weight="400" fill="#4b5563">${priorityForWave(wave)}</text>`);
   });
   edges.forEach((edge) => {
     const source = layout.positions.get(edge.from);
@@ -2176,11 +2266,11 @@ function svgCard(bet, families, position) {
     `<g data-bet-id="${escapeAttr(bet.id)}" data-x="${position.x}" data-y="${position.y}" tabindex="0" role="button" aria-label="${escapeAttr(bet.title)}">`,
     `<path d="${roundedRectPath(position.x, position.y, BOARD.cardWidth, BOARD.cardHeight, 27)}" fill="${fill}" stroke="none" filter="url(#shadow)"/>`,
     ...roughRectPaths(position.x, position.y, BOARD.cardWidth, BOARD.cardHeight, 27, stableSeed(bet.id)),
-    `<path d="${roughRectPath(position.x + 13, position.y + 13, BOARD.cardWidth - 26, BOARD.cardHeight - 26, 20, stableSeed(`inner:${bet.id}`))}" fill="none" stroke="${color}" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" opacity="0.27"/>`,
-    `<text x="${position.x + 23}" y="${position.y + 32}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="12" font-weight="400" fill="${color}">${escapeHtml(bet.priority)} / order ${escapeHtml(bet.rank || "-")} / ${escapeHtml(bet.status)}</text>`,
+    `<path d="${roughRectPath(position.x + 13, position.y + 13, BOARD.cardWidth - 26, BOARD.cardHeight - 26, 20, stableSeed(`inner:${bet.id}`))}" fill="none" stroke="${color}" stroke-width="1.05" stroke-linecap="round" stroke-linejoin="round" opacity="0.34"/>`,
+    `<text x="${position.x + 23}" y="${position.y + 32}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="12" font-weight="400" fill="${color}">${escapeHtml(bet.priority)} / ${escapeHtml(bet.status)}</text>`,
   ];
   titleLines.forEach((line, index) => {
-    parts.push(`<text x="${position.x + 23}" y="${position.y + 61 + index * 19}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="15" font-weight="400" fill="#1e1e1e">${escapeHtml(line)}</text>`);
+    parts.push(`<text x="${position.x + 23}" y="${position.y + 61 + index * 19}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="16" font-weight="400" fill="#1e1e1e">${escapeHtml(line)}</text>`);
   });
   parts.push(`<text x="${position.x + 23}" y="${position.y + BOARD.cardHeight - 20}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="12" fill="#4b5563">${escapeHtml(issueLabel)}</text>`);
   parts.push("</g>");
@@ -2190,8 +2280,8 @@ function svgCard(bet, families, position) {
 function svgEdge(source, target, sx, sy, tx, ty, bend, dash) {
   const seed = stableSeed(`edge:${source}:${target}`);
   return [
-    `<path d="${edgePath(sx, sy, tx, ty, bend, seed)}" fill="none" stroke="#1e1e1e" stroke-width="1.08" stroke-linecap="round" stroke-linejoin="round"${dash} marker-end="url(#arrow)"/>`,
-    `<path d="${edgePath(sx, sy, tx, ty, bend, seed + 17)}" fill="none" stroke="#1e1e1e" stroke-width="0.55" stroke-linecap="round" stroke-linejoin="round" opacity="0.42"${dash}/>`,
+    `<path d="${edgePath(sx, sy, tx, ty, bend, seed)}" fill="none" stroke="#1e1e1e" stroke-width="1.42" stroke-linecap="round" stroke-linejoin="round"${dash} marker-end="url(#arrow)"/>`,
+    `<path d="${edgePath(sx, sy, tx, ty, bend, seed + 17)}" fill="none" stroke="#1e1e1e" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round" opacity="0.28"${dash}/>`,
   ];
 }
 
@@ -2201,8 +2291,8 @@ function edgePath(sx, sy, tx, ty, bend, seed) {
 
 function roughRectPaths(x, y, width, height, radius, seed) {
   return [
-    `<path class="card-outline" d="${roughRectPath(x, y, width, height, radius, seed)}" fill="none" stroke="#1e1e1e" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>`,
-    `<path d="${roughRectPath(x + 1, y - 1, width - 2, height + 1, radius, seed + 31)}" fill="none" stroke="#1e1e1e" stroke-width="0.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.38"/>`,
+    `<path class="card-outline" d="${roughRectPath(x, y, width, height, radius, seed)}" fill="none" stroke="#1e1e1e" stroke-width="1.62" stroke-linecap="round" stroke-linejoin="round"/>`,
+    `<path d="${roughRectPath(x + 1, y - 1, width - 2, height + 1, radius, seed + 31)}" fill="none" stroke="#1e1e1e" stroke-width="0.75" stroke-linecap="round" stroke-linejoin="round" opacity="0.34"/>`,
   ];
 }
 
@@ -2224,7 +2314,7 @@ function roundedRectPath(x, y, width, height, radius) {
   return `M ${x + radius} ${y} H ${x + width - radius} Q ${x + width} ${y} ${x + width} ${y + radius} V ${y + height - radius} Q ${x + width} ${y + height} ${x + width - radius} ${y + height} H ${x + radius} Q ${x} ${y + height} ${x} ${y + height - radius} V ${y + radius} Q ${x} ${y} ${x + radius} ${y} Z`;
 }
 
-function jitter(seed, salt, amount = 1.7) {
+function jitter(seed, salt, amount = 0.9) {
   let value = (seed ^ Math.imul(salt, 0x9e3779b1)) >>> 0;
   value ^= value >>> 16;
   value = Math.imul(value, 0x7feb352d) >>> 0;
@@ -2260,7 +2350,7 @@ function renderExcalidraw(registry, edges, familiesByBet) {
         roundness: null,
         boundElements: null,
       }),
-      fontSize: 15,
+      fontSize: 16,
       fontFamily: 5,
       text,
       rawText: text,
@@ -2301,7 +2391,7 @@ function renderExcalidraw(registry, edges, familiesByBet) {
     source: `bigbets ${GENERATOR.version || "unknown"}`,
     elements,
     appState: {
-      viewBackgroundColor: "#fffaf0",
+      viewBackgroundColor: "#fdfbf4",
       gridSize: 56,
       currentItemFontFamily: 5,
     },
@@ -2342,9 +2432,11 @@ function excalidrawBase(id, type, x, y, width, height, overrides = {}) {
 
 async function writeArtifacts() {
   if (!loadFromJsonEditor("Validated before writing artifacts.")) return;
+  $("artifact-status").textContent = "Publishing artifacts...";
   const result = await callAdapter("writeArtifacts", { appId: APP_ID, artifacts: artifactMap() }, null);
   const links = (result?.links || []).map((link) => `<a href="${escapeAttr(link.href)}">${escapeHtml(link.label || link.href)}</a>`);
   $("artifact-links").innerHTML = links.length ? `<strong>Artifacts:</strong> ${links.join(" / ")}` : escapeHtml(result?.message || "Artifacts written.");
+  $("artifact-status").textContent = links.length ? `Published ${links.length} artifacts` : (result?.message || "Artifacts cached");
   setLog(result?.message || "Generated artifacts written.", false);
 }
 
@@ -2400,7 +2492,10 @@ function normalizedEdges(registry) {
   const edges = new Map();
   registry.big_bets.forEach((bet) => {
     bet.unlocks.forEach((target) => edges.set(`${bet.id}\\u0000${target}`, { from: bet.id, to: target, kind: "unlocks" }));
-    bet.depends_on.forEach((source) => edges.set(`${source}\\u0000${bet.id}`, { from: source, to: bet.id, kind: "depends_on" }));
+    bet.depends_on.forEach((source) => {
+      const key = `${source}\\u0000${bet.id}`;
+      if (!edges.has(key)) edges.set(key, { from: source, to: bet.id, kind: "depends_on" });
+    });
   });
   return [...edges.values()].sort((a, b) => `${a.from}:${a.to}`.localeCompare(`${b.from}:${b.to}`));
 }
@@ -2555,7 +2650,7 @@ function priorityColor(value) {
 }
 
 function priorityFill(value) {
-  return { P0: "#d9f6e1", P1: "#dbeafe", P2: "#fff1c2", P3: "#e9e3ff" }[value] || "#eef2f7";
+  return { P0: "#d8f3dc", P1: "#dbeafe", P2: "#fff0bf", P3: "#eee6ff" }[value] || "#eef2f7";
 }
 
 function nodeId(value) {

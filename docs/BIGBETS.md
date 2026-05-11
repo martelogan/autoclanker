@@ -24,8 +24,8 @@ big_bets:
   - id: data_plane_batching
     title: Batch the request data plane
     priority: P0
-    rank: 1
-    wave: 1
+    rank: 1        # serialized position inside P0
+    wave: 1        # serialized P-depth; P0 == wave 1
     status: active
     narrative: Collapse repeated request-level data fan-out now.
     near_term_win: Ship one measured batch-loader win.
@@ -44,19 +44,30 @@ idea_families:
     url: https://github.com/example/org/issues/1001
 ```
 
-`wave`, `priority`, and `rank` have deliberately narrow meanings:
+The user-facing planning model is intentionally simple: big bets live in
+`P0`, `P1`, `P2`, ... layers, and idea families are ordered lanes inside their
+owning bet. The serialized registry still carries `wave` and `rank` for stable
+machine artifacts:
 
-- Big-bet `wave` is the dependency depth. Wave 1 is the P0 layer, Wave 2 is
-  P1, and so on.
+- Big-bet `priority` is the layer shown to humans. P0 is the current front, P1
+  is the next unlock layer, and so on.
+- Big-bet `wave` is the internal dependency depth. Wave 1 serializes P0, wave
+  2 serializes P1, and so on.
 - Big-bet `priority` is derived from `wave`; the validator rejects mismatches
   so board drags cannot leave stale labels behind.
-- `rank` is serialized for compatibility, but the UI presents it as `order`:
-  left-to-right order for big bets inside a wave, and top-to-bottom order for
-  idea-family lanes inside one bet.
+- `rank` is the internal position inside a layer or bet. The UI makes that
+  implicit through drag/drop, keyboard movement, and table ordering rather than
+  labeling every row with an order number.
 - Idea-family `priority` is the lane's own P-level. It does not change the
-  owning bet's wave.
-- Idea-family `role` should be one of `ideas-lane`, `wip`, `evidence`,
-  `proof`, `follow-up`, `blocked`, or `shipped`.
+  owning bet's layer.
+- Idea-family `artifact` points at the durable lane artifact, often an
+  `*.autoclanker.ideas.json` file. `ideas-lane` is a role; `ideas.json` is a
+  concrete artifact link label.
+- Idea-family `role` should use the supported vocabulary: `ideas-lane` for an
+  issue-backed exploration lane, `wip` for an active implementation or PR,
+  `evidence` for measurement/background material, `proof` for a crisp proof
+  candidate, `follow-up` for deferred work, or `blocked`/`shipped` when the lane
+  state is explicit.
 
 ## Invariants
 
@@ -74,8 +85,8 @@ idea_families:
 - big bets define both `near_term_win` and `long_term_unlock`.
 
 Tooling, observability, and benchmark hygiene should usually be modeled as an
-always-on underlay rather than as Wave 0. Each wave should still pursue concrete
-near-term wins while paving longer-term unlocks.
+always-on underlay rather than as a separate P-layer. Each layer should still
+pursue concrete near-term wins while paving longer-term unlocks.
 
 ## CLI
 
@@ -139,17 +150,18 @@ Generated artifacts:
 - `index.html`: static page.
 
 `bigbets site scaffold` writes a richer static app instead of only a snapshot.
-The generated app is intentionally board-first: the dependency graph is an
-top-down Excalidraw-style prototype board, the table is a compact spreadsheet-like view
-where each row is one idea family, and big-bet grouping is derived from the
-registry. Dragging a board node updates only the bet's wave/order; dependency
-edges stay explicit and do not change as a side effect of layout. Dragging a sheet
-row updates the idea family's big-bet membership and order. Single-clicking a
-node or row selects it without opening an editor; double-click, Enter, or an
-explicit edit action opens the focused inspector. Inline cell edits, keyboard
-row moves, drag/drop moves, inspector edits, canonical JSON edits, and snapshot
-restores all regenerate the JSON, CSV, Markdown, Mermaid, SVG, and Excalidraw
-artifacts from the same registry.
+The generated app is intentionally board-first: the dependency graph is a
+top-down Excalidraw-style prototype board, the table is a compact
+spreadsheet-like view where each row is one idea family, and big-bet grouping is
+derived from the registry. Dragging a board node updates only the bet's P-layer
+and implicit position; dependency edges stay explicit and do not change as a
+side effect of layout. Dragging a sheet row updates the idea family's big-bet
+membership and implicit position. Single-clicking a node or row selects it
+without opening an editor; double-click, Enter, or an explicit edit action opens
+the focused inspector. Inline cell edits, keyboard row moves, drag/drop moves,
+inspector edits, canonical JSON edits, and snapshot restores all regenerate the
+JSON, CSV, Markdown, Mermaid, SVG, and Excalidraw artifacts from the same
+registry.
 
 The generated app can open a focused inspector from table rows or graph nodes,
 validate the same maintenance invariants, download regenerated artifacts, and

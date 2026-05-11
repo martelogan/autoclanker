@@ -4,7 +4,7 @@ metadata:
   title: Example Big Bets Portfolio
   description: >
     Demonstrates how to map concrete idea-family issues into a smaller ranked
-    set of big bets with waves, dependencies, and generated meeting artifacts.
+    set of P-layered big bets with dependencies and generated meeting artifacts.
   updated_at: "2026-05-10"
   max_p0_big_bets: 2
 
@@ -50,7 +50,7 @@ big_bets:
     wave: 2
     status: active
     narrative: >
-      Use the contracts proven by Wave 1 to let compiler/runtime layers plan
+      Use the contracts proven in P0 to let compiler/runtime layers plan
       data dependencies and consume stable request state directly.
     near_term_win: Produce one narrow compiler/runtime handoff proof.
     long_term_unlock: Makes later scheduling and adaptive behavior less speculative.
@@ -91,6 +91,6 @@ idea_families:
     rank: 3
     status: candidate
     role: follow-up
-    next_action: Wait for one Wave 1 contract to stabilize.
+    next_action: Wait for one P0 contract to stabilize.
     artifact: artifacts/native_planning.autoclanker.ideas.json
     url: https://github.com/example/org/issues/1003

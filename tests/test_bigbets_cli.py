@@ -163,8 +163,8 @@ def test_bigbets_site_scaffold_writes_editable_static_app(
     assert "bigbets-site-schema-version" in index_html
     assert "Dependency board" in index_html
     assert "Idea-family sheet" in index_html
-    assert "Snapshot before editing" in index_html
-    assert "Wave 1 is P0" in index_html
+    assert "Snapshot" in index_html
+    assert "Priority layers" in index_html
     assert "localStorageAdapter" in app_js
     assert "REGISTRY_SCHEMA_VERSION" in app_js
     assert "artifactMetadataJson" in app_js
