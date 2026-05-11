@@ -68,7 +68,7 @@ idea_families:
     priority: P0
     rank: 1
     status: active
-    role: proof
+    role: ideas-lane
     next_action: Build one replay-backed projection candidate.
     artifact: artifacts/collection_projection.autoclanker.ideas.json
     url: https://github.com/example/org/issues/1001
@@ -79,7 +79,7 @@ idea_families:
     priority: P0
     rank: 2
     status: active
-    role: core
+    role: wip
     next_action: Compare against current best baseline.
     artifact: artifacts/settings_aot.autoclanker.ideas.json
     url: https://github.com/example/org/issues/1002
@@ -90,7 +90,7 @@ idea_families:
     priority: P1
     rank: 3
     status: candidate
-    role: unlock
+    role: follow-up
     next_action: Wait for one Wave 1 contract to stabilize.
     artifact: artifacts/native_planning.autoclanker.ideas.json
     url: https://github.com/example/org/issues/1003

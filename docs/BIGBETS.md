@@ -44,6 +44,20 @@ idea_families:
     url: https://github.com/example/org/issues/1001
 ```
 
+`wave`, `priority`, and `rank` have deliberately narrow meanings:
+
+- Big-bet `wave` is the dependency depth. Wave 1 is the P0 layer, Wave 2 is
+  P1, and so on.
+- Big-bet `priority` is derived from `wave`; the validator rejects mismatches
+  so board drags cannot leave stale labels behind.
+- `rank` is serialized for compatibility, but the UI presents it as `order`:
+  left-to-right order for big bets inside a wave, and top-to-bottom order for
+  idea-family lanes inside one bet.
+- Idea-family `priority` is the lane's own P-level. It does not change the
+  owning bet's wave.
+- Idea-family `role` should be one of `ideas-lane`, `wip`, `evidence`,
+  `proof`, `follow-up`, `blocked`, or `shipped`.
+
 ## Invariants
 
 `bigbets validate` enforces the constraints that keep the portfolio maintainable:
@@ -54,6 +68,8 @@ idea_families:
 - active big bets have at least one idea family;
 - P0 big bets are capped by `metadata.max_p0_big_bets`;
 - P0/P1 big bets have a `next_action`;
+- big-bet `priority` matches its wave-derived priority;
+- idea-family roles use the supported vocabulary;
 - dependency and unlock edges reference valid big-bet ids;
 - big bets define both `near_term_win` and `long_term_unlock`.
 
@@ -126,8 +142,9 @@ Generated artifacts:
 The generated app is intentionally board-first: the dependency graph is an
 top-down Excalidraw-style prototype board, the table is a compact spreadsheet-like view
 where each row is one idea family, and big-bet grouping is derived from the
-registry. Dragging a board node updates the bet's wave/rank. Dragging a sheet
-row updates the idea family's big-bet membership and rank. Single-clicking a
+registry. Dragging a board node updates only the bet's wave/order; dependency
+edges stay explicit and do not change as a side effect of layout. Dragging a sheet
+row updates the idea family's big-bet membership and order. Single-clicking a
 node or row selects it without opening an editor; double-click, Enter, or an
 explicit edit action opens the focused inspector. Inline cell edits, keyboard
 row moves, drag/drop moves, inspector edits, canonical JSON edits, and snapshot

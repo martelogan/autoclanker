@@ -64,6 +64,7 @@ include-package-data = true
 [tool.setuptools.package-data]
 "autoclanker" = ["py.typed"]
 "bigbets" = ["py.typed"]
+"bigbets.assets" = ["*.woff2"]
 
 [tool.setuptools.data-files]
 "configs" = [

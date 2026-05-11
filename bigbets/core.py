@@ -41,12 +41,21 @@ _KNOWN_STATUSES = {
     "superseded",
     "closed",
 }
-_CARD_WIDTH = 380
-_CARD_HEIGHT = 154
-_CARD_GAP = 42
-_WAVE_GAP = 112
-_MARGIN_X = 72
-_MARGIN_Y = 126
+_KNOWN_ROLES = {
+    "ideas-lane",
+    "wip",
+    "evidence",
+    "proof",
+    "follow-up",
+    "blocked",
+    "shipped",
+}
+_CARD_WIDTH = 350
+_CARD_HEIGHT = 156
+_CARD_GAP = 46
+_WAVE_GAP = 116
+_MARGIN_X = 78
+_MARGIN_Y = 132
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,7 +167,9 @@ def to_json_value(value: object) -> JsonValue:
 
 
 def load_bigbets_registry(path: Path) -> BigBetsRegistry:
-    return validate_bigbets_registry(load_serialized_payload(path), source_name=str(path))
+    return validate_bigbets_registry(
+        load_serialized_payload(path), source_name=str(path)
+    )
 
 
 def validate_bigbets_registry(
@@ -219,30 +230,33 @@ def normalize_bigbets_registry(registry: BigBetsRegistry) -> dict[str, JsonValue
         big_bets.append(bet_payload)
 
     edges = _normalized_edges(registry)
-    return cast(dict[str, JsonValue], {
-        "schema_version": BIGBETS_REGISTRY_SCHEMA_VERSION,
-        "artifact_schema_version": BIGBETS_ARTIFACT_SCHEMA_VERSION,
-        "generator": cast(dict[str, JsonValue], generator_metadata()),
-        "metadata": {
-            "title": registry.title,
-            "description": registry.description,
-            "updated_at": registry.updated_at,
-            "max_p0_big_bets": registry.max_p0_big_bets,
-        },
-        "summary": {
-            "big_bet_count": len(registry.big_bets),
-            "idea_family_count": len(registry.idea_families),
-            "edge_count": len(edges),
-            "p0_big_bet_count": sum(
-                1 for bet in registry.big_bets if bet.priority == "P0"
+    return cast(
+        dict[str, JsonValue],
+        {
+            "schema_version": BIGBETS_REGISTRY_SCHEMA_VERSION,
+            "artifact_schema_version": BIGBETS_ARTIFACT_SCHEMA_VERSION,
+            "generator": cast(dict[str, JsonValue], generator_metadata()),
+            "metadata": {
+                "title": registry.title,
+                "description": registry.description,
+                "updated_at": registry.updated_at,
+                "max_p0_big_bets": registry.max_p0_big_bets,
+            },
+            "summary": {
+                "big_bet_count": len(registry.big_bets),
+                "idea_family_count": len(registry.idea_families),
+                "edge_count": len(edges),
+                "p0_big_bet_count": sum(
+                    1 for bet in registry.big_bets if bet.priority == "P0"
+                ),
+            },
+            "big_bets": big_bets,
+            "idea_families": cast(
+                list[JsonValue], to_json_value(list(registry.idea_families))
             ),
+            "edges": cast(list[JsonValue], to_json_value(edges)),
         },
-        "big_bets": big_bets,
-        "idea_families": cast(
-            list[JsonValue], to_json_value(list(registry.idea_families))
-        ),
-        "edges": cast(list[JsonValue], to_json_value(edges)),
-    })
+    )
 
 
 def registry_to_input_payload(registry: BigBetsRegistry) -> dict[str, JsonValue]:
@@ -258,17 +272,20 @@ def registry_to_input_payload(registry: BigBetsRegistry) -> dict[str, JsonValue]
     idea_families: list[JsonValue] = [
         to_json_value(family) for family in registry.idea_families
     ]
-    return cast(dict[str, JsonValue], {
-        "schema_version": BIGBETS_REGISTRY_SCHEMA_VERSION,
-        "metadata": {
-            "title": registry.title,
-            "description": registry.description,
-            "updated_at": registry.updated_at,
-            "max_p0_big_bets": registry.max_p0_big_bets,
+    return cast(
+        dict[str, JsonValue],
+        {
+            "schema_version": BIGBETS_REGISTRY_SCHEMA_VERSION,
+            "metadata": {
+                "title": registry.title,
+                "description": registry.description,
+                "updated_at": registry.updated_at,
+                "max_p0_big_bets": registry.max_p0_big_bets,
+            },
+            "big_bets": big_bets,
+            "idea_families": idea_families,
         },
-        "big_bets": big_bets,
-        "idea_families": idea_families,
-    })
+    )
 
 
 def render_bigbets(registry: BigBetsRegistry) -> RenderedBigBets:
@@ -287,7 +304,9 @@ def render_bigbets(registry: BigBetsRegistry) -> RenderedBigBets:
     )
 
 
-def _artifact_metadata(*, site_schema_version: str | None = None) -> dict[str, JsonValue]:
+def _artifact_metadata(
+    *, site_schema_version: str | None = None
+) -> dict[str, JsonValue]:
     metadata: dict[str, JsonValue] = {
         "schema_version": BIGBETS_REGISTRY_SCHEMA_VERSION,
         "artifact_schema_version": BIGBETS_ARTIFACT_SCHEMA_VERSION,
@@ -335,17 +354,22 @@ def render_rankings_csv(registry: BigBetsRegistry) -> str:
     writer = csv.writer(buffer)
     writer.writerow(
         [
-            "priority",
-            "rank",
+            "kind",
+            "big_bet_priority",
+            "big_bet_order",
             "wave",
             "big_bet_id",
             "big_bet_title",
-            "status",
+            "big_bet_status",
+            "lane_priority",
+            "lane_order",
             "issue",
             "idea_family_title",
             "idea_family_status",
             "role",
             "next_action",
+            "artifact",
+            "url",
             "schema_version",
             "generator_version",
         ]
@@ -356,6 +380,7 @@ def render_rankings_csv(registry: BigBetsRegistry) -> str:
         if not families:
             writer.writerow(
                 [
+                    "bet",
                     bet.priority,
                     bet.rank or "",
                     bet.wave,
@@ -366,7 +391,11 @@ def render_rankings_csv(registry: BigBetsRegistry) -> str:
                     "",
                     "",
                     "",
+                    "",
+                    "",
                     bet.next_action or "",
+                    "",
+                    "",
                     BIGBETS_REGISTRY_SCHEMA_VERSION,
                     BIGBETS_VERSION,
                 ]
@@ -374,17 +403,22 @@ def render_rankings_csv(registry: BigBetsRegistry) -> str:
         for family in families:
             writer.writerow(
                 [
+                    "family",
                     bet.priority,
                     bet.rank or "",
                     bet.wave,
                     bet.id,
                     bet.title,
                     bet.status,
+                    family.priority,
+                    family.rank or "",
                     family.issue,
                     family.title,
                     family.status,
                     family.role or "",
                     family.next_action or bet.next_action or "",
+                    family.artifact or "",
+                    family.url or "",
                     BIGBETS_REGISTRY_SCHEMA_VERSION,
                     BIGBETS_VERSION,
                 ]
@@ -426,8 +460,8 @@ def render_markdown(registry: BigBetsRegistry, mermaid: str | None = None) -> st
         [
             "## Priority Queue",
             "",
-            "| Priority | Wave | Big bet | Status | Idea families | Next action |",
-            "| --- | --- | --- | --- | --- | --- |",
+            "| Priority | Order | Wave | Big bet | Status | Idea families | Next action |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
     families_by_bet = _families_by_bet(registry)
@@ -440,6 +474,7 @@ def render_markdown(registry: BigBetsRegistry, mermaid: str | None = None) -> st
             + " | ".join(
                 [
                     bet.priority,
+                    str(bet.rank or "-"),
                     str(bet.wave),
                     _escape_markdown_table(bet.title),
                     bet.status,
@@ -476,9 +511,7 @@ def render_svg(registry: BigBetsRegistry) -> str:
     max_cards = max((len(items) for items in by_wave.values()), default=1)
     width = max(
         1040,
-        (_MARGIN_X * 2)
-        + max_cards * _CARD_WIDTH
-        + max(0, max_cards - 1) * _CARD_GAP,
+        (_MARGIN_X * 2) + max_cards * _CARD_WIDTH + max(0, max_cards - 1) * _CARD_GAP,
     )
     height = max(
         520,
@@ -492,18 +525,18 @@ def render_svg(registry: BigBetsRegistry) -> str:
         f"<metadata>{_xml(json.dumps(_artifact_metadata(), sort_keys=True))}</metadata>",
         "<defs>",
         '<pattern id="grid" width="56" height="56" patternUnits="userSpaceOnUse"><path d="M 56 0 L 0 0 0 56" fill="none" stroke="#eadfce" stroke-width="0.9"/></pattern>',
-        '<filter id="shadow" x="-8%" y="-8%" width="116%" height="132%"><feDropShadow dx="0" dy="8" stdDeviation="7" flood-color="#111827" flood-opacity="0.11"/></filter>',
-        '<marker id="arrow" viewBox="0 0 10 10" refX="8.7" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#141b2b"/></marker>',
+        '<filter id="shadow" x="-8%" y="-8%" width="116%" height="132%"><feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#1e1e1e" flood-opacity="0.06"/></filter>',
+        '<marker id="arrow" viewBox="0 0 10 10" refX="8.7" refY="5" markerWidth="5.6" markerHeight="5.6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#1e1e1e"/></marker>',
         "</defs>",
         '<rect width="100%" height="100%" fill="#fffaf0"/>',
         '<rect width="100%" height="100%" fill="url(#grid)" opacity="0.62"/>',
-        f'<text x="{_MARGIN_X}" y="52" font-family="Nunito, Avenir Next, Segoe UI, sans-serif" font-size="30" font-weight="780" fill="#111827">{_xml(registry.title)}</text>',
-        f'<text x="{_MARGIN_X}" y="82" font-family="Nunito, Avenir Next, Segoe UI, sans-serif" font-size="15" fill="#5d6c84">Top-down waves: near-term bets should unlock the next layer while each idea family stays mapped to one bet.</text>',
+        f'<text x="{_MARGIN_X}" y="52" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="31" font-weight="400" fill="#1e1e1e">{_xml(registry.title)}</text>',
+        f'<text x="{_MARGIN_X}" y="82" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="16" fill="#4b5563">Wave depth is big-bet priority. Order is left-to-right within a wave. Arrows are explicit dependencies.</text>',
     ]
     for wave_index, (wave, bets) in enumerate(by_wave.items()):
         y = _MARGIN_Y + wave_index * (_CARD_HEIGHT + _WAVE_GAP)
         parts.append(
-            f'<text x="{_MARGIN_X}" y="{y - 22}" font-family="Nunito, Avenir Next, Segoe UI, sans-serif" font-size="14" font-weight="760" fill="#5d6c84">Wave {wave}</text>'
+            f'<text x="{_MARGIN_X}" y="{y - 22}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="16" font-weight="400" fill="#4b5563">Wave {wave} / {_xml(_priority_for_wave(wave))}</text>'
         )
         for card_index, bet in enumerate(bets):
             x = _MARGIN_X + card_index * (_CARD_WIDTH + _CARD_GAP)
@@ -519,9 +552,7 @@ def render_svg(registry: BigBetsRegistry) -> str:
         ty = target[1]
         bend = max(46, abs(ty - sy) / 2)
         dash = ' stroke-dasharray="8 8"' if edge["kind"] == "depends_on" else ""
-        parts.append(
-            f'<path d="M {sx:.1f} {sy:.1f} C {sx:.1f} {sy + bend:.1f}, {tx:.1f} {ty - bend:.1f}, {tx:.1f} {ty:.1f}" fill="none" stroke="#141b2b" stroke-width="2.2" stroke-linecap="round"{dash} marker-end="url(#arrow)"/>'
-        )
+        parts.extend(_svg_edge(edge["from"], edge["to"], sx, sy, tx, ty, bend, dash))
     families_by_bet = _families_by_bet(registry)
     for bet in registry.big_bets:
         x, y = positions[bet.id]
@@ -553,10 +584,10 @@ def render_excalidraw(registry: BigBetsRegistry) -> str:
                     "width": _CARD_WIDTH,
                     "height": _CARD_HEIGHT,
                     "angle": 0,
-                    "strokeColor": "#111827",
+                    "strokeColor": "#1e1e1e",
                     "backgroundColor": fill,
                     "fillStyle": "solid",
-                    "strokeWidth": 2,
+                    "strokeWidth": 1,
                     "strokeStyle": "solid",
                     "roughness": 2,
                     "opacity": 100,
@@ -588,7 +619,7 @@ def render_excalidraw(registry: BigBetsRegistry) -> str:
                     "width": _CARD_WIDTH - 44,
                     "height": 90,
                     "angle": 0,
-                    "strokeColor": "#121827",
+                    "strokeColor": "#1e1e1e",
                     "backgroundColor": "transparent",
                     "fillStyle": "solid",
                     "strokeWidth": 1,
@@ -606,8 +637,8 @@ def render_excalidraw(registry: BigBetsRegistry) -> str:
                     "updated": 1,
                     "link": None,
                     "locked": False,
-                    "fontSize": 18,
-                    "fontFamily": 1,
+                    "fontSize": 15,
+                    "fontFamily": 5,
                     "text": text,
                     "rawText": text,
                     "textAlign": "left",
@@ -636,10 +667,10 @@ def render_excalidraw(registry: BigBetsRegistry) -> str:
                 "width": tx - sx,
                 "height": ty - sy,
                 "angle": 0,
-                "strokeColor": "#141b2b" if edge["kind"] == "unlocks" else "#5d6c84",
+                "strokeColor": "#1e1e1e" if edge["kind"] == "unlocks" else "#5d6c84",
                 "backgroundColor": "transparent",
                 "fillStyle": "solid",
-                "strokeWidth": 2,
+                "strokeWidth": 1,
                 "strokeStyle": "solid" if edge["kind"] == "unlocks" else "dashed",
                 "roughness": 2,
                 "opacity": 100,
@@ -670,7 +701,7 @@ def render_excalidraw(registry: BigBetsRegistry) -> str:
         "appState": {
             "viewBackgroundColor": "#fffaf0",
             "gridSize": 56,
-            "currentItemFontFamily": 1,
+            "currentItemFontFamily": 5,
         },
         "files": {},
     }
@@ -750,7 +781,7 @@ def render_html(
   </header>
   <main>
     <section class="graph">{svg}</section>
-    <section class="grid">{''.join(cards)}</section>
+    <section class="grid">{"".join(cards)}</section>
   </main>
   <script type="application/json" id="bigbets-registry">{html.escape(data_json)}</script>
 </body>
@@ -769,9 +800,7 @@ def _parse_big_bet(item: object, index: int) -> BigBet:
         wave=_required_positive_int(mapping, "wave", f"big_bets[{index}]"),
         status=_required_status(mapping, "status", f"big_bets[{index}]"),
         narrative=_required_string(mapping, "narrative", f"big_bets[{index}]"),
-        near_term_win=_required_string(
-            mapping, "near_term_win", f"big_bets[{index}]"
-        ),
+        near_term_win=_required_string(mapping, "near_term_win", f"big_bets[{index}]"),
         long_term_unlock=_required_string(
             mapping, "long_term_unlock", f"big_bets[{index}]"
         ),
@@ -822,7 +851,11 @@ def _validate_registry_semantics(
             f"{source_name} maps issue(s) more than once: {duplicate_issues}"
         )
     unknown_bets = sorted(
-        {family.big_bet for family in registry.idea_families if family.big_bet not in bet_id_set}
+        {
+            family.big_bet
+            for family in registry.idea_families
+            if family.big_bet not in bet_id_set
+        }
     )
     if unknown_bets:
         raise ValidationFailure(
@@ -852,7 +885,21 @@ def _validate_registry_semantics(
                 f"{source_name} big_bet {bet.id!r} is {bet.priority} and must set next_action."
             )
         if bet.id in bet.depends_on or bet.id in bet.unlocks:
-            raise ValidationFailure(f"{source_name} big_bet {bet.id!r} links to itself.")
+            raise ValidationFailure(
+                f"{source_name} big_bet {bet.id!r} links to itself."
+            )
+        expected_priority = _priority_for_wave(bet.wave)
+        if bet.priority != expected_priority:
+            raise ValidationFailure(
+                f"{source_name} big_bet {bet.id!r} has priority {bet.priority!r} "
+                f"but wave {bet.wave} requires {expected_priority!r}."
+            )
+    for family in registry.idea_families:
+        if family.role is not None and family.role not in _KNOWN_ROLES:
+            raise ValidationFailure(
+                f"{source_name} idea_family #{family.issue} has unsupported role "
+                f"{family.role!r}; expected one of: {', '.join(sorted(_KNOWN_ROLES))}."
+            )
     families_by_bet = _families_by_bet(registry)
     empty_active = [
         bet.id
@@ -899,8 +946,8 @@ def _big_bets_by_wave(registry: BigBetsRegistry) -> dict[int, tuple[BigBet, ...]
     }
 
 
-def _big_bet_sort_key(bet: BigBet) -> tuple[int, int, int, str]:
-    return (_priority_rank(bet.priority), bet.wave, bet.rank or 9999, bet.title.lower())
+def _big_bet_sort_key(bet: BigBet) -> tuple[int, int, str]:
+    return (bet.wave, bet.rank or 9999, bet.title.lower())
 
 
 def _idea_family_sort_key(family: IdeaFamily) -> tuple[int, int, int]:
@@ -912,6 +959,10 @@ def _priority_rank(priority: str) -> int:
     if match is None:
         return 999
     return int(match.group(1))
+
+
+def _priority_for_wave(wave: int) -> str:
+    return f"P{max(0, wave - 1)}"
 
 
 def _priority_color(priority: str) -> str:
@@ -935,25 +986,129 @@ def _priority_fill(priority: str) -> str:
 def _svg_card(
     bet: BigBet, families: tuple[IdeaFamily, ...], x: int, y: int, color: str
 ) -> list[str]:
-    title_lines = _wrap_text(bet.title, 31, max_lines=2)
+    title_lines = _wrap_text(bet.title, 33, max_lines=3)
     family_label = ", ".join(f"#{family.issue}" for family in families[:4])
     if len(families) > 4:
         family_label = f"{family_label}, +{len(families) - 4}"
     parts = [
         f'<g data-bet-id="{_attr(bet.id)}" tabindex="0" role="button" aria-label="{_attr(bet.title)}">',
-        f'<rect x="{x}" y="{y}" width="{_CARD_WIDTH}" height="{_CARD_HEIGHT}" rx="27" fill="{_priority_fill(bet.priority)}" stroke="#111827" stroke-width="2.4" filter="url(#shadow)"/>',
-        f'<rect x="{x + 13}" y="{y + 13}" width="{_CARD_WIDTH - 26}" height="{_CARD_HEIGHT - 26}" rx="20" fill="none" stroke="{color}" stroke-width="1.25" opacity="0.38"/>',
-        f'<text x="{x + 24}" y="{y + 35}" font-family="Nunito, Avenir Next, Segoe UI, sans-serif" font-size="12" font-weight="760" fill="{color}">{_xml(bet.priority)} / rank {_xml(str(bet.rank or "-"))} / {_xml(bet.status)}</text>',
+        f'<path d="{_rounded_rect_path(x, y, _CARD_WIDTH, _CARD_HEIGHT, 27)}" fill="{_priority_fill(bet.priority)}" stroke="none" filter="url(#shadow)"/>',
+        *_rough_rect_paths(x, y, _CARD_WIDTH, _CARD_HEIGHT, 27, _stable_seed(bet.id)),
+        f'<path d="{_rough_rect_path(x + 13, y + 13, _CARD_WIDTH - 26, _CARD_HEIGHT - 26, 20, _stable_seed(f"inner:{bet.id}"))}" fill="none" stroke="{color}" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" opacity="0.27"/>',
+        f'<text x="{x + 23}" y="{y + 32}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="12" font-weight="400" fill="{color}">{_xml(bet.priority)} / order {_xml(str(bet.rank or "-"))} / {_xml(bet.status)}</text>',
     ]
     for index, line in enumerate(title_lines):
         parts.append(
-            f'<text x="{x + 24}" y="{y + 70 + index * 23}" font-family="Nunito, Avenir Next, Segoe UI, sans-serif" font-size="18" font-weight="760" fill="#111827">{_xml(line)}</text>'
+            f'<text x="{x + 23}" y="{y + 61 + index * 19}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="15" font-weight="400" fill="#1e1e1e">{_xml(line)}</text>'
         )
     parts.append(
-        f'<text x="{x + 24}" y="{y + _CARD_HEIGHT - 22}" font-family="Nunito, Avenir Next, Segoe UI, sans-serif" font-size="13" fill="#5d6c84">{_xml(family_label or "No mapped idea families")}</text>'
+        f'<text x="{x + 23}" y="{y + _CARD_HEIGHT - 20}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="12" fill="#4b5563">{_xml(family_label or "No mapped idea families")}</text>'
     )
     parts.append("</g>")
     return parts
+
+
+def _svg_edge(
+    source: str,
+    target: str,
+    sx: float,
+    sy: float,
+    tx: float,
+    ty: float,
+    bend: float,
+    dash: str,
+) -> list[str]:
+    seed = _stable_seed(f"edge:{source}:{target}")
+    first = _edge_path(sx, sy, tx, ty, bend, seed)
+    second = _edge_path(sx, sy, tx, ty, bend, seed + 17)
+    return [
+        f'<path d="{first}" fill="none" stroke="#1e1e1e" stroke-width="1.08" stroke-linecap="round" stroke-linejoin="round"{dash} marker-end="url(#arrow)"/>',
+        f'<path d="{second}" fill="none" stroke="#1e1e1e" stroke-width="0.55" stroke-linecap="round" stroke-linejoin="round" opacity="0.42"{dash}/>',
+    ]
+
+
+def _edge_path(
+    sx: float,
+    sy: float,
+    tx: float,
+    ty: float,
+    bend: float,
+    seed: int,
+) -> str:
+    j = _jitter
+    return (
+        f"M {sx + j(seed, 1):.1f} {sy + j(seed, 2):.1f} "
+        f"C {sx + j(seed, 3):.1f} {sy + bend + j(seed, 4):.1f}, "
+        f"{tx + j(seed, 5):.1f} {ty - bend + j(seed, 6):.1f}, "
+        f"{tx + j(seed, 7):.1f} {ty + j(seed, 8):.1f}"
+    )
+
+
+def _rough_rect_paths(
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    radius: int,
+    seed: int,
+) -> list[str]:
+    return [
+        f'<path class="card-outline" d="{_rough_rect_path(x, y, width, height, radius, seed)}" fill="none" stroke="#1e1e1e" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>',
+        f'<path d="{_rough_rect_path(x + 1, y - 1, width - 2, height + 1, radius, seed + 31)}" fill="none" stroke="#1e1e1e" stroke-width="0.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.38"/>',
+    ]
+
+
+def _rough_rect_path(
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    radius: int,
+    seed: int,
+) -> str:
+    points = [
+        (x + radius, y),
+        (x + width - radius, y),
+        (x + width, y + radius),
+        (x + width, y + height - radius),
+        (x + width - radius, y + height),
+        (x + radius, y + height),
+        (x, y + height - radius),
+        (x, y + radius),
+    ]
+    jittered = [
+        (px + _jitter(seed, index * 2), py + _jitter(seed, index * 2 + 1))
+        for index, (px, py) in enumerate(points)
+    ]
+    return (
+        f"M {jittered[0][0]:.1f} {jittered[0][1]:.1f} "
+        f"L {jittered[1][0]:.1f} {jittered[1][1]:.1f} "
+        f"Q {x + width + _jitter(seed, 20):.1f} {y + _jitter(seed, 21):.1f} {jittered[2][0]:.1f} {jittered[2][1]:.1f} "
+        f"L {jittered[3][0]:.1f} {jittered[3][1]:.1f} "
+        f"Q {x + width + _jitter(seed, 22):.1f} {y + height + _jitter(seed, 23):.1f} {jittered[4][0]:.1f} {jittered[4][1]:.1f} "
+        f"L {jittered[5][0]:.1f} {jittered[5][1]:.1f} "
+        f"Q {x + _jitter(seed, 24):.1f} {y + height + _jitter(seed, 25):.1f} {jittered[6][0]:.1f} {jittered[6][1]:.1f} "
+        f"L {jittered[7][0]:.1f} {jittered[7][1]:.1f} "
+        f"Q {x + _jitter(seed, 26):.1f} {y + _jitter(seed, 27):.1f} {jittered[0][0]:.1f} {jittered[0][1]:.1f} Z"
+    )
+
+
+def _rounded_rect_path(x: int, y: int, width: int, height: int, radius: int) -> str:
+    return (
+        f"M {x + radius} {y} H {x + width - radius} "
+        f"Q {x + width} {y} {x + width} {y + radius} "
+        f"V {y + height - radius} Q {x + width} {y + height} {x + width - radius} {y + height} "
+        f"H {x + radius} Q {x} {y + height} {x} {y + height - radius} "
+        f"V {y + radius} Q {x} {y} {x + radius} {y} Z"
+    )
+
+
+def _jitter(seed: int, salt: int, amount: float = 1.7) -> float:
+    value = (seed ^ (salt * 0x9E3779B1)) & 0xFFFFFFFF
+    value ^= value >> 16
+    value = (value * 0x7FEB352D) & 0xFFFFFFFF
+    value ^= value >> 15
+    return ((value % 1000) / 999 - 0.5) * amount * 2
 
 
 def _excalidraw_id(value: str) -> str:
