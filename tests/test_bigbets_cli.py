@@ -164,10 +164,15 @@ def test_bigbets_site_scaffold_writes_editable_static_app(
     assert "Dependency board" in index_html
     assert "Idea-family sheet" in index_html
     assert "Snapshot" in index_html
-    assert "Priority layers" in index_html
+    assert "Big bets" in index_html
+    assert "Idea lanes" in index_html
     assert "localStorageAdapter" in app_js
     assert "REGISTRY_SCHEMA_VERSION" in app_js
     assert "artifactMetadataJson" in app_js
+    assert "LINK_KIND_VALUES" in app_js
+    assert "parseEdgeLabels" in app_js
+    assert "Project/docs links" in app_js
+    assert "card-drag-handle" in app_js
     assert "generator_version" in app_js
     assert "renderExcalidraw" in app_js
     assert "fontFamily: 5" in app_js

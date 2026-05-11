@@ -50,12 +50,34 @@ _KNOWN_ROLES = {
     "blocked",
     "shipped",
 }
+_KNOWN_LINK_KINDS = {
+    "artifact",
+    "doc",
+    "evidence",
+    "issue",
+    "project",
+    "pr",
+    "tracker",
+}
 _CARD_WIDTH = 350
 _CARD_HEIGHT = 156
 _CARD_GAP = 46
 _WAVE_GAP = 116
 _MARGIN_X = 78
 _MARGIN_Y = 132
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalLink:
+    label: str
+    url: str
+    kind: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class EdgeLabel:
+    target: str
+    label: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,11 +96,13 @@ class BigBet:
     risk: str | None
     depends_on: tuple[str, ...]
     unlocks: tuple[str, ...]
+    edge_labels: tuple[EdgeLabel, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class IdeaFamily:
     issue: int
+    slug: str | None
     title: str
     big_bet: str
     priority: str
@@ -88,6 +112,7 @@ class IdeaFamily:
     next_action: str | None
     artifact: str | None
     url: str | None
+    links: tuple[ExternalLink, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,11 +292,16 @@ def registry_to_input_payload(registry: BigBetsRegistry) -> dict[str, JsonValue]
             payload.pop("depends_on", None)
         if not bet.unlocks:
             payload.pop("unlocks", None)
+        if not bet.edge_labels:
+            payload.pop("edge_labels", None)
         big_bets.append(payload)
 
-    idea_families: list[JsonValue] = [
-        to_json_value(family) for family in registry.idea_families
-    ]
+    idea_families: list[JsonValue] = []
+    for family in registry.idea_families:
+        payload = cast(dict[str, JsonValue], to_json_value(family))
+        if not family.links:
+            payload.pop("links", None)
+        idea_families.append(payload)
     return cast(
         dict[str, JsonValue],
         {
@@ -364,12 +394,14 @@ def render_rankings_csv(registry: BigBetsRegistry) -> str:
             "lane_priority",
             "lane_order",
             "issue",
+            "idea_family_slug",
             "idea_family_title",
             "idea_family_status",
             "role",
             "next_action",
             "artifact",
             "url",
+            "links",
             "schema_version",
             "generator_version",
         ]
@@ -393,7 +425,9 @@ def render_rankings_csv(registry: BigBetsRegistry) -> str:
                     "",
                     "",
                     "",
+                    "",
                     bet.next_action or "",
+                    "",
                     "",
                     "",
                     BIGBETS_REGISTRY_SCHEMA_VERSION,
@@ -413,12 +447,14 @@ def render_rankings_csv(registry: BigBetsRegistry) -> str:
                     family.priority,
                     family.rank or "",
                     family.issue,
+                    family.slug or "",
                     family.title,
                     family.status,
                     family.role or "",
                     family.next_action or bet.next_action or "",
                     family.artifact or "",
                     family.url or "",
+                    _links_text(family.links),
                     BIGBETS_REGISTRY_SCHEMA_VERSION,
                     BIGBETS_VERSION,
                 ]
@@ -439,7 +475,12 @@ def render_mermaid(registry: BigBetsRegistry) -> str:
             lines.append(f'    {_node_id(bet.id)}["{label}"]')
         lines.append("  end")
     for edge in _normalized_edges(registry):
-        lines.append(f"  {_node_id(edge['from'])} --> {_node_id(edge['to'])}")
+        if label := edge.get("label"):
+            lines.append(
+                f"  {_node_id(edge['from'])} -->|{_escape_mermaid(label)}| {_node_id(edge['to'])}"
+            )
+        else:
+            lines.append(f"  {_node_id(edge['from'])} --> {_node_id(edge['to'])}")
     return "\n".join(lines) + "\n"
 
 
@@ -460,7 +501,7 @@ def render_markdown(registry: BigBetsRegistry, mermaid: str | None = None) -> st
         [
             "## Priority Queue",
             "",
-            "| P layer | Big bet | Status | Idea families | Next action |",
+            "| Priority | Big bet | Status | Idea families | Next action |",
             "| --- | --- | --- | --- | --- |",
         ]
     )
@@ -531,7 +572,6 @@ def render_svg(registry: BigBetsRegistry) -> str:
         f'<circle cx="{width - 170}" cy="145" r="250" fill="#d8f3dc" opacity="0.21"/>',
         '<rect width="100%" height="100%" fill="url(#grid)" opacity="0.66"/>',
         f'<text x="{_MARGIN_X}" y="52" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="31" font-weight="400" fill="#1e1e1e">{_xml(registry.title)}</text>',
-        f'<text x="{_MARGIN_X}" y="82" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="16" fill="#4b5563">Priority layers flow top-down. Dragging changes layer placement; arrows are explicit dependencies.</text>',
     ]
     for wave_index, (wave, bets) in enumerate(by_wave.items()):
         y = _MARGIN_Y + wave_index * (_CARD_HEIGHT + _WAVE_GAP)
@@ -552,7 +592,19 @@ def render_svg(registry: BigBetsRegistry) -> str:
         ty = target[1]
         bend = max(46, abs(ty - sy) / 2)
         dash = ' stroke-dasharray="8 8"' if edge["kind"] == "depends_on" else ""
-        parts.extend(_svg_edge(edge["from"], edge["to"], sx, sy, tx, ty, bend, dash))
+        parts.extend(
+            _svg_edge(
+                edge["from"],
+                edge["to"],
+                sx,
+                sy,
+                tx,
+                ty,
+                bend,
+                dash,
+                edge.get("label"),
+            )
+        )
     families_by_bet = _families_by_bet(registry)
     for bet in registry.big_bets:
         x, y = positions[bet.id]
@@ -605,7 +657,7 @@ def render_excalidraw(registry: BigBetsRegistry) -> str:
                 }
             )
             issue_label = " ".join(
-                f"#{family.issue}" for family in families_by_bet.get(bet.id, ())
+                _family_label(family) for family in families_by_bet.get(bet.id, ())
             )
             text = f"{bet.priority} / {bet.title}\n{bet.status}"
             if issue_label:
@@ -693,6 +745,54 @@ def render_excalidraw(registry: BigBetsRegistry) -> str:
                 "endArrowhead": "arrow",
             }
         )
+        if edge_label := edge.get("label"):
+            label_id = _excalidraw_id(f"edge-label:{edge['from']}:{edge['to']}")
+            label_seed = _stable_seed(label_id)
+            label_ratio = 0.38 + (label_seed % 29) / 100
+            elements.append(
+                {
+                    "id": label_id,
+                    "type": "text",
+                    "x": sx
+                    + (tx - sx) * label_ratio
+                    - 70
+                    + _jitter(label_seed, 1, amount=34),
+                    "y": sy
+                    + (ty - sy) * label_ratio
+                    - 24
+                    + _jitter(label_seed, 2, amount=20),
+                    "width": 140,
+                    "height": 24,
+                    "angle": 0,
+                    "strokeColor": "#5d6c84",
+                    "backgroundColor": "transparent",
+                    "fillStyle": "solid",
+                    "strokeWidth": 1,
+                    "strokeStyle": "solid",
+                    "roughness": 1,
+                    "opacity": 100,
+                    "groupIds": [],
+                    "frameId": None,
+                    "roundness": None,
+                    "seed": _stable_seed(label_id),
+                    "version": 1,
+                    "versionNonce": _stable_seed(f"nonce:{label_id}"),
+                    "isDeleted": False,
+                    "boundElements": None,
+                    "updated": 1,
+                    "link": None,
+                    "locked": False,
+                    "fontSize": 13,
+                    "fontFamily": 5,
+                    "text": edge_label,
+                    "rawText": edge_label,
+                    "textAlign": "center",
+                    "verticalAlign": "middle",
+                    "containerId": None,
+                    "originalText": edge_label,
+                    "lineHeight": 1.25,
+                }
+            )
     payload = {
         "type": "excalidraw",
         "version": 2,
@@ -815,6 +915,9 @@ def _parse_big_bet(item: object, index: int) -> BigBet:
             _required_identifier_value(value, f"big_bets[{index}].unlocks")
             for value in _optional_sequence(mapping.get("unlocks"), "unlocks")
         ),
+        edge_labels=_parse_edge_labels(
+            mapping.get("edge_labels"), f"big_bets[{index}]"
+        ),
     )
 
 
@@ -822,6 +925,7 @@ def _parse_idea_family(item: object, index: int) -> IdeaFamily:
     mapping = _required_mapping(item, f"idea_families[{index}]")
     return IdeaFamily(
         issue=_required_positive_int(mapping, "issue", f"idea_families[{index}]"),
+        slug=_optional_identifier(mapping, "slug", f"idea_families[{index}]"),
         title=_required_string(mapping, "title", f"idea_families[{index}]"),
         big_bet=_required_identifier(mapping, "big_bet", f"idea_families[{index}]"),
         priority=_required_priority(mapping, "priority", f"idea_families[{index}]"),
@@ -831,6 +935,7 @@ def _parse_idea_family(item: object, index: int) -> IdeaFamily:
         next_action=_optional_string(mapping, "next_action"),
         artifact=_optional_string(mapping, "artifact"),
         url=_optional_string(mapping, "url"),
+        links=_parse_external_links(mapping.get("links"), f"idea_families[{index}]"),
     )
 
 
@@ -894,12 +999,24 @@ def _validate_registry_semantics(
                 f"{source_name} big_bet {bet.id!r} has priority {bet.priority!r} "
                 f"but wave {bet.wave} requires {expected_priority!r}."
             )
+        for edge_label in bet.edge_labels:
+            if edge_label.target not in (*bet.depends_on, *bet.unlocks):
+                raise ValidationFailure(
+                    f"{source_name} big_bet {bet.id!r} has edge label for "
+                    f"{edge_label.target!r} but no matching depends_on/unlocks edge."
+                )
     for family in registry.idea_families:
         if family.role is not None and family.role not in _KNOWN_ROLES:
             raise ValidationFailure(
                 f"{source_name} idea_family #{family.issue} has unsupported role "
                 f"{family.role!r}; expected one of: {', '.join(sorted(_KNOWN_ROLES))}."
             )
+        for link in family.links:
+            if link.kind is not None and link.kind not in _KNOWN_LINK_KINDS:
+                raise ValidationFailure(
+                    f"{source_name} idea_family #{family.issue} has unsupported link kind "
+                    f"{link.kind!r}; expected one of: {', '.join(sorted(_KNOWN_LINK_KINDS))}."
+                )
     families_by_bet = _families_by_bet(registry)
     empty_active = [
         bet.id
@@ -915,13 +1032,26 @@ def _validate_registry_semantics(
 
 def _normalized_edges(registry: BigBetsRegistry) -> list[dict[str, str]]:
     edges: dict[tuple[str, str], str] = {}
+    labels: dict[tuple[str, str], str] = {}
     for bet in registry.big_bets:
+        for edge_label in bet.edge_labels:
+            labels[(bet.id, edge_label.target)] = edge_label.label
+            labels[(edge_label.target, bet.id)] = edge_label.label
         for target in bet.unlocks:
             edges[(bet.id, target)] = "unlocks"
         for source in bet.depends_on:
             edges.setdefault((source, bet.id), "depends_on")
     return [
-        {"from": source, "to": target, "kind": kind}
+        {
+            key: value
+            for key, value in {
+                "from": source,
+                "to": target,
+                "kind": kind,
+                "label": labels.get((source, target)),
+            }.items()
+            if value is not None
+        }
         for (source, target), kind in sorted(edges.items())
     ]
 
@@ -987,7 +1117,7 @@ def _svg_card(
     bet: BigBet, families: tuple[IdeaFamily, ...], x: int, y: int, color: str
 ) -> list[str]:
     title_lines = _wrap_text(bet.title, 33, max_lines=3)
-    family_label = ", ".join(f"#{family.issue}" for family in families[:4])
+    family_label = ", ".join(_family_label(family) for family in families[:4])
     if len(families) > 4:
         family_label = f"{family_label}, +{len(families) - 4}"
     parts = [
@@ -1017,14 +1147,26 @@ def _svg_edge(
     ty: float,
     bend: float,
     dash: str,
+    label: str | None,
 ) -> list[str]:
     seed = _stable_seed(f"edge:{source}:{target}")
     first = _edge_path(sx, sy, tx, ty, bend, seed)
     second = _edge_path(sx, sy, tx, ty, bend, seed + 17)
-    return [
+    parts = [
         f'<path d="{first}" fill="none" stroke="#1e1e1e" stroke-width="1.42" stroke-linecap="round" stroke-linejoin="round"{dash} marker-end="url(#arrow)"/>',
         f'<path d="{second}" fill="none" stroke="#1e1e1e" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round" opacity="0.28"{dash}/>',
     ]
+    if label:
+        label_ratio = 0.38 + (seed % 29) / 100
+        lx = sx + (tx - sx) * label_ratio + _jitter(seed, 33, amount=34)
+        ly = sy + (ty - sy) * label_ratio - 8 + _jitter(seed, 34, amount=20)
+        parts.extend(
+            [
+                f'<rect x="{lx - 64:.1f}" y="{ly - 15:.1f}" width="128" height="22" rx="11" fill="#fdfbf4" opacity="0.82"/>',
+                f'<text x="{lx:.1f}" y="{ly:.1f}" text-anchor="middle" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="11" fill="#5d6c84">{_xml(label)}</text>',
+            ]
+        )
+    return parts
 
 
 def _edge_path(
@@ -1143,7 +1285,7 @@ def _wrap_text(text: str, width: int, *, max_lines: int) -> list[str]:
 
 def _mermaid_label(bet: BigBet, registry: BigBetsRegistry) -> str:
     families = _families_by_bet(registry).get(bet.id, ())
-    issue_label = " ".join(f"#{family.issue}" for family in families)
+    issue_label = " ".join(_family_label(family) for family in families)
     return _escape_mermaid(f"{bet.priority} · {bet.title}\\n{issue_label}")
 
 
@@ -1152,10 +1294,21 @@ def _node_id(value: str) -> str:
 
 
 def _markdown_issue_link(family: IdeaFamily) -> str:
-    label = f"#{family.issue}"
+    label = _family_label(family)
     if family.url:
         return f"[{label}]({family.url})"
     return label
+
+
+def _family_label(family: IdeaFamily) -> str:
+    return family.slug or f"#{family.issue}"
+
+
+def _links_text(links: tuple[ExternalLink, ...]) -> str:
+    return "\n".join(
+        " | ".join(value for value in (link.kind, link.label, link.url) if value)
+        for link in links
+    )
 
 
 def _escape_markdown_table(value: str) -> str:
@@ -1219,6 +1372,15 @@ def _optional_string(mapping: dict[str, object], key: str) -> str | None:
     return normalized or None
 
 
+def _optional_identifier(
+    mapping: dict[str, object], key: str, label: str
+) -> str | None:
+    value = _optional_string(mapping, key)
+    if value is None:
+        return None
+    return _validate_identifier_value(value, f"{label}.{key}")
+
+
 def _required_identifier(mapping: dict[str, object], key: str, label: str) -> str:
     value = _required_string(mapping, key, label)
     return _validate_identifier_value(value, f"{label}.{key}")
@@ -1236,6 +1398,54 @@ def _validate_identifier_value(value: str, label: str) -> str:
             f"Expected {label} to match {_IDENTIFIER_RE.pattern!r}; got {value!r}."
         )
     return value
+
+
+def _parse_external_links(value: object, label: str) -> tuple[ExternalLink, ...]:
+    links: list[ExternalLink] = []
+    for index, item in enumerate(_optional_sequence(value, f"{label}.links")):
+        mapping = _required_mapping(item, f"{label}.links[{index}]")
+        links.append(
+            ExternalLink(
+                label=_required_string(mapping, "label", f"{label}.links[{index}]"),
+                url=_required_string(mapping, "url", f"{label}.links[{index}]"),
+                kind=_optional_string(mapping, "kind"),
+            )
+        )
+    return tuple(links)
+
+
+def _parse_edge_labels(value: object, label: str) -> tuple[EdgeLabel, ...]:
+    labels: list[EdgeLabel] = []
+    if value is None:
+        return ()
+    if isinstance(value, dict):
+        for target, edge_label in cast(dict[object, object], value).items():
+            labels.append(
+                EdgeLabel(
+                    target=_required_identifier_value(target, f"{label}.edge_labels"),
+                    label=_required_non_empty_value(edge_label, f"{label}.edge_labels"),
+                )
+            )
+        return tuple(labels)
+    for index, item in enumerate(_optional_sequence(value, f"{label}.edge_labels")):
+        mapping = _required_mapping(item, f"{label}.edge_labels[{index}]")
+        labels.append(
+            EdgeLabel(
+                target=_required_identifier(
+                    mapping, "target", f"{label}.edge_labels[{index}]"
+                ),
+                label=_required_string(
+                    mapping, "label", f"{label}.edge_labels[{index}]"
+                ),
+            )
+        )
+    return tuple(labels)
+
+
+def _required_non_empty_value(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationFailure(f"Expected {label} values to be non-empty strings.")
+    return value.strip()
 
 
 def _required_priority(mapping: dict[str, object], key: str, label: str) -> str:
@@ -1273,6 +1483,8 @@ def _optional_positive_int(mapping: dict[str, object], key: str) -> int | None:
 __all__ = [
     "BigBet",
     "BigBetsRegistry",
+    "EdgeLabel",
+    "ExternalLink",
     "IdeaFamily",
     "RenderedBigBets",
     "load_bigbets_registry",

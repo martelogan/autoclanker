@@ -4,7 +4,7 @@ metadata:
   title: Example Big Bets Portfolio
   description: >
     Demonstrates how to map concrete idea-family issues into a smaller ranked
-    set of P-layered big bets with dependencies and generated meeting artifacts.
+    set of priority-ranked big bets with dependencies and generated meeting artifacts.
   updated_at: "2026-05-10"
   max_p0_big_bets: 2
 
@@ -25,6 +25,9 @@ big_bets:
     risk: Semantic parity for ordering, missing values, visibility, and fallback behavior.
     unlocks:
       - native_planning
+    edge_labels:
+      - target: native_planning
+        label: batch contract
 
   - id: typed_render_state
     title: Move repeated render state to typed boundaries
@@ -42,6 +45,9 @@ big_bets:
     risk: Stale state, feature flag parity, and exact legacy formatting behavior.
     unlocks:
       - native_planning
+    edge_labels:
+      - target: native_planning
+        label: typed state
 
   - id: native_planning
     title: Plan and consume state natively
@@ -63,6 +69,7 @@ big_bets:
 
 idea_families:
   - issue: 1001
+    slug: collection_bulk
     title: Bulk-resolve repeated collection projections
     big_bet: data_plane_batching
     priority: P0
@@ -72,8 +79,13 @@ idea_families:
     next_action: Build one replay-backed projection candidate.
     artifact: artifacts/collection_projection.autoclanker.ideas.json
     url: https://github.com/example/org/issues/1001
+    links:
+      - label: Tracking project
+        url: https://example.invalid/projects/collection-bulk
+        kind: project
 
   - issue: 1002
+    slug: settings_aot
     title: Compile repeated settings-derived state
     big_bet: typed_render_state
     priority: P0
@@ -85,6 +97,7 @@ idea_families:
     url: https://github.com/example/org/issues/1002
 
   - issue: 1003
+    slug: native_plan
     title: Prototype native runtime data plans
     big_bet: native_planning
     priority: P1

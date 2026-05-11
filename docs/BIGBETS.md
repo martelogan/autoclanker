@@ -32,9 +32,13 @@ big_bets:
     long_term_unlock: Enables static planning and adaptive prefetching.
     next_action: Run the strongest concrete batch surface first.
     unlocks: [native_planning]
+    edge_labels:
+      - target: native_planning
+        label: proven contracts
 
 idea_families:
   - issue: 1001
+    slug: collection_bulk
     title: Bulk-resolve repeated collection projections
     big_bet: data_plane_batching
     priority: P0
@@ -42,6 +46,10 @@ idea_families:
     status: active
     artifact: artifacts/collection_projection.autoclanker.ideas.json
     url: https://github.com/example/org/issues/1001
+    links:
+      - label: Tracking project
+        url: https://example.invalid/projects/collection-bulk
+        kind: project
 ```
 
 The user-facing planning model is intentionally simple: big bets live in
@@ -60,9 +68,18 @@ machine artifacts:
   labeling every row with an order number.
 - Idea-family `priority` is the lane's own P-level. It does not change the
   owning bet's layer.
+- Idea-family `slug` is the short human label shown in compact views. It should
+  be stable enough for meeting notes, but it is not a replacement for the issue
+  or PR URL.
 - Idea-family `artifact` points at the durable lane artifact, often an
   `*.autoclanker.ideas.json` file. `ideas-lane` is a role; `ideas.json` is a
   concrete artifact link label.
+- Idea-family `links` is an optional list of related project trackers, docs,
+  PRs, or evidence links. Link `kind` is generic; hosts can render private
+  trackers without coupling `bigbets` to that tracker.
+- Big-bet `edge_labels` is optional. Use it sparingly for short dependency
+  reasons like `safe contracts` or `profile heat`; omit labels when the edge is
+  already obvious.
 - Idea-family `role` should use the supported vocabulary: `ideas-lane` for an
   issue-backed exploration lane, `wip` for an active implementation or PR,
   `evidence` for measurement/background material, `proof` for a crisp proof
@@ -81,11 +98,13 @@ machine artifacts:
 - P0/P1 big bets have a `next_action`;
 - big-bet `priority` matches its wave-derived priority;
 - idea-family roles use the supported vocabulary;
+- idea-family link kinds use the supported vocabulary;
 - dependency and unlock edges reference valid big-bet ids;
+- dependency labels reference an actual dependency/unlock edge;
 - big bets define both `near_term_win` and `long_term_unlock`.
 
 Tooling, observability, and benchmark hygiene should usually be modeled as an
-always-on underlay rather than as a separate P-layer. Each layer should still
+always-on underlay rather than as a separate priority layer. Each layer should still
 pursue concrete near-term wins while paving longer-term unlocks.
 
 ## CLI
@@ -153,7 +172,7 @@ Generated artifacts:
 The generated app is intentionally board-first: the dependency graph is a
 top-down Excalidraw-style prototype board, the table is a compact
 spreadsheet-like view where each row is one idea family, and big-bet grouping is
-derived from the registry. Dragging a board node updates only the bet's P-layer
+derived from the registry. Dragging a board node updates only the bet's priority
 and implicit position; dependency edges stay explicit and do not change as a
 side effect of layout. Dragging a sheet row updates the idea family's big-bet
 membership and implicit position. Single-clicking a node or row selects it

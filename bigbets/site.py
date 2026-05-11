@@ -256,7 +256,7 @@ def _index_html(registry: BigBetsRegistry, app_id: str) -> str:
       <div class="section-heading">
         <div>
           <span class="label">Dependency board</span>
-          <h2>Priority layers. P0 is the current front; drag only changes layer placement, never dependency edges.</h2>
+          <h2>Big bets</h2>
         </div>
         <div class="button-row">
           <button type="button" data-export="svg">Download SVG</button>
@@ -271,7 +271,7 @@ def _index_html(registry: BigBetsRegistry, app_id: str) -> str:
       <div class="section-heading">
         <div>
           <span class="label">Idea-family sheet</span>
-          <h2>One row per lane, grouped by its owning bet.</h2>
+          <h2>Idea lanes</h2>
         </div>
         <div class="button-row">
           <button type="button" id="table-add-family-button">Insert family</button>
@@ -284,12 +284,13 @@ def _index_html(registry: BigBetsRegistry, app_id: str) -> str:
             <tr>
               <th class="w-drag"></th>
               <th class="w-issue">Issue/PR</th>
+              <th class="w-slug">Slug</th>
               <th class="w-priority">P</th>
               <th class="w-title">Idea family</th>
               <th class="w-state">Status</th>
-              <th class="w-role" title="Lane type: ideas-lane, wip, evidence, proof, follow-up, blocked, or shipped.">Role</th>
+              <th class="w-role" title="Lane type: ideas-lane, wip, evidence, proof, follow-up, blocked, or shipped.">Type</th>
               <th class="w-action">Next action</th>
-              <th class="w-artifact" title="Optional durable lane artifact, often an *.ideas.json file.">Artifact</th>
+              <th class="w-artifact" title="Optional lane seed, often an *.ideas.json file.">Seed</th>
               <th class="w-actions">Edit</th>
             </tr>
           </thead>
@@ -322,7 +323,7 @@ def _index_html(registry: BigBetsRegistry, app_id: str) -> str:
         <div>
           <span class="label" id="inspector-kicker">Inspector</span>
           <h2 id="inspector-title">Select a bet or idea family</h2>
-          <p id="inspector-hint">Focused editing opens on double-click, Enter, or an explicit edit button.</p>
+          <p id="inspector-hint">Use Edit, double-click, or Enter for details.</p>
         </div>
         <button type="button" id="inspector-close-button">Close</button>
       </div>
@@ -691,11 +692,25 @@ main {
 }
 
 .paper-board [data-bet-id] {
+  cursor: pointer;
+}
+
+.paper-board .card-drag-handle {
   cursor: grab;
 }
 
-.paper-board [data-bet-id]:active {
+.paper-board .card-drag-handle:active {
   cursor: grabbing;
+}
+
+.paper-board .card-action-hint {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.paper-board [data-bet-id]:hover .card-action-hint,
+.paper-board .selected-card .card-action-hint {
+  opacity: 1;
 }
 
 .paper-board [data-bet-id]:hover .card-outline {
@@ -854,6 +869,15 @@ main {
   text-overflow: ellipsis;
 }
 
+.aux-link {
+  margin-left: 0.35rem;
+}
+
+.muted-value {
+  color: #a59b8e;
+  font-style: italic;
+}
+
 .sheet-cell:empty::before {
   content: attr(data-placeholder);
   color: #a59b8e;
@@ -885,6 +909,7 @@ main {
 
 .w-drag { width: 2.2rem; }
 .w-issue { width: 4.1rem; }
+.w-slug { width: 6.5rem; }
 .w-priority { width: 3.3rem; }
 .w-title { width: 16rem; }
 .w-state { width: 5.4rem; }
@@ -995,6 +1020,15 @@ const ROLE_VALUES = new Set([
   "follow-up",
   "blocked",
   "shipped",
+]);
+const LINK_KIND_VALUES = new Set([
+  "artifact",
+  "doc",
+  "evidence",
+  "issue",
+  "project",
+  "pr",
+  "tracker",
 ]);
 const IDENTIFIER_RE = /^[a-z][a-z0-9_-]*$/;
 const PRIORITY_RE = /^P([0-9]+)$/;
@@ -1244,12 +1278,16 @@ function wireGraphCards() {
         selectBet(node.dataset.betId, true);
       }
     });
-    node.addEventListener("pointerdown", (event) => startBoardDrag(event, svg, node));
+    const handle = node.querySelector("[data-drag-handle]");
+    if (handle) {
+      handle.addEventListener("pointerdown", (event) => startBoardDrag(event, svg, node));
+    }
   });
 }
 
 function startBoardDrag(event, svg, node) {
   if (event.button !== 0) return;
+  event.stopPropagation();
   event.preventDefault();
   const start = svgPoint(svg, event);
   let moved = false;
@@ -1365,7 +1403,7 @@ function betGroupRow(bet, familyCount) {
   return `
     <tr class="bet-group-row" data-kind="bet" data-id="${escapeAttr(bet.id)}" data-priority="${escapeAttr(bet.priority)}">
       <td><button type="button" class="drag-handle" draggable="true" data-drag-kind="bet" data-drag-id="${escapeAttr(bet.id)}" title="Drag bet">::</button></td>
-      <td colspan="8">
+      <td colspan="9">
         <div class="bet-group">
           <div class="bet-group-main">
             <span class="mini-meta">${escapeHtml(bet.priority)} / ${escapeHtml(bet.status)}</span>
@@ -1387,12 +1425,13 @@ function familyRow(family) {
     <tr class="family-row" data-kind="family" data-issue="${family.issue}" data-big-bet="${escapeAttr(family.big_bet)}">
       <td><button type="button" class="drag-handle" draggable="true" data-drag-kind="family" data-drag-id="${family.issue}" title="Drag family">::</button></td>
       ${issueCell(family)}
+      ${cell("slug", family.slug || "", "w-slug", "short_slug")}
       ${selectCell("priority", family.priority, "w-priority", ["P0", "P1", "P2", "P3"])}
       ${cell("title", family.title, "w-title", "Idea family title")}
       ${selectCell("status", family.status, "w-state", [...STATUS_VALUES])}
       ${selectCell("role", family.role || "", "w-role", ["", ...ROLE_VALUES])}
       ${cell("next_action", family.next_action || "", "w-action", "next action")}
-      ${linkCell("artifact", family.artifact || "", "w-artifact", "artifact")}
+      ${linkCell("artifact", family.artifact || "", "w-artifact", "none")}
       <td class="row-actions w-actions">
         <button type="button" data-row-action="focus">Edit</button>
         <button type="button" data-row-action="hydrate">Autofill</button>
@@ -1415,9 +1454,14 @@ function selectCell(field, value, className, options) {
 
 function issueCell(family) {
   const label = `#${family.issue}`;
-  const content = family.url
+  const projectLinks = (family.links || [])
+    .filter((link) => link.kind === "project" || link.kind === "tracker")
+    .map((link) => `<a class="sheet-link aux-link" href="${escapeAttr(link.url)}" target="_blank" rel="noopener">${escapeHtml(link.label)}</a>`)
+    .join("");
+  const issue = family.url
     ? `<a class="sheet-link" href="${escapeAttr(family.url)}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`
     : escapeHtml(label);
+  const content = `${issue}${projectLinks}`;
   return `<td class="w-issue"><div class="sheet-cell" tabindex="0" data-cell data-field="issue" data-value="${family.issue}" data-placeholder="Issue">${content}</div></td>`;
 }
 
@@ -1425,7 +1469,7 @@ function linkCell(field, value, className, label) {
   const text = value ? linkLabel(value, label) : "";
   const content = value
     ? `<a class="sheet-link" href="${escapeAttr(value)}" target="_blank" rel="noopener">${escapeHtml(text)}</a>`
-    : "";
+    : `<span class="muted-value">${escapeHtml(label)}</span>`;
   return `<td class="${className}"><div class="sheet-cell" tabindex="0" data-cell data-field="${escapeAttr(field)}" data-value="${escapeAttr(value)}" data-placeholder="${escapeAttr(label)}">${content}</div></td>`;
 }
 
@@ -1626,6 +1670,7 @@ function applyTableRow(row) {
     const updated = {
       ...existing,
       issue: positiveInt(Number(value("issue")), "family.issue"),
+      slug: optionalIdentifier(value("slug"), "family.slug"),
       title: requiredString(value("title"), "family.title"),
       priority: priority(requiredString(value("priority"), "family.priority"), "family.priority"),
       rank: optionalPositiveInt(value("rank"), "family.rank") || existing.rank,
@@ -1634,6 +1679,7 @@ function applyTableRow(row) {
       next_action: optionalString(value("next_action")),
       artifact: optionalString(value("artifact")),
       url: optionalString(value("url")) || existing.url || null,
+      links: existing.links || [],
     };
     state.registry.idea_families = state.registry.idea_families.filter((family) => family.issue !== previousIssue && family.issue !== updated.issue);
     state.registry.idea_families.push(updated);
@@ -1679,8 +1725,8 @@ function betToolbar(bet) {
   return `
     <button type="button" data-inspector-action="rank-up">Move left</button>
     <button type="button" data-inspector-action="rank-down">Move right</button>
-    <button type="button" data-inspector-action="wave-earlier">Earlier P layer</button>
-    <button type="button" data-inspector-action="wave-later">Later P layer</button>
+    <button type="button" data-inspector-action="wave-earlier">Earlier priority</button>
+    <button type="button" data-inspector-action="wave-later">Later priority</button>
     <button type="button" data-inspector-action="add-family">Add family to ${escapeHtml(bet.id)}</button>
   `;
 }
@@ -1728,8 +1774,8 @@ function betFields(bet) {
   return [
     field("id", "ID", bet.id),
     field("title", "Title", bet.title),
-    field("priority", "P layer", bet.priority, "select", ["P0", "P1", "P2", "P3"]),
-    field("rank", "Position inside layer", bet.rank || "", "number"),
+    field("priority", "Priority", bet.priority, "select", ["P0", "P1", "P2", "P3"]),
+    field("rank", "Position", bet.rank || "", "number"),
     field("status", "Status", bet.status, "select", [...STATUS_VALUES]),
     field("confidence", "Confidence", bet.confidence || "", "text", ["high", "medium_high", "medium", "low"]),
     field("narrative", "Narrative", bet.narrative, "textarea wide"),
@@ -1739,6 +1785,7 @@ function betFields(bet) {
     field("risk", "Risk", bet.risk || "", "textarea wide"),
     field("depends_on", "Depends on IDs", bet.depends_on.join(", "), "text", betIds),
     field("unlocks", "Unlocks IDs", bet.unlocks.join(", "), "text", betIds),
+    field("edge_labels", "Edge labels", edgeLabelsText(bet.edge_labels || []), "textarea wide"),
   ].join("");
 }
 
@@ -1748,15 +1795,17 @@ function familyFields(family) {
   const titles = uniqueOptionValues(state.registry.idea_families.map((item) => item.title));
   return [
     field("issue", "Issue", family.issue, "number"),
+    field("slug", "Slug", family.slug || "", "text", uniqueOptionValues(state.registry.idea_families.map((item) => item.slug))),
     field("title", "Title", family.title, "text", titles),
     field("big_bet", "Big bet", family.big_bet, "select", state.registry.big_bets.map((bet) => bet.id)),
-    field("priority", "Lane P", family.priority, "select", ["P0", "P1", "P2", "P3"]),
+    field("priority", "Lane priority", family.priority, "select", ["P0", "P1", "P2", "P3"]),
     field("rank", "Position inside bet", family.rank || "", "number"),
     field("status", "Status", family.status, "select", [...STATUS_VALUES]),
-    field("role", "Role", family.role || "", "select", ["", ...ROLE_VALUES]),
+    field("role", "Type", family.role || "", "select", ["", ...ROLE_VALUES]),
     field("next_action", "Next action", family.next_action || "", "textarea wide"),
-    field("artifact", "Lane artifact URL", family.artifact || "", "url wide", artifacts),
+    field("artifact", "Seed URL", family.artifact || "", "url wide", artifacts),
     field("url", "Issue/PR URL", family.url || "", "url wide", urls),
+    field("links", "Project/docs links", linksText(family.links || []), "textarea wide"),
   ].join("");
 }
 
@@ -1785,6 +1834,46 @@ function uniqueOptionValues(values) {
     .sort((a, b) => a.localeCompare(b));
 }
 
+function linksText(links) {
+  return (links || [])
+    .map((link) => [link.kind || "link", link.label, link.url].filter(Boolean).join(" | "))
+    .join("\\n");
+}
+
+function edgeLabelsText(edgeLabels) {
+  return (edgeLabels || [])
+    .map((edge) => `${edge.target}: ${edge.label}`)
+    .join("\\n");
+}
+
+function parseLinksText(value, label) {
+  return String(value || "")
+    .split("\\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => {
+      const parts = line.split("|").map((part) => part.trim()).filter(Boolean);
+      if (parts.length === 3) return { kind: optionalString(parts[0]), label: requiredString(parts[1], `${label}[${index}].label`), url: requiredString(parts[2], `${label}[${index}].url`) };
+      if (parts.length === 2) return { kind: null, label: requiredString(parts[0], `${label}[${index}].label`), url: requiredString(parts[1], `${label}[${index}].url`) };
+      throw new Error(`${label}[${index}] must use "kind | label | url" or "label | url".`);
+    });
+}
+
+function parseEdgeLabelsText(value, label) {
+  return String(value || "")
+    .split("\\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => {
+      const separator = line.indexOf(":");
+      if (separator === -1) throw new Error(`${label}[${index}] must use "target: label".`);
+      return {
+        target: identifier(line.slice(0, separator).trim(), `${label}[${index}].target`),
+        label: requiredString(line.slice(separator + 1), `${label}[${index}].label`),
+      };
+    });
+}
+
 function applyInspector() {
   if (!state.selection) return;
   try {
@@ -1806,6 +1895,7 @@ function applyInspector() {
         risk: optionalString(value("risk")),
         depends_on: splitIdentifiers(value("depends_on"), "bet.depends_on"),
         unlocks: splitIdentifiers(value("unlocks"), "bet.unlocks"),
+        edge_labels: parseEdgeLabelsText(value("edge_labels"), "bet.edge_labels"),
       };
       state.registry.big_bets = state.registry.big_bets.filter((bet) => bet.id !== previousId && bet.id !== updated.id);
       state.registry.big_bets.push(updated);
@@ -1817,6 +1907,7 @@ function applyInspector() {
       const previousIssue = state.selection.issue;
       const updated = {
         issue: positiveInt(Number(value("issue")), "family.issue"),
+        slug: optionalIdentifier(value("slug"), "family.slug"),
         title: requiredString(value("title"), "family.title"),
         big_bet: identifier(requiredString(value("big_bet"), "family.big_bet"), "family.big_bet"),
         priority: priority(requiredString(value("priority"), "family.priority"), "family.priority"),
@@ -1826,6 +1917,7 @@ function applyInspector() {
         next_action: optionalString(value("next_action")),
         artifact: optionalString(value("artifact")),
         url: optionalString(value("url")),
+        links: parseLinksText(value("links"), "family.links"),
       };
       state.registry.idea_families = state.registry.idea_families.filter((family) => family.issue !== previousIssue && family.issue !== updated.issue);
       state.registry.idea_families.push(updated);
@@ -1924,6 +2016,7 @@ function addBet() {
     risk: null,
     depends_on: [],
     unlocks: [],
+    edge_labels: [],
   });
   state.selection = { kind: "bet", id: nextId };
   state.inspectorOpen = true;
@@ -1937,6 +2030,7 @@ function addFamily(bigBetId = null) {
   const targetBet = bigBetId || (state.selection?.kind === "bet" ? state.selection.id : null) || state.registry.big_bets[0]?.id || "";
   state.registry.idea_families.push({
     issue,
+    slug: null,
     title: "New idea family",
     big_bet: targetBet,
     priority: "P2",
@@ -1946,6 +2040,7 @@ function addFamily(bigBetId = null) {
     next_action: "Define the next exploration step.",
     artifact: null,
     url: null,
+    links: [],
   });
   state.selection = { kind: "family", issue };
   state.inspectorOpen = true;
@@ -1957,7 +2052,7 @@ function duplicateSelection() {
   if (state.selection.kind === "bet") {
     const bet = findBet(state.selection.id);
     const id = uniqueId(`${bet.id}_copy`, new Set(state.registry.big_bets.map((item) => item.id)));
-    state.registry.big_bets.push({ ...bet, id, title: `${bet.title} copy`, rank: nextRankFor(state.registry.big_bets.filter((item) => item.wave === bet.wave)), depends_on: [...bet.depends_on], unlocks: [...bet.unlocks] });
+    state.registry.big_bets.push({ ...bet, id, title: `${bet.title} copy`, rank: nextRankFor(state.registry.big_bets.filter((item) => item.wave === bet.wave)), depends_on: [...bet.depends_on], unlocks: [...bet.unlocks], edge_labels: [...(bet.edge_labels || [])] });
     state.selection = { kind: "bet", id };
     state.inspectorOpen = true;
   } else {
@@ -1965,7 +2060,7 @@ function duplicateSelection() {
     const existing = new Set(state.registry.idea_families.map((item) => item.issue));
     let issue = family.issue + 1;
     while (existing.has(issue)) issue += 1;
-    state.registry.idea_families.push({ ...family, issue, title: `${family.title} copy`, rank: nextRankFor(state.registry.idea_families.filter((item) => item.big_bet === family.big_bet)) });
+    state.registry.idea_families.push({ ...family, issue, slug: null, title: `${family.title} copy`, rank: nextRankFor(state.registry.idea_families.filter((item) => item.big_bet === family.big_bet)), links: [...(family.links || [])] });
     state.selection = { kind: "family", issue };
     state.inspectorOpen = true;
   }
@@ -2041,6 +2136,7 @@ function parseBigBet(item, index) {
     risk: optionalString(value.risk),
     depends_on: optionalIdentifierArray(value.depends_on, `${label}.depends_on`),
     unlocks: optionalIdentifierArray(value.unlocks, `${label}.unlocks`),
+    edge_labels: parseEdgeLabels(value.edge_labels, `${label}.edge_labels`),
   };
 }
 
@@ -2049,6 +2145,7 @@ function parseIdeaFamily(item, index) {
   const value = objectRequired(item, label);
   return {
     issue: positiveInt(value.issue, `${label}.issue`),
+    slug: optionalIdentifier(value.slug, `${label}.slug`),
     title: requiredString(value.title, `${label}.title`),
     big_bet: identifier(requiredString(value.big_bet, `${label}.big_bet`), `${label}.big_bet`),
     priority: priority(requiredString(value.priority, `${label}.priority`), `${label}.priority`),
@@ -2058,6 +2155,7 @@ function parseIdeaFamily(item, index) {
     next_action: optionalString(value.next_action),
     artifact: optionalString(value.artifact),
     url: optionalString(value.url),
+    links: parseLinks(value.links, `${label}.links`),
   };
 }
 
@@ -2080,6 +2178,11 @@ function validateSemantics(registry) {
     if (bet.priority !== expectedPriority) {
       throw new Error(`${bet.id} has ${bet.priority}, but wave ${bet.wave} requires ${expectedPriority}.`);
     }
+    bet.edge_labels.forEach((edge) => {
+      if (![...bet.depends_on, ...bet.unlocks].includes(edge.target)) {
+        throw new Error(`${bet.id} labels ${edge.target}, but no matching edge exists.`);
+      }
+    });
     if (priorityRank(bet.priority) <= 1 && !bet.next_action) {
       throw new Error(`${bet.id} is ${bet.priority} and must set next_action.`);
     }
@@ -2088,6 +2191,11 @@ function validateSemantics(registry) {
     if (family.role && !ROLE_VALUES.has(family.role)) {
       throw new Error(`#${family.issue} has unsupported role ${family.role}. Use one of: ${[...ROLE_VALUES].join(", ")}.`);
     }
+    family.links.forEach((link) => {
+      if (link.kind && !LINK_KIND_VALUES.has(link.kind)) {
+        throw new Error(`#${family.issue} has unsupported link kind ${link.kind}. Use one of: ${[...LINK_KIND_VALUES].join(", ")}.`);
+      }
+    });
   });
   if (badEdges.length) throw new Error(`Edges reference unknown big bets: ${[...new Set(badEdges)].join(", ")}`);
   const p0Count = registry.big_bets.filter((bet) => bet.priority === "P0").length;
@@ -2140,11 +2248,11 @@ function renderArtifacts(registry) {
 }
 
 function renderCsv(registry, familiesByBet) {
-  const rows = [["kind", "big_bet_priority", "big_bet_order", "wave", "big_bet_id", "big_bet_title", "big_bet_status", "lane_priority", "lane_order", "issue", "idea_family_title", "idea_family_status", "role", "next_action", "artifact", "url", "schema_version", "generator_version"]];
+  const rows = [["kind", "big_bet_priority", "big_bet_order", "wave", "big_bet_id", "big_bet_title", "big_bet_status", "lane_priority", "lane_order", "issue", "idea_family_slug", "idea_family_title", "idea_family_status", "role", "next_action", "artifact", "url", "links", "schema_version", "generator_version"]];
   registry.big_bets.forEach((bet) => {
     const families = familiesByBet.get(bet.id) || [];
-    rows.push(["bet", bet.priority, bet.rank || "", bet.wave, bet.id, bet.title, bet.status, "", "", "", "", "", "", bet.next_action || "", "", "", REGISTRY_SCHEMA_VERSION, GENERATOR.version || "unknown"]);
-    families.forEach((family) => rows.push(["family", bet.priority, bet.rank || "", bet.wave, bet.id, bet.title, bet.status, family.priority, family.rank || "", family.issue, family.title, family.status, family.role || "", family.next_action || bet.next_action || "", family.artifact || "", family.url || "", REGISTRY_SCHEMA_VERSION, GENERATOR.version || "unknown"]));
+    rows.push(["bet", bet.priority, bet.rank || "", bet.wave, bet.id, bet.title, bet.status, "", "", "", "", "", "", "", bet.next_action || "", "", "", "", REGISTRY_SCHEMA_VERSION, GENERATOR.version || "unknown"]);
+    families.forEach((family) => rows.push(["family", bet.priority, bet.rank || "", bet.wave, bet.id, bet.title, bet.status, family.priority, family.rank || "", family.issue, family.slug || "", family.title, family.status, family.role || "", family.next_action || bet.next_action || "", family.artifact || "", family.url || "", linksText(family.links || []), REGISTRY_SCHEMA_VERSION, GENERATOR.version || "unknown"]));
   });
   return rows.map((row) => row.map(csvCell).join(",")).join("\\n") + "\\n";
 }
@@ -2161,7 +2269,7 @@ function renderMarkdown(registry, mermaid, familiesByBet) {
   if (registry.metadata.description) lines.push(registry.metadata.description, "");
   if (registry.metadata.updated_at) lines.push(`Updated: \\`${registry.metadata.updated_at}\\``, "");
   lines.push("## Priority Queue", "");
-  lines.push("| P layer | Big bet | Status | Idea families | Next action |");
+  lines.push("| Priority | Big bet | Status | Idea families | Next action |");
   lines.push("| --- | --- | --- | --- | --- |");
   registry.big_bets.forEach((bet) => {
     const familyLinks = (familiesByBet.get(bet.id) || []).map(markdownIssueLink).join(", ") || "-";
@@ -2187,12 +2295,15 @@ function renderMermaid(registry, edges, familiesByBet) {
   waves(registry).forEach(([wave, bets]) => {
     lines.push(`  subgraph wave_${wave}[${priorityForWave(wave)}]`);
     bets.forEach((bet) => {
-      const issueLabel = (familiesByBet.get(bet.id) || []).map((family) => `#${family.issue}`).join(" ");
+      const issueLabel = (familiesByBet.get(bet.id) || []).map(familyLabel).join(" ");
       lines.push(`    ${nodeId(bet.id)}["${escapeMermaid(`${bet.priority} / ${bet.title}\\\\n${issueLabel}`)}"]`);
     });
     lines.push("  end");
   });
-  edges.forEach((edge) => lines.push(`  ${nodeId(edge.from)} --> ${nodeId(edge.to)}`));
+  edges.forEach((edge) => {
+    const label = edge.label ? `|${escapeMermaid(edge.label)}|` : "";
+    lines.push(`  ${nodeId(edge.from)} -->${label} ${nodeId(edge.to)}`);
+  });
   return lines.join("\\n") + "\\n";
 }
 
@@ -2230,7 +2341,6 @@ function renderSvg(registry, edges, familiesByBet) {
     `<circle cx="${layout.width - 170}" cy="145" r="250" fill="#d8f3dc" opacity="0.21"/>`,
     '<rect width="100%" height="100%" fill="url(#grid)" opacity="0.66"/>',
     `<text x="${BOARD.marginX}" y="52" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="31" font-weight="400" fill="#1e1e1e">${escapeHtml(registry.metadata.title)}</text>`,
-    `<text x="${BOARD.marginX}" y="82" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="16" fill="#4b5563">Priority layers flow top-down. Dragging changes layer placement; arrows are explicit dependencies.</text>`,
   ];
   layout.grouped.forEach(([wave, bets]) => {
     const first = layout.positions.get(bets[0].id);
@@ -2246,7 +2356,7 @@ function renderSvg(registry, edges, familiesByBet) {
     const ty = target.y;
     const bend = Math.max(46, Math.abs(ty - sy) / 2);
     const dash = edge.kind === "depends_on" ? ' stroke-dasharray="8 8"' : "";
-    parts.push(...svgEdge(edge.from, edge.to, sx, sy, tx, ty, bend, dash));
+    parts.push(...svgEdge(edge.from, edge.to, sx, sy, tx, ty, bend, dash, edge.label));
   });
   registry.big_bets.forEach((bet) => {
     const position = layout.positions.get(bet.id);
@@ -2261,28 +2371,44 @@ function svgCard(bet, families, position) {
   const color = priorityColor(bet.priority);
   const fill = priorityFill(bet.priority);
   const titleLines = wrapText(bet.title, 33, 3);
-  const issueLabel = families.slice(0, 4).map((family) => `#${family.issue}`).join(", ") || "No mapped idea families";
+  const issueLabel = families.slice(0, 4).map(familyLabel).join(", ") || "No mapped idea families";
   const parts = [
     `<g data-bet-id="${escapeAttr(bet.id)}" data-x="${position.x}" data-y="${position.y}" tabindex="0" role="button" aria-label="${escapeAttr(bet.title)}">`,
     `<path d="${roundedRectPath(position.x, position.y, BOARD.cardWidth, BOARD.cardHeight, 27)}" fill="${fill}" stroke="none" filter="url(#shadow)"/>`,
     ...roughRectPaths(position.x, position.y, BOARD.cardWidth, BOARD.cardHeight, 27, stableSeed(bet.id)),
     `<path d="${roughRectPath(position.x + 13, position.y + 13, BOARD.cardWidth - 26, BOARD.cardHeight - 26, 20, stableSeed(`inner:${bet.id}`))}" fill="none" stroke="${color}" stroke-width="1.05" stroke-linecap="round" stroke-linejoin="round" opacity="0.34"/>`,
     `<text x="${position.x + 23}" y="${position.y + 32}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="12" font-weight="400" fill="${color}">${escapeHtml(bet.priority)} / ${escapeHtml(bet.status)}</text>`,
+    `<g class="card-drag-handle" data-drag-handle="true" aria-label="Drag ${escapeAttr(bet.title)}">`,
+    `<rect x="${position.x + BOARD.cardWidth - 54}" y="${position.y + 18}" width="31" height="24" rx="10" fill="#fffefa" stroke="${color}" stroke-width="1" opacity="0.78"/>`,
+    `<circle cx="${position.x + BOARD.cardWidth - 44}" cy="${position.y + 27}" r="1.7" fill="${color}"/>`,
+    `<circle cx="${position.x + BOARD.cardWidth - 34}" cy="${position.y + 27}" r="1.7" fill="${color}"/>`,
+    `<circle cx="${position.x + BOARD.cardWidth - 44}" cy="${position.y + 35}" r="1.7" fill="${color}"/>`,
+    `<circle cx="${position.x + BOARD.cardWidth - 34}" cy="${position.y + 35}" r="1.7" fill="${color}"/>`,
+    `</g>`,
   ];
   titleLines.forEach((line, index) => {
     parts.push(`<text x="${position.x + 23}" y="${position.y + 61 + index * 19}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="16" font-weight="400" fill="#1e1e1e">${escapeHtml(line)}</text>`);
   });
   parts.push(`<text x="${position.x + 23}" y="${position.y + BOARD.cardHeight - 20}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="12" fill="#4b5563">${escapeHtml(issueLabel)}</text>`);
+  parts.push(`<text class="card-action-hint" x="${position.x + BOARD.cardWidth - 23}" y="${position.y + BOARD.cardHeight - 20}" text-anchor="end" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="11" fill="#5d6c84" opacity="0">edit</text>`);
   parts.push("</g>");
   return parts.join("\\n");
 }
 
-function svgEdge(source, target, sx, sy, tx, ty, bend, dash) {
+function svgEdge(source, target, sx, sy, tx, ty, bend, dash, label) {
   const seed = stableSeed(`edge:${source}:${target}`);
-  return [
+  const parts = [
     `<path d="${edgePath(sx, sy, tx, ty, bend, seed)}" fill="none" stroke="#1e1e1e" stroke-width="1.42" stroke-linecap="round" stroke-linejoin="round"${dash} marker-end="url(#arrow)"/>`,
     `<path d="${edgePath(sx, sy, tx, ty, bend, seed + 17)}" fill="none" stroke="#1e1e1e" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round" opacity="0.28"${dash}/>`,
   ];
+  if (label) {
+    const labelRatio = 0.38 + (seed % 29) / 100;
+    const lx = sx + (tx - sx) * labelRatio + jitter(seed, 33, 34);
+    const ly = sy + (ty - sy) * labelRatio - 8 + jitter(seed, 34, 20);
+    parts.push(`<rect x="${fmt(lx - 64)}" y="${fmt(ly - 15)}" width="128" height="22" rx="11" fill="#fdfbf4" opacity="0.82"/>`);
+    parts.push(`<text x="${fmt(lx)}" y="${fmt(ly)}" text-anchor="middle" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="11" fill="#5d6c84">${escapeHtml(label)}</text>`);
+  }
+  return parts;
 }
 
 function edgePath(sx, sy, tx, ty, bend, seed) {
@@ -2384,6 +2510,28 @@ function renderExcalidraw(registry, edges, familiesByBet) {
       startArrowhead: null,
       endArrowhead: "arrow",
     });
+    if (edge.label) {
+      const text = edge.label;
+      const labelSeed = stableSeed(`edge-label:${edge.from}:${edge.to}`);
+      const labelRatio = 0.38 + (labelSeed % 29) / 100;
+      elements.push({
+        ...excalidrawBase(stableId(`edge-label:${edge.from}:${edge.to}`), "text", sx + (tx - sx) * labelRatio - 70 + jitter(labelSeed, 1, 34), sy + (ty - sy) * labelRatio - 24 + jitter(labelSeed, 2, 20), 140, 24, {
+          strokeColor: "#5d6c84",
+          backgroundColor: "transparent",
+          roundness: null,
+          boundElements: null,
+        }),
+        fontSize: 13,
+        fontFamily: 5,
+        text,
+        rawText: text,
+        textAlign: "center",
+        verticalAlign: "middle",
+        containerId: null,
+        originalText: text,
+        lineHeight: 1.25,
+      });
+    }
   });
   return JSON.stringify({
     type: "excalidraw",
@@ -2490,14 +2638,24 @@ function familiesByBigBet(registry) {
 
 function normalizedEdges(registry) {
   const edges = new Map();
+  const labels = new Map();
   registry.big_bets.forEach((bet) => {
+    (bet.edge_labels || []).forEach((edge) => {
+      labels.set(`${bet.id}\\u0000${edge.target}`, edge.label);
+      labels.set(`${edge.target}\\u0000${bet.id}`, edge.label);
+    });
     bet.unlocks.forEach((target) => edges.set(`${bet.id}\\u0000${target}`, { from: bet.id, to: target, kind: "unlocks" }));
     bet.depends_on.forEach((source) => {
       const key = `${source}\\u0000${bet.id}`;
       if (!edges.has(key)) edges.set(key, { from: source, to: bet.id, kind: "depends_on" });
     });
   });
-  return [...edges.values()].sort((a, b) => `${a.from}:${a.to}`.localeCompare(`${b.from}:${b.to}`));
+  return [...edges.entries()]
+    .map(([key, edge]) => {
+      const label = labels.get(key);
+      return label ? { ...edge, label } : edge;
+    })
+    .sort((a, b) => `${a.from}:${a.to}`.localeCompare(`${b.from}:${b.to}`));
 }
 
 function waves(registry) {
@@ -2597,6 +2755,42 @@ function optionalIdentifierArray(value, label) {
   return value.map((item) => identifier(requiredString(item, label), label));
 }
 
+function optionalIdentifier(value, label) {
+  const text = optionalString(value);
+  return text ? identifier(text, label) : null;
+}
+
+function parseLinks(value, label) {
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array.`);
+  return value.map((item, index) => {
+    const link = objectRequired(item, `${label}[${index}]`);
+    return {
+      label: requiredString(link.label, `${label}[${index}].label`),
+      url: requiredString(link.url, `${label}[${index}].url`),
+      kind: optionalString(link.kind),
+    };
+  });
+}
+
+function parseEdgeLabels(value, label) {
+  if (value == null) return [];
+  if (!Array.isArray(value) && typeof value === "object") {
+    return Object.entries(value).map(([target, edgeLabel]) => ({
+      target: identifier(target, `${label}.target`),
+      label: requiredString(edgeLabel, `${label}.${target}`),
+    }));
+  }
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array.`);
+  return value.map((item, index) => {
+    const edge = objectRequired(item, `${label}[${index}]`);
+    return {
+      target: identifier(requiredString(edge.target, `${label}[${index}].target`), `${label}[${index}].target`),
+      label: requiredString(edge.label, `${label}[${index}].label`),
+    };
+  });
+}
+
 function splitIdentifiers(value, label) {
   return String(value || "").split(",").map((item) => item.trim()).filter(Boolean).map((item) => identifier(item, label));
 }
@@ -2658,7 +2852,12 @@ function nodeId(value) {
 }
 
 function markdownIssueLink(family) {
-  return family.url ? `[#${family.issue}](${family.url})` : `#${family.issue}`;
+  const label = familyLabel(family);
+  return family.url ? `[${label}](${family.url})` : label;
+}
+
+function familyLabel(family) {
+  return family.slug || `#${family.issue}`;
 }
 
 function linkLabel(value, fallback) {
@@ -2669,6 +2868,7 @@ function linkLabel(value, fallback) {
   const file = text.split("/").filter(Boolean).at(-1) || fallback;
   if (file.endsWith(".ideas.json")) return "ideas.json";
   if (file.endsWith(".json")) return file.replace(/.*?([a-z0-9_-]+\\.json)$/i, "$1");
+  if (fallback === "none") return "human-authored";
   return fallback || file;
 }
 
