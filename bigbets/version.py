@@ -11,8 +11,8 @@ BIGBETS_VERSION = _installed_version
 
 BIGBETS_GENERATOR_NAME = "bigbets"
 BIGBETS_REGISTRY_SCHEMA_VERSION = "bigbets.registry.v1"
-BIGBETS_ARTIFACT_SCHEMA_VERSION = "bigbets.artifacts.v1"
-BIGBETS_SITE_SCHEMA_VERSION = "bigbets.site.v1"
+BIGBETS_ARTIFACT_SCHEMA_VERSION = "bigbets.artifacts.v2"
+BIGBETS_SITE_SCHEMA_VERSION = "bigbets.site.v2"
 
 
 def generator_metadata() -> dict[str, str]:
