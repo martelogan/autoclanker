@@ -100,6 +100,8 @@ integration target.
 - Era-local objective and feasibility models with an exact explicit-feature
   posterior when safe, plus explicit fallback metadata when not.
 - A filesystem-backed session store.
+- A standalone `bigbets` portfolio compiler for ranked strategy registries,
+  dependency graphs, and host-neutral static views.
 - Public examples for Bayes-first, `autoresearch`, and `cevolve` workflows.
 
 ## Plain-Language Vocabulary
@@ -145,6 +147,7 @@ The installed CLI entry point is:
 
 ```bash
 autoclanker --help
+bigbets --help
 ```
 
 If `autoresearch` or `cevolve` are already installed on your machine, the
@@ -166,6 +169,26 @@ Equivalent task surfaces are available through `mise` and `make`.
 For local secrets or live-test overrides, copy
 [`/.env.example`](.env.example) to `.env.local`. The repo ignores `.env`,
 `.env.local`, and `.env.*.local`.
+
+## Big Bets Portfolio Compiler
+
+`bigbets` is a sibling CLI packaged with this repo for maintaining ranked
+optimization portfolios. It validates one structured registry and renders the
+derived JSON graph, CSV ranking, Mermaid graph, SVG visual, Markdown snapshot,
+Excalidraw board, static `index.html`, and editable static site scaffold.
+
+```bash
+bigbets validate --input examples/bigbets/basic_portfolio.yaml
+bigbets render --input examples/bigbets/basic_portfolio.yaml --output-dir tmp/bigbets-site
+bigbets site scaffold --input examples/bigbets/basic_portfolio.yaml --output-dir ~/bigbets-site
+autoclanker bigbets validate --input examples/bigbets/basic_portfolio.yaml
+```
+
+Registries and rendered artifacts are schema-versioned so durable meeting
+surfaces can be audited and regenerated when `bigbets` evolves.
+
+Use it when individual idea-family issues need to roll up into a smaller set of
+ranked big bets. See [`docs/BIGBETS.md`](docs/BIGBETS.md).
 
 ## Quickstart
 

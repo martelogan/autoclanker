@@ -6,6 +6,7 @@ from typing import cast
 
 from autoclanker import __version__
 from autoclanker.cli import build_parser
+from bigbets import BIGBETS_VERSION, __version__ as bigbets_version
 from tests.compliance import covers
 
 
@@ -29,6 +30,7 @@ def _subparser_choices(
 @covers("M0-001")
 def test_package_exposes_version() -> None:
     assert __version__
+    assert bigbets_version == BIGBETS_VERSION
 
 
 @covers("M0-002")
@@ -36,7 +38,7 @@ def test_cli_parser_exposes_required_command_tree() -> None:
     parser = build_parser()
     root_commands = _subparser_choices(parser)
 
-    assert {"beliefs", "eval", "adapter", "session"} <= set(root_commands)
+    assert {"beliefs", "eval", "adapter", "session", "bigbets"} <= set(root_commands)
     assert {
         "validate",
         "preview",
@@ -57,3 +59,6 @@ def test_cli_parser_exposes_required_command_tree() -> None:
         "recommend-commit",
         "status",
     } <= set(_subparser_choices(root_commands["session"]))
+    assert {"validate", "emit", "render", "site"} <= set(
+        _subparser_choices(root_commands["bigbets"])
+    )

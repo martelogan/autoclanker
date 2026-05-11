@@ -53,15 +53,17 @@ dev = [
 
 [project.scripts]
 autoclanker = "autoclanker.cli:main"
+bigbets = "bigbets.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["autoclanker*"]
+include = ["autoclanker*", "bigbets*"]
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.package-data]
 "autoclanker" = ["py.typed"]
+"bigbets" = ["py.typed"]
 
 [tool.setuptools.data-files]
 "configs" = [
@@ -80,7 +82,7 @@ include-package-data = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
-addopts = "-q --cov=autoclanker --cov-report=term-missing -m 'not integration and not upstream_live and not live'"
+addopts = "-q --cov=autoclanker --cov=bigbets --cov-report=term-missing -m 'not integration and not upstream_live and not live'"
 xfail_strict = true
 markers = [
     "integration: slower or end-to-end checks that are excluded from the default test lane",
@@ -101,13 +103,13 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 ignore = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["autoclanker"]
+known-first-party = ["autoclanker", "bigbets"]
 combine-as-imports = true
 force-single-line = false
 lines-between-types = 1
 
 [tool.pyright]
-include = ["autoclanker", "tests"]
+include = ["autoclanker", "bigbets", "tests"]
 exclude = [".venv", ".mise", ".local", "build", "dist"]
 typeCheckingMode = "strict"
 pythonVersion = "3.11"

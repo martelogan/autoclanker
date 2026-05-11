@@ -57,3 +57,4 @@ This document mirrors the machine-readable acceptance matrix at [`tests/complian
 | `M7-009` | `required` | The primary repo docs focus on the current library and contributor workflow rather than internal handoff or scaffold artifacts. |
 | `M7-010` | `required` | The advanced skill and belief-input docs describe the common LLM-assisted workflow from rough ideas to advanced typed Bayes specs, with JSON preferred for machine-authored outputs. |
 | `M7-011` | `required` | A second deterministic frontier-heavy benchmark shows normalized budget allocations and heuristic merge-suggestion artifacts on the parser target rather than only cold-start ranking lift. |
+| `M8-001` | `required` | The standalone bigbets package validates one structured versioned portfolio registry and renders schema-versioned JSON, CSV, Markdown, Mermaid, Excalidraw, SVG, static HTML, and editable static-site artifacts, with autoclanker exposing a convenience alias. |

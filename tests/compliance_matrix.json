@@ -316,5 +316,11 @@
     "gate": "required",
     "description": "A second deterministic frontier-heavy benchmark shows normalized budget allocations and heuristic merge-suggestion artifacts on the parser target rather than only cold-start ranking lift.",
     "status": "active"
+  },
+  {
+    "requirement_id": "M8-001",
+    "gate": "required",
+    "description": "The standalone bigbets package validates one structured versioned portfolio registry and renders schema-versioned JSON, CSV, Markdown, Mermaid, Excalidraw, SVG, static HTML, and editable static-site artifacts, with autoclanker exposing a convenience alias.",
+    "status": "active"
   }
 ]

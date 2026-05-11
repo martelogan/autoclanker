@@ -1,0 +1,96 @@
+schema_version: bigbets.registry.v1
+
+metadata:
+  title: Example Big Bets Portfolio
+  description: >
+    Demonstrates how to map concrete idea-family issues into a smaller ranked
+    set of big bets with waves, dependencies, and generated meeting artifacts.
+  updated_at: "2026-05-10"
+  max_p0_big_bets: 2
+
+big_bets:
+  - id: data_plane_batching
+    title: Batch the request data plane
+    priority: P0
+    rank: 1
+    wave: 1
+    status: active
+    narrative: >
+      Collapse repeated request-level data fan-out now while proving reusable
+      batching contracts for later compiler and scheduler work.
+    near_term_win: Ship one measured batch-loader or bulk-projection win.
+    long_term_unlock: Enables static planning and adaptive prefetching to target a shared contract.
+    next_action: Run the strongest concrete batch surface first.
+    confidence: medium_high
+    risk: Semantic parity for ordering, missing values, visibility, and fallback behavior.
+    unlocks:
+      - native_planning
+
+  - id: typed_render_state
+    title: Move repeated render state to typed boundaries
+    priority: P0
+    rank: 2
+    wave: 1
+    status: active
+    narrative: >
+      Move repeated parsing and request-state admission out of hot loops and
+      into narrow typed boundaries.
+    near_term_win: Replace repeated runtime parsing with a validated typed representation.
+    long_term_unlock: Gives native runtimes compact state that can be consumed without callback churn.
+    next_action: Pick one repeated state path with strong benchmark coverage.
+    confidence: medium
+    risk: Stale state, feature flag parity, and exact legacy formatting behavior.
+    unlocks:
+      - native_planning
+
+  - id: native_planning
+    title: Plan and consume state natively
+    priority: P1
+    rank: 3
+    wave: 2
+    status: active
+    narrative: >
+      Use the contracts proven by Wave 1 to let compiler/runtime layers plan
+      data dependencies and consume stable request state directly.
+    near_term_win: Produce one narrow compiler/runtime handoff proof.
+    long_term_unlock: Makes later scheduling and adaptive behavior less speculative.
+    next_action: Start with measurement and one narrow prototype.
+    confidence: medium
+    risk: Over-broad compiler changes before the runtime contract is proven.
+    depends_on:
+      - data_plane_batching
+      - typed_render_state
+
+idea_families:
+  - issue: 1001
+    title: Bulk-resolve repeated collection projections
+    big_bet: data_plane_batching
+    priority: P0
+    rank: 1
+    status: active
+    role: proof
+    next_action: Build one replay-backed projection candidate.
+    artifact: artifacts/collection_projection.autoclanker.ideas.json
+    url: https://github.com/example/org/issues/1001
+
+  - issue: 1002
+    title: Compile repeated settings-derived state
+    big_bet: typed_render_state
+    priority: P0
+    rank: 2
+    status: active
+    role: core
+    next_action: Compare against current best baseline.
+    artifact: artifacts/settings_aot.autoclanker.ideas.json
+    url: https://github.com/example/org/issues/1002
+
+  - issue: 1003
+    title: Prototype native runtime data plans
+    big_bet: native_planning
+    priority: P1
+    rank: 3
+    status: candidate
+    role: unlock
+    next_action: Wait for one Wave 1 contract to stabilize.
+    artifact: artifacts/native_planning.autoclanker.ideas.json
+    url: https://github.com/example/org/issues/1003

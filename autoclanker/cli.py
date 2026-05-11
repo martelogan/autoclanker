@@ -19,6 +19,7 @@ from autoclanker.bayes_layer.types import (
     SessionFailure,
     ValidationFailure,
 )
+from bigbets.cli import register_bigbets_commands
 
 EXIT_VALIDATION_ERROR = 2
 EXIT_SESSION_ERROR = 3
@@ -64,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_eval_commands(subparsers)
     register_adapter_commands(subparsers)
     register_session_commands(subparsers)
+    register_bigbets_commands(subparsers)
     return parser
 
 
