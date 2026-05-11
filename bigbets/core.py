@@ -41,12 +41,12 @@ _KNOWN_STATUSES = {
     "superseded",
     "closed",
 }
-_CARD_WIDTH = 320
-_CARD_HEIGHT = 132
-_CARD_GAP = 34
-_WAVE_GAP = 128
-_MARGIN_X = 64
-_MARGIN_Y = 112
+_CARD_WIDTH = 380
+_CARD_HEIGHT = 154
+_CARD_GAP = 42
+_WAVE_GAP = 112
+_MARGIN_X = 72
+_MARGIN_Y = 126
 
 
 @dataclass(frozen=True, slots=True)
@@ -395,7 +395,7 @@ def render_rankings_csv(registry: BigBetsRegistry) -> str:
 def render_mermaid(registry: BigBetsRegistry) -> str:
     lines = [
         f"%% schema_version={BIGBETS_REGISTRY_SCHEMA_VERSION} generator=bigbets@{BIGBETS_VERSION}",
-        "flowchart LR",
+        "flowchart TD",
     ]
     by_wave = _big_bets_by_wave(registry)
     for wave, bets in by_wave.items():
@@ -475,52 +475,52 @@ def render_svg(registry: BigBetsRegistry) -> str:
     by_wave = _big_bets_by_wave(registry)
     max_cards = max((len(items) for items in by_wave.values()), default=1)
     width = max(
-        960,
+        1040,
         (_MARGIN_X * 2)
-        + len(by_wave) * _CARD_WIDTH
-        + max(0, len(by_wave) - 1) * _WAVE_GAP,
+        + max_cards * _CARD_WIDTH
+        + max(0, max_cards - 1) * _CARD_GAP,
     )
     height = max(
-        430,
+        520,
         (_MARGIN_Y * 2)
-        + max_cards * _CARD_HEIGHT
-        + max(0, max_cards - 1) * _CARD_GAP,
+        + len(by_wave) * _CARD_HEIGHT
+        + max(0, len(by_wave) - 1) * _WAVE_GAP,
     )
     positions: dict[str, tuple[int, int]] = {}
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-label="{_xml(registry.title)}">',
         f"<metadata>{_xml(json.dumps(_artifact_metadata(), sort_keys=True))}</metadata>",
         "<defs>",
-        '<pattern id="grid" width="56" height="56" patternUnits="userSpaceOnUse"><path d="M 56 0 L 0 0 0 56" fill="none" stroke="#eadfce" stroke-width="1"/></pattern>',
-        '<filter id="shadow" x="-10%" y="-10%" width="120%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="8" flood-color="#111827" flood-opacity="0.16"/></filter>',
-        '<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#111827"/></marker>',
+        '<pattern id="grid" width="56" height="56" patternUnits="userSpaceOnUse"><path d="M 56 0 L 0 0 0 56" fill="none" stroke="#eadfce" stroke-width="0.9"/></pattern>',
+        '<filter id="shadow" x="-8%" y="-8%" width="116%" height="132%"><feDropShadow dx="0" dy="8" stdDeviation="7" flood-color="#111827" flood-opacity="0.11"/></filter>',
+        '<marker id="arrow" viewBox="0 0 10 10" refX="8.7" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#141b2b"/></marker>',
         "</defs>",
         '<rect width="100%" height="100%" fill="#fffaf0"/>',
-        '<rect width="100%" height="100%" fill="url(#grid)" opacity="0.72"/>',
-        f'<text x="{_MARGIN_X}" y="48" font-family="Avenir Next, Segoe UI, sans-serif" font-size="30" font-weight="900" fill="#111827">{_xml(registry.title)}</text>',
-        f'<text x="{_MARGIN_X}" y="76" font-family="Avenir Next, Segoe UI, sans-serif" font-size="15" fill="#5d6c84">Every idea-family row maps to exactly one big bet; arrows show unlocks.</text>',
+        '<rect width="100%" height="100%" fill="url(#grid)" opacity="0.62"/>',
+        f'<text x="{_MARGIN_X}" y="52" font-family="Nunito, Avenir Next, Segoe UI, sans-serif" font-size="30" font-weight="780" fill="#111827">{_xml(registry.title)}</text>',
+        f'<text x="{_MARGIN_X}" y="82" font-family="Nunito, Avenir Next, Segoe UI, sans-serif" font-size="15" fill="#5d6c84">Top-down waves: near-term bets should unlock the next layer while each idea family stays mapped to one bet.</text>',
     ]
     for wave_index, (wave, bets) in enumerate(by_wave.items()):
-        x = _MARGIN_X + wave_index * (_CARD_WIDTH + _WAVE_GAP)
+        y = _MARGIN_Y + wave_index * (_CARD_HEIGHT + _WAVE_GAP)
         parts.append(
-            f'<text x="{x}" y="{_MARGIN_Y - 24}" font-family="Avenir Next, Segoe UI, sans-serif" font-size="14" font-weight="900" fill="#5d6c84">Wave {wave}</text>'
+            f'<text x="{_MARGIN_X}" y="{y - 22}" font-family="Nunito, Avenir Next, Segoe UI, sans-serif" font-size="14" font-weight="760" fill="#5d6c84">Wave {wave}</text>'
         )
         for card_index, bet in enumerate(bets):
-            y = _MARGIN_Y + card_index * (_CARD_HEIGHT + _CARD_GAP)
+            x = _MARGIN_X + card_index * (_CARD_WIDTH + _CARD_GAP)
             positions[bet.id] = (x, y)
     for edge in _normalized_edges(registry):
         source = positions.get(edge["from"])
         target = positions.get(edge["to"])
         if source is None or target is None:
             continue
-        sx = source[0] + _CARD_WIDTH
-        sy = source[1] + _CARD_HEIGHT / 2
-        tx = target[0]
-        ty = target[1] + _CARD_HEIGHT / 2
-        bend = max(62, abs(tx - sx) / 2)
+        sx = source[0] + _CARD_WIDTH / 2
+        sy = source[1] + _CARD_HEIGHT
+        tx = target[0] + _CARD_WIDTH / 2
+        ty = target[1]
+        bend = max(46, abs(ty - sy) / 2)
         dash = ' stroke-dasharray="8 8"' if edge["kind"] == "depends_on" else ""
         parts.append(
-            f'<path d="M {sx:.1f} {sy:.1f} C {sx + bend:.1f} {sy:.1f}, {tx - bend:.1f} {ty:.1f}, {tx:.1f} {ty:.1f}" fill="none" stroke="#111827" stroke-width="3"{dash} marker-end="url(#arrow)"/>'
+            f'<path d="M {sx:.1f} {sy:.1f} C {sx:.1f} {sy + bend:.1f}, {tx:.1f} {ty - bend:.1f}, {tx:.1f} {ty:.1f}" fill="none" stroke="#141b2b" stroke-width="2.2" stroke-linecap="round"{dash} marker-end="url(#arrow)"/>'
         )
     families_by_bet = _families_by_bet(registry)
     for bet in registry.big_bets:
@@ -537,11 +537,10 @@ def render_excalidraw(registry: BigBetsRegistry) -> str:
     elements: list[dict[str, JsonValue]] = []
     families_by_bet = _families_by_bet(registry)
     for wave_index, (_wave, bets) in enumerate(by_wave.items()):
-        x = _MARGIN_X + wave_index * (_CARD_WIDTH + _WAVE_GAP)
+        y = _MARGIN_Y + wave_index * (_CARD_HEIGHT + _WAVE_GAP)
         for card_index, bet in enumerate(bets):
-            y = _MARGIN_Y + card_index * (_CARD_HEIGHT + _CARD_GAP)
+            x = _MARGIN_X + card_index * (_CARD_WIDTH + _CARD_GAP)
             positions[bet.id] = (x, y)
-            color = _priority_color(bet.priority)
             fill = _priority_fill(bet.priority)
             element_id = _excalidraw_id(f"rect:{bet.id}")
             text_id = _excalidraw_id(f"text:{bet.id}")
@@ -554,12 +553,12 @@ def render_excalidraw(registry: BigBetsRegistry) -> str:
                     "width": _CARD_WIDTH,
                     "height": _CARD_HEIGHT,
                     "angle": 0,
-                    "strokeColor": color,
+                    "strokeColor": "#111827",
                     "backgroundColor": fill,
                     "fillStyle": "solid",
                     "strokeWidth": 2,
                     "strokeStyle": "solid",
-                    "roughness": 1,
+                    "roughness": 2,
                     "opacity": 100,
                     "groupIds": [],
                     "frameId": None,
@@ -584,10 +583,10 @@ def render_excalidraw(registry: BigBetsRegistry) -> str:
                 {
                     "id": text_id,
                     "type": "text",
-                    "x": x + 18,
-                    "y": y + 18,
-                    "width": _CARD_WIDTH - 36,
-                    "height": 72,
+                    "x": x + 22,
+                    "y": y + 22,
+                    "width": _CARD_WIDTH - 44,
+                    "height": 90,
                     "angle": 0,
                     "strokeColor": "#121827",
                     "backgroundColor": "transparent",
@@ -607,7 +606,7 @@ def render_excalidraw(registry: BigBetsRegistry) -> str:
                     "updated": 1,
                     "link": None,
                     "locked": False,
-                    "fontSize": 20,
+                    "fontSize": 18,
                     "fontFamily": 1,
                     "text": text,
                     "rawText": text,
@@ -623,10 +622,10 @@ def render_excalidraw(registry: BigBetsRegistry) -> str:
         target = positions.get(edge["to"])
         if source is None or target is None:
             continue
-        sx = source[0] + _CARD_WIDTH
-        sy = source[1] + _CARD_HEIGHT / 2
-        tx = target[0]
-        ty = target[1] + _CARD_HEIGHT / 2
+        sx = source[0] + _CARD_WIDTH / 2
+        sy = source[1] + _CARD_HEIGHT
+        tx = target[0] + _CARD_WIDTH / 2
+        ty = target[1]
         arrow_id = _excalidraw_id(f"arrow:{edge['from']}:{edge['to']}")
         elements.append(
             {
@@ -637,12 +636,12 @@ def render_excalidraw(registry: BigBetsRegistry) -> str:
                 "width": tx - sx,
                 "height": ty - sy,
                 "angle": 0,
-                "strokeColor": "#111827" if edge["kind"] == "unlocks" else "#5d6c84",
+                "strokeColor": "#141b2b" if edge["kind"] == "unlocks" else "#5d6c84",
                 "backgroundColor": "transparent",
                 "fillStyle": "solid",
                 "strokeWidth": 2,
                 "strokeStyle": "solid" if edge["kind"] == "unlocks" else "dashed",
-                "roughness": 1,
+                "roughness": 2,
                 "opacity": 100,
                 "groupIds": [],
                 "frameId": None,
@@ -936,22 +935,22 @@ def _priority_fill(priority: str) -> str:
 def _svg_card(
     bet: BigBet, families: tuple[IdeaFamily, ...], x: int, y: int, color: str
 ) -> list[str]:
-    title_lines = _wrap_text(bet.title, 24, max_lines=2)
+    title_lines = _wrap_text(bet.title, 31, max_lines=2)
     family_label = ", ".join(f"#{family.issue}" for family in families[:4])
     if len(families) > 4:
         family_label = f"{family_label}, +{len(families) - 4}"
     parts = [
         f'<g data-bet-id="{_attr(bet.id)}" tabindex="0" role="button" aria-label="{_attr(bet.title)}">',
-        f'<rect x="{x}" y="{y}" width="{_CARD_WIDTH}" height="{_CARD_HEIGHT}" rx="26" fill="{_priority_fill(bet.priority)}" stroke="{color}" stroke-width="3" filter="url(#shadow)"/>',
-        f'<rect x="{x + 12}" y="{y + 12}" width="{_CARD_WIDTH - 24}" height="{_CARD_HEIGHT - 24}" rx="19" fill="none" stroke="{color}" stroke-width="1.4" opacity="0.34"/>',
-        f'<text x="{x + 22}" y="{y + 31}" font-family="Avenir Next, Segoe UI, sans-serif" font-size="12" font-weight="900" fill="{color}">{_xml(bet.priority)} / rank {_xml(str(bet.rank or "-"))} / {_xml(bet.status)}</text>',
+        f'<rect x="{x}" y="{y}" width="{_CARD_WIDTH}" height="{_CARD_HEIGHT}" rx="27" fill="{_priority_fill(bet.priority)}" stroke="#111827" stroke-width="2.4" filter="url(#shadow)"/>',
+        f'<rect x="{x + 13}" y="{y + 13}" width="{_CARD_WIDTH - 26}" height="{_CARD_HEIGHT - 26}" rx="20" fill="none" stroke="{color}" stroke-width="1.25" opacity="0.38"/>',
+        f'<text x="{x + 24}" y="{y + 35}" font-family="Nunito, Avenir Next, Segoe UI, sans-serif" font-size="12" font-weight="760" fill="{color}">{_xml(bet.priority)} / rank {_xml(str(bet.rank or "-"))} / {_xml(bet.status)}</text>',
     ]
     for index, line in enumerate(title_lines):
         parts.append(
-            f'<text x="{x + 22}" y="{y + 64 + index * 24}" font-family="Avenir Next, Segoe UI, sans-serif" font-size="20" font-weight="900" fill="#111827">{_xml(line)}</text>'
+            f'<text x="{x + 24}" y="{y + 70 + index * 23}" font-family="Nunito, Avenir Next, Segoe UI, sans-serif" font-size="18" font-weight="760" fill="#111827">{_xml(line)}</text>'
         )
     parts.append(
-        f'<text x="{x + 22}" y="{y + _CARD_HEIGHT - 19}" font-family="Avenir Next, Segoe UI, sans-serif" font-size="13" fill="#5d6c84">{_xml(family_label or "No mapped idea families")}</text>'
+        f'<text x="{x + 24}" y="{y + _CARD_HEIGHT - 22}" font-family="Nunito, Avenir Next, Segoe UI, sans-serif" font-size="13" fill="#5d6c84">{_xml(family_label or "No mapped idea families")}</text>'
     )
     parts.append("</g>")
     return parts

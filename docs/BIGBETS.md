@@ -124,11 +124,13 @@ Generated artifacts:
 
 `bigbets site scaffold` writes a richer static app instead of only a snapshot.
 The generated app is intentionally board-first: the dependency graph is an
-Excalidraw-style prototype board, the table is a compact spreadsheet-like view
+top-down Excalidraw-style prototype board, the table is a compact spreadsheet-like view
 where each row is one idea family, and big-bet grouping is derived from the
 registry. Dragging a board node updates the bet's wave/rank. Dragging a sheet
-row updates the idea family's big-bet membership and rank. Inline cell edits,
-drag/drop moves, focused inspector edits, canonical JSON edits, and snapshot
+row updates the idea family's big-bet membership and rank. Single-clicking a
+node or row selects it without opening an editor; double-click, Enter, or an
+explicit edit action opens the focused inspector. Inline cell edits, keyboard
+row moves, drag/drop moves, inspector edits, canonical JSON edits, and snapshot
 restores all regenerate the JSON, CSV, Markdown, Mermaid, SVG, and Excalidraw
 artifacts from the same registry.
 

@@ -202,7 +202,7 @@ def _index_html(registry: BigBetsRegistry, app_id: str) -> str:
 <body>
   <header class="hero">
     <div class="hero-copy">
-      <div class="eyebrow">Big Bets Braintrust</div>
+      <div class="eyebrow">Big Bets Portfolio</div>
       <h1>{title}</h1>
       <p>{description}</p>
     </div>
@@ -214,10 +214,15 @@ def _index_html(registry: BigBetsRegistry, app_id: str) -> str:
         <option value="">No snapshots yet</option>
       </select>
       <button type="button" id="restore-snapshot-button">Restore</button>
-      <button type="button" id="add-bet-button">Add bet</button>
       <button type="button" id="add-family-button">Add family</button>
-      <button type="button" data-export="excalidraw">Excalidraw</button>
-      <button type="button" id="write-artifacts-button">Write artifacts</button>
+      <details class="tool-drawer">
+        <summary>More</summary>
+        <div>
+          <button type="button" id="add-bet-button">Add bet</button>
+          <button type="button" data-export="excalidraw">Excalidraw</button>
+          <button type="button" id="write-artifacts-button">Write artifacts</button>
+        </div>
+      </details>
     </div>
     <div class="status-line">
       <span id="storage-status">Loading storage</span>
@@ -232,7 +237,7 @@ def _index_html(registry: BigBetsRegistry, app_id: str) -> str:
       <div class="section-heading">
         <div>
           <span class="label">Dependency board</span>
-          <h2>Drag bets across waves; arrows show what unlocks what.</h2>
+          <h2>Top-down waves. Drag bets to rerank; double-click to edit.</h2>
         </div>
         <div class="button-row">
           <button type="button" data-export="svg">Download SVG</button>
@@ -247,7 +252,7 @@ def _index_html(registry: BigBetsRegistry, app_id: str) -> str:
       <div class="section-heading">
         <div>
           <span class="label">Idea-family sheet</span>
-          <h2>Each row is one lane; each lane belongs to exactly one big bet.</h2>
+          <h2>One row per lane, grouped by its owning bet.</h2>
         </div>
         <div class="button-row">
           <button type="button" id="table-add-family-button">Insert family</button>
@@ -266,8 +271,8 @@ def _index_html(registry: BigBetsRegistry, app_id: str) -> str:
               <th class="w-state">Status</th>
               <th class="w-role">Role</th>
               <th class="w-action">Next action</th>
-              <th class="w-artifact">Artifact</th>
-              <th class="w-url">URL</th>
+      <th class="w-artifact">Ideas</th>
+      <th class="w-url">Issue</th>
               <th class="w-actions">Open</th>
             </tr>
           </thead>
@@ -300,7 +305,7 @@ def _index_html(registry: BigBetsRegistry, app_id: str) -> str:
         <div>
           <span class="label" id="inspector-kicker">Inspector</span>
           <h2 id="inspector-title">Select a bet or idea family</h2>
-          <p id="inspector-hint">Focused editing opens only after you click a board node or sheet row.</p>
+          <p id="inspector-hint">Focused editing opens on double-click, Enter, or an explicit edit button.</p>
         </div>
         <button type="button" id="inspector-close-button">Close</button>
       </div>
@@ -420,7 +425,7 @@ _STYLES_CSS = """\
   --accent: #0f766e;
   --burnt: #b75b36;
   --danger: #b42318;
-  --shadow: 0 18px 34px rgba(17, 24, 39, 0.16);
+  --shadow: 0 14px 30px rgba(17, 24, 39, 0.10);
 }
 
 * { box-sizing: border-box; }
@@ -443,19 +448,19 @@ body {
 button, input, select, textarea { font: inherit; }
 
 button {
-  border: 2px solid var(--line);
+  border: 1.5px solid var(--line);
   background: var(--white);
   color: var(--ink);
   border-radius: 14px 17px 13px 18px;
-  padding: 0.52rem 0.78rem;
-  font-weight: 850;
+  padding: 0.46rem 0.68rem;
+  font-weight: 720;
   cursor: pointer;
-  box-shadow: 3px 4px 0 rgba(17, 24, 39, 0.12);
+  box-shadow: 2px 3px 0 rgba(17, 24, 39, 0.10);
 }
 
 button:hover {
   transform: translate(-1px, -1px);
-  box-shadow: 5px 6px 0 rgba(17, 24, 39, 0.13);
+  box-shadow: 4px 5px 0 rgba(17, 24, 39, 0.11);
 }
 
 button.linkish {
@@ -498,9 +503,9 @@ code {
 .hero h1 {
   max-width: 1040px;
   margin: 10px 0 14px;
-  font-size: clamp(2.8rem, 7vw, 6.8rem);
-  line-height: 0.88;
-  letter-spacing: -0.075em;
+  font-size: clamp(2.6rem, 6vw, 5.8rem);
+  line-height: 0.92;
+  letter-spacing: -0.065em;
 }
 
 .hero p {
@@ -512,7 +517,7 @@ code {
 .eyebrow, .label {
   color: var(--burnt);
   font-size: 0.72rem;
-  font-weight: 950;
+  font-weight: 780;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -523,11 +528,43 @@ code {
   gap: 9px;
   align-items: center;
   margin-top: 20px;
-  padding: 12px;
-  border: 2px solid var(--line);
+  padding: 10px;
+  border: 1.5px solid var(--line);
   border-radius: 24px 28px 22px 26px;
-  background: rgba(255, 254, 250, 0.78);
-  box-shadow: 5px 7px 0 rgba(17, 24, 39, 0.08);
+  background: rgba(255, 254, 250, 0.62);
+  box-shadow: 3px 5px 0 rgba(17, 24, 39, 0.06);
+}
+
+.tool-drawer {
+  position: relative;
+}
+
+.tool-drawer summary {
+  list-style: none;
+  cursor: pointer;
+  border: 1.5px solid var(--line);
+  border-radius: 14px 17px 13px 18px;
+  background: var(--white);
+  padding: 0.46rem 0.68rem;
+  box-shadow: 2px 3px 0 rgba(17, 24, 39, 0.10);
+  font-weight: 720;
+}
+
+.tool-drawer summary::-webkit-details-marker { display: none; }
+
+.tool-drawer[open] div {
+  position: absolute;
+  right: 0;
+  z-index: 10;
+  display: grid;
+  gap: 7px;
+  min-width: 180px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1.5px solid var(--line);
+  border-radius: 18px;
+  background: var(--white);
+  box-shadow: var(--shadow);
 }
 
 .action-strip input {
@@ -564,7 +601,7 @@ main {
 }
 
 .board-stage, .sheet-stage, .json-drawer, .inspector-panel {
-  border: 3px solid var(--line);
+  border: 2px solid var(--line);
   border-radius: 28px 34px 25px 31px;
   background: rgba(255, 250, 240, 0.82);
   box-shadow: var(--shadow);
@@ -586,9 +623,9 @@ main {
 .section-heading h2 {
   margin: 2px 0 0;
   max-width: 820px;
-  font-size: clamp(1.35rem, 2.8vw, 2.35rem);
-  line-height: 0.98;
-  letter-spacing: -0.055em;
+  font-size: clamp(1.25rem, 2.2vw, 1.9rem);
+  line-height: 1.02;
+  letter-spacing: -0.045em;
 }
 
 .section-heading p,
@@ -607,7 +644,7 @@ main {
 .paper-board {
   overflow: auto;
   min-height: 420px;
-  border: 2px solid var(--line);
+  border: 1.5px solid var(--line);
   border-radius: 24px 29px 22px 27px;
   background:
     linear-gradient(var(--grid) 1px, transparent 1px),
@@ -619,7 +656,7 @@ main {
 
 .paper-board svg {
   display: block;
-  min-width: 960px;
+  min-width: 1040px;
 }
 
 .paper-board [data-bet-id] {
@@ -631,7 +668,24 @@ main {
 }
 
 .paper-board [data-bet-id]:hover rect:first-of-type {
-  stroke-width: 4;
+  stroke-width: 3;
+}
+
+.paper-board .selected-card rect:first-of-type {
+  stroke: var(--burnt);
+  stroke-width: 3;
+}
+
+.paper-board .dragging-card {
+  opacity: 0.74;
+}
+
+.board-drop-preview {
+  fill: rgba(183, 91, 54, 0.08);
+  stroke: rgba(183, 91, 54, 0.7);
+  stroke-width: 2;
+  stroke-dasharray: 8 7;
+  pointer-events: none;
 }
 
 .sheet-stage {
@@ -640,17 +694,17 @@ main {
 
 .sheet-wrap {
   overflow: auto;
-  border: 2px solid var(--line);
+  border: 1.5px solid var(--line);
   border-radius: 18px;
   background: var(--white);
 }
 
 .plan-sheet {
   width: 100%;
-  min-width: 1160px;
+  min-width: 1120px;
   border-collapse: collapse;
   table-layout: fixed;
-  font-size: 0.83rem;
+  font-size: 0.79rem;
 }
 
 .plan-sheet th {
@@ -669,7 +723,7 @@ main {
 
 .plan-sheet td {
   border: 1px solid var(--line-soft);
-  padding: 0.28rem 0.36rem;
+  padding: 0.18rem 0.28rem;
   vertical-align: top;
 }
 
@@ -692,9 +746,9 @@ main {
 
 .bet-group-row td {
   background: #eaf7ec;
-  border-top: 2px solid var(--line);
-  border-bottom: 2px solid var(--line);
-  font-weight: 850;
+  border-top: 1.5px solid var(--line);
+  border-bottom: 1.5px solid var(--line);
+  font-weight: 720;
 }
 
 .bet-group-row[data-priority="P1"] td { background: #eaf2ff; }
@@ -723,17 +777,35 @@ main {
 .mini-meta {
   color: var(--muted);
   font-size: 0.75rem;
-  font-weight: 800;
+  font-weight: 720;
   text-transform: uppercase;
 }
 
 .sheet-cell {
-  min-height: 1.55rem;
+  min-height: 1.35rem;
   border: 1px solid transparent;
   border-radius: 7px;
-  padding: 0.1rem 0.18rem;
+  padding: 0.06rem 0.14rem;
   white-space: normal;
   word-break: break-word;
+}
+
+.sheet-cell.active-cell {
+  border-color: var(--accent);
+  background: rgba(15, 118, 110, 0.07);
+}
+
+.sheet-link {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.25rem;
+  color: #0b6795;
+  text-decoration: underline;
+  text-decoration-thickness: 0.08em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sheet-cell:empty::before {
@@ -772,9 +844,9 @@ main {
 .w-title { width: 16rem; }
 .w-state { width: 5.4rem; }
 .w-role { width: 6rem; }
-.w-action { width: 17rem; }
-.w-artifact { width: 10rem; }
-.w-url { width: 10rem; }
+.w-action { width: 18rem; }
+.w-artifact { width: 7rem; }
+.w-url { width: 6.5rem; }
 .w-actions { width: 7.3rem; }
 
 .json-drawer summary {
@@ -880,12 +952,12 @@ const SITE_SCHEMA_VERSION = window.BIGBETS_SITE_SCHEMA_VERSION || "bigbets.site.
 const GENERATOR = window.BIGBETS_GENERATOR || { name: "bigbets", version: "unknown" };
 
 const BOARD = {
-  cardWidth: 320,
-  cardHeight: 132,
-  rowGap: 34,
-  waveGap: 128,
-  marginX: 64,
-  marginY: 112,
+  cardWidth: 380,
+  cardHeight: 154,
+  cardGap: 42,
+  waveGap: 112,
+  marginX: 72,
+  marginY: 126,
 };
 
 const localStorageAdapter = {
@@ -930,8 +1002,10 @@ const state = {
   registry: null,
   rendered: null,
   selection: null,
+  inspectorOpen: false,
   snapshots: [],
   dragRow: null,
+  activeCell: null,
 };
 const $ = (id) => document.getElementById(id);
 
@@ -1066,31 +1140,44 @@ function markInvalid(message) {
   setLog(message, true);
 }
 
-function selectBet(id) {
+function selectBet(id, openInspector = false) {
   state.selection = { kind: "bet", id };
+  state.inspectorOpen = openInspector;
   renderInspector();
   highlightSelection();
 }
 
-function selectFamily(issue) {
+function selectFamily(issue, openInspector = false) {
   state.selection = { kind: "family", issue: Number(issue) };
+  state.inspectorOpen = openInspector;
   renderInspector();
   highlightSelection();
 }
 
 function clearSelection() {
   state.selection = null;
+  state.inspectorOpen = false;
   renderInspector();
   highlightSelection();
+}
+
+function openSelection() {
+  if (!state.selection) return;
+  state.inspectorOpen = true;
+  renderInspector();
 }
 
 function wireGraphCards() {
   const svg = $("graph").querySelector("svg");
   if (!svg) return;
   svg.querySelectorAll("[data-bet-id]").forEach((node) => {
-    node.addEventListener("click", () => selectBet(node.dataset.betId));
+    node.addEventListener("click", () => selectBet(node.dataset.betId, false));
+    node.addEventListener("dblclick", () => selectBet(node.dataset.betId, true));
     node.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") selectBet(node.dataset.betId);
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectBet(node.dataset.betId, true);
+      }
     });
     node.addEventListener("pointerdown", (event) => startBoardDrag(event, svg, node));
   });
@@ -1103,12 +1190,14 @@ function startBoardDrag(event, svg, node) {
   let moved = false;
   node.setPointerCapture(event.pointerId);
   node.style.transition = "none";
+  node.classList.add("dragging-card");
   const move = (moveEvent) => {
     const point = svgPoint(svg, moveEvent);
     const dx = point.x - start.x;
     const dy = point.y - start.y;
     if (Math.abs(dx) + Math.abs(dy) > 5) moved = true;
     node.setAttribute("transform", `translate(${dx} ${dy})`);
+    updateBoardDropPreview(svg, point);
   };
   const up = (upEvent) => {
     node.releasePointerCapture(event.pointerId);
@@ -1116,8 +1205,10 @@ function startBoardDrag(event, svg, node) {
     node.removeEventListener("pointerup", up);
     node.removeAttribute("transform");
     node.style.transition = "";
+    node.classList.remove("dragging-card");
+    clearBoardDropPreview(svg);
     if (!moved) {
-      selectBet(node.dataset.betId);
+      selectBet(node.dataset.betId, false);
       return;
     }
     const point = svgPoint(svg, upEvent);
@@ -1135,11 +1226,46 @@ function svgPoint(svg, event) {
 }
 
 function moveBetToBoardPoint(id, point) {
-  const targetWave = Math.max(1, Math.round((point.x - BOARD.marginX) / (BOARD.cardWidth + BOARD.waveGap)) + 1);
-  const targetRank = Math.max(1, Math.round((point.y - BOARD.marginY) / (BOARD.cardHeight + BOARD.rowGap)) + 1);
-  moveBetToWaveRank(id, targetWave, targetRank);
+  const slot = boardSlotFromPoint(point);
+  moveBetToWaveRank(id, slot.wave, slot.rank);
   state.selection = { kind: "bet", id };
+  state.inspectorOpen = false;
   commitRegistry("Moved bet on dependency board.");
+}
+
+function boardSlotFromPoint(point) {
+  return {
+    wave: Math.max(1, Math.round((point.y - BOARD.marginY) / (BOARD.cardHeight + BOARD.waveGap)) + 1),
+    rank: Math.max(1, Math.round((point.x - BOARD.marginX) / (BOARD.cardWidth + BOARD.cardGap)) + 1),
+  };
+}
+
+function boardSlotPosition(slot) {
+  return {
+    x: BOARD.marginX + (slot.rank - 1) * (BOARD.cardWidth + BOARD.cardGap),
+    y: BOARD.marginY + (slot.wave - 1) * (BOARD.cardHeight + BOARD.waveGap),
+  };
+}
+
+function updateBoardDropPreview(svg, point) {
+  const slot = boardSlotFromPoint(point);
+  const position = boardSlotPosition(slot);
+  let preview = svg.querySelector("#board-drop-preview");
+  if (!preview) {
+    preview = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    preview.id = "board-drop-preview";
+    preview.setAttribute("class", "board-drop-preview");
+    preview.setAttribute("rx", "27");
+    svg.appendChild(preview);
+  }
+  preview.setAttribute("x", position.x);
+  preview.setAttribute("y", position.y);
+  preview.setAttribute("width", BOARD.cardWidth);
+  preview.setAttribute("height", BOARD.cardHeight);
+}
+
+function clearBoardDropPreview(svg) {
+  svg.querySelector("#board-drop-preview")?.remove();
 }
 
 function moveBetToWaveRank(id, wave, rank) {
@@ -1200,8 +1326,8 @@ function familyRow(family) {
       ${cell("status", family.status, "w-state", "active")}
       ${cell("role", family.role || "", "w-role", "role")}
       ${cell("next_action", family.next_action || "", "w-action", "next action")}
-      ${cell("artifact", family.artifact || "", "w-artifact", "artifact")}
-      ${cell("url", family.url || "", "w-url", "url")}
+      ${linkCell("artifact", family.artifact || "", "w-artifact", "ideas")}
+      ${linkCell("url", family.url || "", "w-url", `#${family.issue}`)}
       <td class="row-actions w-actions">
         <button type="button" data-row-action="focus">Edit</button>
         <button type="button" data-row-action="hydrate">Import</button>
@@ -1213,6 +1339,14 @@ function familyRow(family) {
 
 function cell(field, value, className, placeholder) {
   return `<td class="${className}"><div class="sheet-cell" contenteditable="true" data-cell data-field="${escapeAttr(field)}" data-placeholder="${escapeAttr(placeholder)}">${escapeHtml(value)}</div></td>`;
+}
+
+function linkCell(field, value, className, label) {
+  const text = value ? linkLabel(value, label) : "";
+  const content = value
+    ? `<a class="sheet-link" href="${escapeAttr(value)}" target="_blank" rel="noopener">${escapeHtml(text)}</a>`
+    : "";
+  return `<td class="${className}"><div class="sheet-cell" tabindex="0" data-cell data-field="${escapeAttr(field)}" data-value="${escapeAttr(value)}" data-placeholder="${escapeAttr(label)}">${content}</div></td>`;
 }
 
 function wirePlanTable() {
@@ -1232,9 +1366,16 @@ function wirePlanTable() {
     });
   });
   $("plan-table-body").querySelectorAll("[data-cell]").forEach((cellNode) => {
-    cellNode.addEventListener("blur", () => applyTableRow(cellNode.closest("tr")));
+    cellNode.addEventListener("blur", () => {
+      cellNode.classList.remove("active-cell");
+      if (cellNode.isContentEditable) applyTableRow(cellNode.closest("tr"));
+    });
     cellNode.addEventListener("keydown", handleCellKeydown);
-    cellNode.addEventListener("focus", () => selectFamily(cellNode.closest("tr").dataset.issue));
+    cellNode.addEventListener("focus", () => {
+      document.querySelectorAll(".active-cell").forEach((node) => node.classList.remove("active-cell"));
+      cellNode.classList.add("active-cell");
+      selectFamily(cellNode.closest("tr").dataset.issue, false);
+    });
   });
   $("plan-table-body").querySelectorAll("[data-drag-kind]").forEach((handle) => {
     handle.addEventListener("dragstart", (event) => {
@@ -1250,14 +1391,46 @@ function wirePlanTable() {
 }
 
 function handleCellKeydown(event) {
+  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    event.preventDefault();
+    openSelection();
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "i") {
+    event.preventDefault();
+    addFamily(event.currentTarget.closest("tr").dataset.bigBet);
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key === "Backspace") {
+    event.preventDefault();
+    state.selection = { kind: "family", issue: Number(event.currentTarget.closest("tr").dataset.issue) };
+    state.inspectorOpen = false;
+    deleteSelection();
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+    event.preventDefault();
+    const family = findFamily(event.currentTarget.closest("tr").dataset.issue);
+    moveFamilyToBetRank(family.issue, family.big_bet, Math.max(1, (family.rank || 1) + (event.key === "ArrowUp" ? -1 : 1)));
+    state.selection = { kind: "family", issue: family.issue };
+    state.inspectorOpen = false;
+    commitRegistry("Reordered idea family row.");
+    return;
+  }
   if (event.key === "Enter") {
     event.preventDefault();
-    event.currentTarget.blur();
+    if (event.currentTarget.isContentEditable) event.currentTarget.blur();
+    else openSelection();
     return;
   }
   if (event.key === "Tab") {
     event.preventDefault();
     focusRelativeCell(event.currentTarget, event.shiftKey ? -1 : 1);
+    return;
+  }
+  if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+    event.preventDefault();
+    focusRelativeCell(event.currentTarget, event.key === "ArrowRight" ? 1 : -1);
     return;
   }
   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -1335,13 +1508,14 @@ function moveFamilyToBetRank(issue, bigBetId, rank) {
 function handleRowAction(row, action) {
   const kind = row.dataset.kind;
   if (action === "focus") {
-    if (kind === "bet") selectBet(row.dataset.id);
-    if (kind === "family") selectFamily(row.dataset.issue);
+    if (kind === "bet") selectBet(row.dataset.id, true);
+    if (kind === "family") selectFamily(row.dataset.issue, true);
     return;
   }
   if (action === "child") return addFamily(row.dataset.id);
   if (action === "hydrate") {
     applyTableRow(row);
+    if (kind === "family") selectFamily(row.dataset.issue, true);
     return hydrateIssueFromSelection();
   }
   if (action === "delete") {
@@ -1356,7 +1530,7 @@ function applyTableRow(row) {
   try {
     const previousIssue = Number(row.dataset.issue);
     const existing = findFamily(previousIssue);
-    const value = (name) => row.querySelector(`[data-field="${name}"]`)?.textContent?.trim() || "";
+    const value = (name) => cellValue(row, name);
     const updated = {
       ...existing,
       issue: positiveInt(Number(value("issue")), "family.issue"),
@@ -1378,9 +1552,16 @@ function applyTableRow(row) {
   }
 }
 
+function cellValue(row, name) {
+  const node = row.querySelector(`[data-field="${name}"]`);
+  if (!node) return "";
+  if (node.dataset.value != null) return node.dataset.value.trim();
+  return node.textContent?.trim() || "";
+}
+
 function renderInspector() {
   const panel = $("inspector-panel");
-  if (!state.selection) {
+  if (!state.selection || !state.inspectorOpen) {
     panel.classList.remove("active");
     return;
   }
@@ -1596,6 +1777,7 @@ function addBet() {
     unlocks: [],
   });
   state.selection = { kind: "bet", id: nextId };
+  state.inspectorOpen = true;
   commitRegistry("Added new big bet.");
 }
 
@@ -1617,6 +1799,7 @@ function addFamily(bigBetId = null) {
     url: null,
   });
   state.selection = { kind: "family", issue };
+  state.inspectorOpen = true;
   commitRegistry("Added new idea family.");
 }
 
@@ -1627,6 +1810,7 @@ function duplicateSelection() {
     const id = uniqueId(`${bet.id}_copy`, new Set(state.registry.big_bets.map((item) => item.id)));
     state.registry.big_bets.push({ ...bet, id, title: `${bet.title} copy`, rank: nextRankFor(state.registry.big_bets), depends_on: [...bet.depends_on], unlocks: [...bet.unlocks] });
     state.selection = { kind: "bet", id };
+    state.inspectorOpen = true;
   } else {
     const family = findFamily(state.selection.issue);
     const existing = new Set(state.registry.idea_families.map((item) => item.issue));
@@ -1634,6 +1818,7 @@ function duplicateSelection() {
     while (existing.has(issue)) issue += 1;
     state.registry.idea_families.push({ ...family, issue, title: `${family.title} copy`, rank: nextRankFor(state.registry.idea_families.filter((item) => item.big_bet === family.big_bet)) });
     state.selection = { kind: "family", issue };
+    state.inspectorOpen = true;
   }
   commitRegistry("Duplicated selected item.");
 }
@@ -1648,6 +1833,7 @@ function deleteSelection() {
     state.registry.idea_families = state.registry.idea_families.filter((family) => family.issue !== issue);
   }
   state.selection = null;
+  state.inspectorOpen = false;
   commitRegistry("Deleted selected item.");
 }
 
@@ -1839,7 +2025,7 @@ function renderMarkdown(registry, mermaid, familiesByBet) {
 }
 
 function renderMermaid(registry, edges, familiesByBet) {
-  const lines = [`%% schema_version=${REGISTRY_SCHEMA_VERSION} generator=bigbets@${GENERATOR.version || "unknown"}`, "flowchart LR"];
+  const lines = [`%% schema_version=${REGISTRY_SCHEMA_VERSION} generator=bigbets@${GENERATOR.version || "unknown"}`, "flowchart TD"];
   waves(registry).forEach(([wave, bets]) => {
     lines.push(`  subgraph wave_${wave}[Wave ${wave}]`);
     bets.forEach((bet) => {
@@ -1855,14 +2041,14 @@ function renderMermaid(registry, edges, familiesByBet) {
 function boardLayout(registry) {
   const grouped = waves(registry);
   const maxCards = Math.max(1, ...grouped.map(([, bets]) => bets.length));
-  const width = Math.max(960, BOARD.marginX * 2 + grouped.length * BOARD.cardWidth + Math.max(0, grouped.length - 1) * BOARD.waveGap);
-  const height = Math.max(430, BOARD.marginY * 2 + maxCards * BOARD.cardHeight + Math.max(0, maxCards - 1) * BOARD.rowGap);
+  const width = Math.max(1040, BOARD.marginX * 2 + maxCards * BOARD.cardWidth + Math.max(0, maxCards - 1) * BOARD.cardGap);
+  const height = Math.max(520, BOARD.marginY * 2 + grouped.length * BOARD.cardHeight + Math.max(0, grouped.length - 1) * BOARD.waveGap);
   const positions = new Map();
   grouped.forEach(([wave, bets], waveIndex) => {
-    const x = BOARD.marginX + waveIndex * (BOARD.cardWidth + BOARD.waveGap);
+    const y = BOARD.marginY + waveIndex * (BOARD.cardHeight + BOARD.waveGap);
     bets.forEach((bet, cardIndex) => positions.set(bet.id, {
-      x,
-      y: BOARD.marginY + cardIndex * (BOARD.cardHeight + BOARD.rowGap),
+      x: BOARD.marginX + cardIndex * (BOARD.cardWidth + BOARD.cardGap),
+      y,
       wave,
       cardWidth: BOARD.cardWidth,
       cardHeight: BOARD.cardHeight,
@@ -1877,30 +2063,30 @@ function renderSvg(registry, edges, familiesByBet) {
     `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}" role="img" aria-label="${escapeAttr(registry.metadata.title)}">`,
     `<metadata>${escapeHtml(JSON.stringify(artifactMetadata()))}</metadata>`,
     "<defs>",
-    '<pattern id="grid" width="56" height="56" patternUnits="userSpaceOnUse"><path d="M 56 0 L 0 0 0 56" fill="none" stroke="#eadfce" stroke-width="1"/></pattern>',
-    '<filter id="shadow" x="-10%" y="-10%" width="120%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="8" flood-color="#111827" flood-opacity="0.16"/></filter>',
-    '<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#111827"/></marker>',
+    '<pattern id="grid" width="56" height="56" patternUnits="userSpaceOnUse"><path d="M 56 0 L 0 0 0 56" fill="none" stroke="#eadfce" stroke-width="0.9"/></pattern>',
+    '<filter id="shadow" x="-8%" y="-8%" width="116%" height="132%"><feDropShadow dx="0" dy="8" stdDeviation="7" flood-color="#111827" flood-opacity="0.11"/></filter>',
+    '<marker id="arrow" viewBox="0 0 10 10" refX="8.7" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#141b2b"/></marker>',
     "</defs>",
     '<rect width="100%" height="100%" fill="#fffaf0"/>',
-    '<rect width="100%" height="100%" fill="url(#grid)" opacity="0.72"/>',
-    `<text x="${BOARD.marginX}" y="48" font-family="Avenir Next, Segoe UI, sans-serif" font-size="30" font-weight="900" fill="#111827">${escapeHtml(registry.metadata.title)}</text>`,
-    `<text x="${BOARD.marginX}" y="76" font-family="Avenir Next, Segoe UI, sans-serif" font-size="15" fill="#5d6c84">Drag nodes to change wave/rank. Every family row maps to exactly one bet.</text>`,
+    '<rect width="100%" height="100%" fill="url(#grid)" opacity="0.62"/>',
+    `<text x="${BOARD.marginX}" y="52" font-family="Nunito, Avenir Next, Segoe UI, sans-serif" font-size="30" font-weight="780" fill="#111827">${escapeHtml(registry.metadata.title)}</text>`,
+    `<text x="${BOARD.marginX}" y="82" font-family="Nunito, Avenir Next, Segoe UI, sans-serif" font-size="15" fill="#5d6c84">Drag nodes to change wave/rank. Double-click or press Enter to edit the selected bet.</text>`,
   ];
   layout.grouped.forEach(([wave, bets]) => {
     const first = layout.positions.get(bets[0].id);
-    if (first) parts.push(`<text x="${first.x}" y="${first.y - 24}" font-family="Avenir Next, Segoe UI, sans-serif" font-size="14" font-weight="900" fill="#5d6c84">Wave ${wave}</text>`);
+    if (first) parts.push(`<text x="${BOARD.marginX}" y="${first.y - 22}" font-family="Nunito, Avenir Next, Segoe UI, sans-serif" font-size="14" font-weight="760" fill="#5d6c84">Wave ${wave}</text>`);
   });
   edges.forEach((edge) => {
     const source = layout.positions.get(edge.from);
     const target = layout.positions.get(edge.to);
     if (!source || !target) return;
-    const sx = source.x + BOARD.cardWidth;
-    const sy = source.y + BOARD.cardHeight / 2;
-    const tx = target.x;
-    const ty = target.y + BOARD.cardHeight / 2;
-    const bend = Math.max(62, Math.abs(tx - sx) / 2);
+    const sx = source.x + BOARD.cardWidth / 2;
+    const sy = source.y + BOARD.cardHeight;
+    const tx = target.x + BOARD.cardWidth / 2;
+    const ty = target.y;
+    const bend = Math.max(46, Math.abs(ty - sy) / 2);
     const dash = edge.kind === "depends_on" ? ' stroke-dasharray="8 8"' : "";
-    parts.push(`<path d="M ${sx} ${sy} C ${sx + bend} ${sy}, ${tx - bend} ${ty}, ${tx} ${ty}" fill="none" stroke="#111827" stroke-width="3"${dash} marker-end="url(#arrow)"/>`);
+    parts.push(`<path d="M ${sx} ${sy} C ${sx} ${sy + bend}, ${tx} ${ty - bend}, ${tx} ${ty}" fill="none" stroke="#141b2b" stroke-width="2.2" stroke-linecap="round"${dash} marker-end="url(#arrow)"/>`);
   });
   registry.big_bets.forEach((bet) => {
     const position = layout.positions.get(bet.id);
@@ -1914,18 +2100,18 @@ function renderSvg(registry, edges, familiesByBet) {
 function svgCard(bet, families, position) {
   const color = priorityColor(bet.priority);
   const fill = priorityFill(bet.priority);
-  const titleLines = wrapText(bet.title, 24, 2);
+  const titleLines = wrapText(bet.title, 31, 2);
   const issueLabel = families.slice(0, 4).map((family) => `#${family.issue}`).join(", ") || "No mapped idea families";
   const parts = [
     `<g data-bet-id="${escapeAttr(bet.id)}" data-x="${position.x}" data-y="${position.y}" tabindex="0" role="button" aria-label="${escapeAttr(bet.title)}">`,
-    `<rect x="${position.x}" y="${position.y}" width="${BOARD.cardWidth}" height="${BOARD.cardHeight}" rx="26" fill="${fill}" stroke="${color}" stroke-width="3" filter="url(#shadow)"/>`,
-    `<rect x="${position.x + 12}" y="${position.y + 12}" width="${BOARD.cardWidth - 24}" height="${BOARD.cardHeight - 24}" rx="19" fill="none" stroke="${color}" stroke-width="1.4" opacity="0.34"/>`,
-    `<text x="${position.x + 22}" y="${position.y + 31}" font-family="Avenir Next, Segoe UI, sans-serif" font-size="12" font-weight="900" fill="${color}">${escapeHtml(bet.priority)} / rank ${escapeHtml(bet.rank || "-")} / ${escapeHtml(bet.status)}</text>`,
+    `<rect x="${position.x}" y="${position.y}" width="${BOARD.cardWidth}" height="${BOARD.cardHeight}" rx="27" fill="${fill}" stroke="#111827" stroke-width="2.4" filter="url(#shadow)"/>`,
+    `<rect x="${position.x + 13}" y="${position.y + 13}" width="${BOARD.cardWidth - 26}" height="${BOARD.cardHeight - 26}" rx="20" fill="none" stroke="${color}" stroke-width="1.25" opacity="0.38"/>`,
+    `<text x="${position.x + 24}" y="${position.y + 35}" font-family="Nunito, Avenir Next, Segoe UI, sans-serif" font-size="12" font-weight="760" fill="${color}">${escapeHtml(bet.priority)} / rank ${escapeHtml(bet.rank || "-")} / ${escapeHtml(bet.status)}</text>`,
   ];
   titleLines.forEach((line, index) => {
-    parts.push(`<text x="${position.x + 22}" y="${position.y + 64 + index * 24}" font-family="Avenir Next, Segoe UI, sans-serif" font-size="20" font-weight="900" fill="#111827">${escapeHtml(line)}</text>`);
+    parts.push(`<text x="${position.x + 24}" y="${position.y + 70 + index * 23}" font-family="Nunito, Avenir Next, Segoe UI, sans-serif" font-size="18" font-weight="760" fill="#111827">${escapeHtml(line)}</text>`);
   });
-  parts.push(`<text x="${position.x + 22}" y="${position.y + BOARD.cardHeight - 19}" font-family="Avenir Next, Segoe UI, sans-serif" font-size="13" fill="#5d6c84">${escapeHtml(issueLabel)}</text>`);
+  parts.push(`<text x="${position.x + 24}" y="${position.y + BOARD.cardHeight - 22}" font-family="Nunito, Avenir Next, Segoe UI, sans-serif" font-size="13" fill="#5d6c84">${escapeHtml(issueLabel)}</text>`);
   parts.push("</g>");
   return parts.join("\\n");
 }
@@ -1939,21 +2125,22 @@ function renderExcalidraw(registry, edges, familiesByBet) {
     const rectangleId = stableId(`rect:${bet.id}`);
     const textId = stableId(`text:${bet.id}`);
     elements.push(excalidrawBase(rectangleId, "rectangle", position.x, position.y, BOARD.cardWidth, BOARD.cardHeight, {
-      strokeColor: priorityColor(bet.priority),
+      strokeColor: "#111827",
       backgroundColor: priorityFill(bet.priority),
       roundness: { type: 3 },
       boundElements: [{ type: "text", id: textId }],
+      roughness: 2,
     }));
     const issues = (familiesByBet.get(bet.id) || []).map((family) => `#${family.issue}`).join(" ");
     const text = `${bet.priority} / ${bet.title}\\n${bet.status}${issues ? `\\n${issues}` : ""}`;
     elements.push({
-      ...excalidrawBase(textId, "text", position.x + 20, position.y + 18, BOARD.cardWidth - 40, 86, {
+      ...excalidrawBase(textId, "text", position.x + 22, position.y + 22, BOARD.cardWidth - 44, 90, {
         strokeColor: "#111827",
         backgroundColor: "transparent",
         roundness: null,
         boundElements: null,
       }),
-      fontSize: 20,
+      fontSize: 18,
       fontFamily: 1,
       text,
       rawText: text,
@@ -1968,16 +2155,17 @@ function renderExcalidraw(registry, edges, familiesByBet) {
     const source = layout.positions.get(edge.from);
     const target = layout.positions.get(edge.to);
     if (!source || !target) return;
-    const sx = source.x + BOARD.cardWidth;
-    const sy = source.y + BOARD.cardHeight / 2;
-    const tx = target.x;
-    const ty = target.y + BOARD.cardHeight / 2;
+    const sx = source.x + BOARD.cardWidth / 2;
+    const sy = source.y + BOARD.cardHeight;
+    const tx = target.x + BOARD.cardWidth / 2;
+    const ty = target.y;
     elements.push({
       ...excalidrawBase(stableId(`arrow:${edge.from}:${edge.to}`), "arrow", sx, sy, tx - sx, ty - sy, {
-        strokeColor: edge.kind === "unlocks" ? "#111827" : "#5d6c84",
+        strokeColor: edge.kind === "unlocks" ? "#141b2b" : "#5d6c84",
         backgroundColor: "transparent",
         strokeStyle: edge.kind === "unlocks" ? "solid" : "dashed",
         roundness: { type: 2 },
+        roughness: 2,
       }),
       points: [[0, 0], [tx - sx, ty - sy]],
       lastCommittedPoint: null,
@@ -2253,6 +2441,17 @@ function markdownIssueLink(family) {
   return family.url ? `[#${family.issue}](${family.url})` : `#${family.issue}`;
 }
 
+function linkLabel(value, fallback) {
+  const text = String(value || "");
+  if (!text) return fallback;
+  const issue = text.match(/(?:issues|pull)\\/(\\d+)(?:\\b|$)/);
+  if (issue) return `#${issue[1]}`;
+  const file = text.split("/").filter(Boolean).at(-1) || fallback;
+  if (file.endsWith(".ideas.json")) return "ideas.json";
+  if (file.endsWith(".json")) return file.replace(/.*?([a-z0-9_-]+\\.json)$/i, "$1");
+  return fallback || file;
+}
+
 function wrapText(text, width, maxLines) {
   const words = text.split(/\\s+/);
   const lines = [];
@@ -2316,11 +2515,15 @@ function download(filename, content, type) {
 
 function highlightSelection() {
   document.querySelectorAll(".selected-row").forEach((row) => row.classList.remove("selected-row"));
+  document.querySelectorAll(".selected-card").forEach((node) => node.classList.remove("selected-card"));
   if (!state.selection) return;
   const selector = state.selection.kind === "bet"
     ? `tr[data-kind="bet"][data-id="${cssEscape(state.selection.id)}"]`
     : `tr[data-kind="family"][data-issue="${state.selection.issue}"]`;
   document.querySelector(selector)?.classList.add("selected-row");
+  if (state.selection.kind === "bet") {
+    document.querySelector(`[data-bet-id="${cssEscape(state.selection.id)}"]`)?.classList.add("selected-card");
+  }
 }
 
 function stableSeed(value) {

@@ -104,7 +104,7 @@ def test_bigbets_standalone_and_autoclanker_alias_cli(
     assert artifact_metadata["generator"]["version"] == BIGBETS_VERSION
 
     assert bigbets_main(["emit", "--input", str(EXAMPLE), "--format", "mermaid"]) == 0
-    assert "flowchart LR" in capsys.readouterr().out
+    assert "flowchart TD" in capsys.readouterr().out
     assert bigbets_main(["emit", "--input", str(EXAMPLE), "--format", "excalidraw"]) == 0
     assert '"type": "excalidraw"' in capsys.readouterr().out
     assert bigbets_main(["emit", "--input", str(EXAMPLE), "--format", "metadata"]) == 0
