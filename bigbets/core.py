@@ -936,7 +936,7 @@ def _priority_fill(priority: str) -> str:
 def _svg_card(
     bet: BigBet, families: tuple[IdeaFamily, ...], x: int, y: int, color: str
 ) -> list[str]:
-    title_lines = _wrap_text(bet.title, 31, max_lines=2)
+    title_lines = _wrap_text(bet.title, 24, max_lines=2)
     family_label = ", ".join(f"#{family.issue}" for family in families[:4])
     if len(families) > 4:
         family_label = f"{family_label}, +{len(families) - 4}"

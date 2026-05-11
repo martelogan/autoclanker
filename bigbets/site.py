@@ -1914,7 +1914,7 @@ function renderSvg(registry, edges, familiesByBet) {
 function svgCard(bet, families, position) {
   const color = priorityColor(bet.priority);
   const fill = priorityFill(bet.priority);
-  const titleLines = wrapText(bet.title, 31, 2);
+  const titleLines = wrapText(bet.title, 24, 2);
   const issueLabel = families.slice(0, 4).map((family) => `#${family.issue}`).join(", ") || "No mapped idea families";
   const parts = [
     `<g data-bet-id="${escapeAttr(bet.id)}" data-x="${position.x}" data-y="${position.y}" tabindex="0" role="button" aria-label="${escapeAttr(bet.title)}">`,
