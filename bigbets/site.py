@@ -223,6 +223,7 @@ def _index_html(registry: BigBetsRegistry, app_id: str) -> str:
       <div class="eyebrow">Big Bets Portfolio</div>
       <h1>{title}</h1>
       <p>{description}</p>
+      <nav id="portfolio-links" class="portfolio-links" aria-label="Portfolio links"></nav>
     </div>
     <div class="action-strip" aria-label="Board actions">
       <button type="button" id="save-button" title="Persist the current canonical board.">Save board</button>
@@ -290,6 +291,7 @@ def _index_html(registry: BigBetsRegistry, app_id: str) -> str:
               <th class="w-state">Status</th>
               <th class="w-role" title="Lane type: ideas-lane, wip, evidence, proof, follow-up, blocked, or shipped.">Type</th>
               <th class="w-action">Next action</th>
+              <th class="w-links">Refs</th>
               <th class="w-artifact" title="Optional lane seed, often an *.ideas.json file.">Seed</th>
               <th class="w-actions">Edit</th>
             </tr>
@@ -544,6 +546,25 @@ code {
   font-size: 1.08rem;
 }
 
+.portfolio-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.portfolio-links:empty { display: none; }
+
+.portfolio-links a {
+  border: 1.1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 254, 250, 0.7);
+  padding: 0.22rem 0.58rem;
+  color: var(--ink);
+  text-decoration: none;
+  box-shadow: 1.4px 2px 0 rgba(17, 24, 39, 0.05);
+}
+
 .eyebrow, .label {
   color: var(--burnt);
   font-size: 0.72rem;
@@ -692,7 +713,7 @@ main {
 }
 
 .paper-board [data-bet-id] {
-  cursor: pointer;
+  cursor: default;
 }
 
 .paper-board .card-drag-handle {
@@ -706,6 +727,7 @@ main {
 .paper-board .card-action-hint {
   opacity: 0;
   transition: opacity 120ms ease;
+  pointer-events: none;
 }
 
 .paper-board [data-bet-id]:hover .card-action-hint,
@@ -748,7 +770,7 @@ main {
 
 .plan-sheet {
   width: 100%;
-  min-width: 1040px;
+  min-width: 1120px;
   border-collapse: collapse;
   table-layout: fixed;
   font-size: 0.79rem;
@@ -873,6 +895,16 @@ main {
   margin-left: 0.35rem;
 }
 
+.refs-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.refs-list .sheet-link {
+  max-width: 7.8rem;
+}
+
 .muted-value {
   color: #a59b8e;
   font-style: italic;
@@ -915,6 +947,7 @@ main {
 .w-state { width: 5.4rem; }
 .w-role { width: 6.8rem; }
 .w-action { width: 15rem; }
+.w-links { width: 8.8rem; }
 .w-artifact { width: 5.8rem; }
 .w-actions { width: 6.6rem; }
 
@@ -1023,6 +1056,7 @@ const ROLE_VALUES = new Set([
 ]);
 const LINK_KIND_VALUES = new Set([
   "artifact",
+  "board",
   "doc",
   "evidence",
   "issue",
@@ -1030,12 +1064,13 @@ const LINK_KIND_VALUES = new Set([
   "pr",
   "tracker",
 ]);
+const UNLOCK_STATE_VALUES = new Set(["locked", "emerging", "unlocked"]);
 const IDENTIFIER_RE = /^[a-z][a-z0-9_-]*$/;
 const PRIORITY_RE = /^P([0-9]+)$/;
 const APP_ID = window.BIGBETS_APP_ID || "bigbets-portfolio";
 const REGISTRY_SCHEMA_VERSION = window.BIGBETS_REGISTRY_SCHEMA_VERSION || "bigbets.registry.v1";
-const ARTIFACT_SCHEMA_VERSION = window.BIGBETS_ARTIFACT_SCHEMA_VERSION || "bigbets.artifacts.v1";
-const SITE_SCHEMA_VERSION = window.BIGBETS_SITE_SCHEMA_VERSION || "bigbets.site.v1";
+const ARTIFACT_SCHEMA_VERSION = window.BIGBETS_ARTIFACT_SCHEMA_VERSION || "bigbets.artifacts.v2";
+const SITE_SCHEMA_VERSION = window.BIGBETS_SITE_SCHEMA_VERSION || "bigbets.site.v2";
 const GENERATOR = window.BIGBETS_GENERATOR || { name: "bigbets", version: "unknown" };
 
 const BOARD = {
@@ -1220,12 +1255,22 @@ function renderAll(message) {
     $("validation-status").textContent = "Valid";
     setLog(message || "Valid registry.", false);
     $("graph").innerHTML = state.rendered.svg;
+    renderPortfolioLinks();
     wireGraphCards();
     renderPlanTable();
     renderInspector();
   } catch (error) {
     markInvalid(error.message);
   }
+}
+
+function renderPortfolioLinks() {
+  const target = $("portfolio-links");
+  if (!target) return;
+  const links = state.registry?.metadata?.links || [];
+  target.innerHTML = links
+    .map((link) => `<a href="${escapeAttr(link.url)}" target="_blank" rel="noopener">${escapeHtml(link.label)}</a>`)
+    .join("");
 }
 
 function markInvalid(message) {
@@ -1290,7 +1335,12 @@ function startBoardDrag(event, svg, node) {
   event.stopPropagation();
   event.preventDefault();
   const start = svgPoint(svg, event);
+  const origin = {
+    x: Number(node.dataset.x || 0),
+    y: Number(node.dataset.y || 0),
+  };
   let moved = false;
+  let currentSlot = boardSlotFromPosition(origin.x, origin.y);
   node.setPointerCapture(event.pointerId);
   node.style.transition = "none";
   node.classList.add("dragging-card");
@@ -1298,9 +1348,10 @@ function startBoardDrag(event, svg, node) {
     const point = svgPoint(svg, moveEvent);
     const dx = point.x - start.x;
     const dy = point.y - start.y;
-    if (Math.abs(dx) + Math.abs(dy) > 5) moved = true;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) > 3) moved = true;
     node.setAttribute("transform", `translate(${dx} ${dy})`);
-    updateBoardDropPreview(svg, point);
+    currentSlot = boardSlotFromPosition(origin.x + dx, origin.y + dy);
+    updateBoardDropPreview(svg, currentSlot);
   };
   const up = (upEvent) => {
     node.releasePointerCapture(event.pointerId);
@@ -1316,7 +1367,11 @@ function startBoardDrag(event, svg, node) {
     }
     state.suppressBoardClick = true;
     const point = svgPoint(svg, upEvent);
-    moveBetToBoardPoint(node.dataset.betId, point);
+    currentSlot = boardSlotFromPosition(origin.x + point.x - start.x, origin.y + point.y - start.y);
+    moveBetToWaveRank(node.dataset.betId, currentSlot.wave, currentSlot.rank);
+    state.selection = { kind: "bet", id: node.dataset.betId };
+    state.inspectorOpen = false;
+    commitRegistry("Moved bet on dependency board.");
   };
   node.addEventListener("pointermove", move);
   node.addEventListener("pointerup", up);
@@ -1329,18 +1384,10 @@ function svgPoint(svg, event) {
   return point.matrixTransform(svg.getScreenCTM().inverse());
 }
 
-function moveBetToBoardPoint(id, point) {
-  const slot = boardSlotFromPoint(point);
-  moveBetToWaveRank(id, slot.wave, slot.rank);
-  state.selection = { kind: "bet", id };
-  state.inspectorOpen = false;
-  commitRegistry("Moved bet on dependency board.");
-}
-
-function boardSlotFromPoint(point) {
+function boardSlotFromPosition(x, y) {
   return {
-    wave: Math.max(1, Math.round((point.y - BOARD.marginY) / (BOARD.cardHeight + BOARD.waveGap)) + 1),
-    rank: Math.max(1, Math.round((point.x - BOARD.marginX) / (BOARD.cardWidth + BOARD.cardGap)) + 1),
+    wave: Math.max(1, Math.round((y - BOARD.marginY) / (BOARD.cardHeight + BOARD.waveGap)) + 1),
+    rank: Math.max(1, Math.round((x - BOARD.marginX) / (BOARD.cardWidth + BOARD.cardGap)) + 1),
   };
 }
 
@@ -1351,8 +1398,7 @@ function boardSlotPosition(slot) {
   };
 }
 
-function updateBoardDropPreview(svg, point) {
-  const slot = boardSlotFromPoint(point);
+function updateBoardDropPreview(svg, slot) {
   const position = boardSlotPosition(slot);
   let preview = svg.querySelector("#board-drop-preview");
   if (!preview) {
@@ -1403,10 +1449,10 @@ function betGroupRow(bet, familyCount) {
   return `
     <tr class="bet-group-row" data-kind="bet" data-id="${escapeAttr(bet.id)}" data-priority="${escapeAttr(bet.priority)}">
       <td><button type="button" class="drag-handle" draggable="true" data-drag-kind="bet" data-drag-id="${escapeAttr(bet.id)}" title="Drag bet">::</button></td>
-      <td colspan="9">
+      <td colspan="10">
         <div class="bet-group">
           <div class="bet-group-main">
-            <span class="mini-meta">${escapeHtml(bet.priority)} / ${escapeHtml(bet.status)}</span>
+            <span class="mini-meta">${escapeHtml(bet.priority)} / ${escapeHtml(bet.status)} / ${escapeHtml(bet.unlock_state)}</span>
             <span class="bet-title">${escapeHtml(bet.title)}</span>
             <span class="mini-meta">${familyCount} idea families</span>
           </div>
@@ -1431,6 +1477,7 @@ function familyRow(family) {
       ${selectCell("status", family.status, "w-state", [...STATUS_VALUES])}
       ${selectCell("role", family.role || "", "w-role", ["", ...ROLE_VALUES])}
       ${cell("next_action", family.next_action || "", "w-action", "next action")}
+      ${linksCell(family)}
       ${linkCell("artifact", family.artifact || "", "w-artifact", "none")}
       <td class="row-actions w-actions">
         <button type="button" data-row-action="focus">Edit</button>
@@ -1454,15 +1501,18 @@ function selectCell(field, value, className, options) {
 
 function issueCell(family) {
   const label = `#${family.issue}`;
-  const projectLinks = (family.links || [])
-    .filter((link) => link.kind === "project" || link.kind === "tracker")
-    .map((link) => `<a class="sheet-link aux-link" href="${escapeAttr(link.url)}" target="_blank" rel="noopener">${escapeHtml(link.label)}</a>`)
-    .join("");
   const issue = family.url
     ? `<a class="sheet-link" href="${escapeAttr(family.url)}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`
     : escapeHtml(label);
-  const content = `${issue}${projectLinks}`;
-  return `<td class="w-issue"><div class="sheet-cell" tabindex="0" data-cell data-field="issue" data-value="${family.issue}" data-placeholder="Issue">${content}</div></td>`;
+  return `<td class="w-issue"><div class="sheet-cell" tabindex="0" data-cell data-field="issue" data-value="${family.issue}" data-placeholder="Issue">${issue}</div></td>`;
+}
+
+function linksCell(family) {
+  const links = (family.links || []).filter((link) => link.url);
+  const content = links.length
+    ? `<span class="refs-list">${links.map((link) => `<a class="sheet-link" href="${escapeAttr(link.url)}" target="_blank" rel="noopener">${escapeHtml(shortLinkLabel(link))}</a>`).join("")}</span>`
+    : `<span class="muted-value">none</span>`;
+  return `<td class="w-links"><div class="sheet-cell" tabindex="0" data-cell data-field="links" data-value="${escapeAttr(linksText(family.links || []))}" data-placeholder="refs">${content}</div></td>`;
 }
 
 function linkCell(field, value, className, label) {
@@ -1777,6 +1827,8 @@ function betFields(bet) {
     field("priority", "Priority", bet.priority, "select", ["P0", "P1", "P2", "P3"]),
     field("rank", "Position", bet.rank || "", "number"),
     field("status", "Status", bet.status, "select", [...STATUS_VALUES]),
+    field("unlock_state", "Unlock state", bet.unlock_state, "select", [...UNLOCK_STATE_VALUES]),
+    field("unlock_evidence", "Unlock evidence", bet.unlock_evidence || "", "textarea wide"),
     field("confidence", "Confidence", bet.confidence || "", "text", ["high", "medium_high", "medium", "low"]),
     field("narrative", "Narrative", bet.narrative, "textarea wide"),
     field("near_term_win", "Near-term win", bet.near_term_win, "textarea wide"),
@@ -1805,7 +1857,7 @@ function familyFields(family) {
     field("next_action", "Next action", family.next_action || "", "textarea wide"),
     field("artifact", "Seed URL", family.artifact || "", "url wide", artifacts),
     field("url", "Issue/PR URL", family.url || "", "url wide", urls),
-    field("links", "Project/docs links", linksText(family.links || []), "textarea wide"),
+    field("links", "Refs", linksText(family.links || []), "textarea wide"),
   ].join("");
 }
 
@@ -1887,6 +1939,8 @@ function applyInspector() {
         rank: optionalPositiveInt(value("rank"), "bet.rank"),
         wave: priorityRank(priority(requiredString(value("priority"), "bet.priority"), "bet.priority")) + 1,
         status: status(requiredString(value("status"), "bet.status"), "bet.status"),
+        unlock_state: unlockState(requiredString(value("unlock_state"), "bet.unlock_state"), "bet.unlock_state"),
+        unlock_evidence: optionalString(value("unlock_evidence")),
         narrative: requiredString(value("narrative"), "bet.narrative"),
         near_term_win: requiredString(value("near_term_win"), "bet.near_term_win"),
         long_term_unlock: requiredString(value("long_term_unlock"), "bet.long_term_unlock"),
@@ -2008,6 +2062,8 @@ function addBet() {
     rank: nextRank,
     wave: nextWave,
     status: "candidate",
+    unlock_state: "emerging",
+    unlock_evidence: null,
     narrative: "Describe why this bet matters.",
     near_term_win: "Define one measurable near-term win.",
     long_term_unlock: "Define what this unlocks later.",
@@ -2107,6 +2163,7 @@ function validateRegistry(payload) {
       title: optionalString(metadata.title) || "Big Bets Portfolio",
       description: optionalString(metadata.description),
       updated_at: optionalString(metadata.updated_at),
+      links: parseLinks(metadata.links, "metadata.links"),
       max_p0_big_bets: positiveInt(metadata.max_p0_big_bets, "metadata.max_p0_big_bets", 3),
     },
     big_bets: arrayRequired(payload.big_bets, "big_bets").map(parseBigBet),
@@ -2128,6 +2185,8 @@ function parseBigBet(item, index) {
     rank: optionalPositiveInt(value.rank, `${label}.rank`),
     wave: positiveInt(value.wave, `${label}.wave`),
     status: status(requiredString(value.status, `${label}.status`), `${label}.status`),
+    unlock_state: unlockState(optionalString(value.unlock_state) || defaultUnlockState(value), `${label}.unlock_state`),
+    unlock_evidence: optionalString(value.unlock_evidence),
     narrative: requiredString(value.narrative, `${label}.narrative`),
     near_term_win: requiredString(value.near_term_win, `${label}.near_term_win`),
     long_term_unlock: requiredString(value.long_term_unlock, `${label}.long_term_unlock`),
@@ -2178,6 +2237,9 @@ function validateSemantics(registry) {
     if (bet.priority !== expectedPriority) {
       throw new Error(`${bet.id} has ${bet.priority}, but wave ${bet.wave} requires ${expectedPriority}.`);
     }
+    if (bet.unlock_state === "unlocked" && !bet.unlock_evidence) {
+      throw new Error(`${bet.id} is unlocked and must set unlock_evidence.`);
+    }
     bet.edge_labels.forEach((edge) => {
       if (![...bet.depends_on, ...bet.unlocks].includes(edge.target)) {
         throw new Error(`${bet.id} labels ${edge.target}, but no matching edge exists.`);
@@ -2196,6 +2258,11 @@ function validateSemantics(registry) {
         throw new Error(`#${family.issue} has unsupported link kind ${link.kind}. Use one of: ${[...LINK_KIND_VALUES].join(", ")}.`);
       }
     });
+  });
+  registry.metadata.links.forEach((link) => {
+    if (link.kind && !LINK_KIND_VALUES.has(link.kind)) {
+      throw new Error(`metadata.links has unsupported link kind ${link.kind}. Use one of: ${[...LINK_KIND_VALUES].join(", ")}.`);
+    }
   });
   if (badEdges.length) throw new Error(`Edges reference unknown big bets: ${[...new Set(badEdges)].join(", ")}`);
   const p0Count = registry.big_bets.filter((bet) => bet.priority === "P0").length;
@@ -2248,11 +2315,11 @@ function renderArtifacts(registry) {
 }
 
 function renderCsv(registry, familiesByBet) {
-  const rows = [["kind", "big_bet_priority", "big_bet_order", "wave", "big_bet_id", "big_bet_title", "big_bet_status", "lane_priority", "lane_order", "issue", "idea_family_slug", "idea_family_title", "idea_family_status", "role", "next_action", "artifact", "url", "links", "schema_version", "generator_version"]];
+  const rows = [["kind", "big_bet_priority", "big_bet_order", "wave", "big_bet_id", "big_bet_title", "big_bet_status", "unlock_state", "unlock_evidence", "lane_priority", "lane_order", "issue", "idea_family_slug", "idea_family_title", "idea_family_status", "role", "next_action", "artifact", "url", "links", "schema_version", "generator_version"]];
   registry.big_bets.forEach((bet) => {
     const families = familiesByBet.get(bet.id) || [];
-    rows.push(["bet", bet.priority, bet.rank || "", bet.wave, bet.id, bet.title, bet.status, "", "", "", "", "", "", "", bet.next_action || "", "", "", "", REGISTRY_SCHEMA_VERSION, GENERATOR.version || "unknown"]);
-    families.forEach((family) => rows.push(["family", bet.priority, bet.rank || "", bet.wave, bet.id, bet.title, bet.status, family.priority, family.rank || "", family.issue, family.slug || "", family.title, family.status, family.role || "", family.next_action || bet.next_action || "", family.artifact || "", family.url || "", linksText(family.links || []), REGISTRY_SCHEMA_VERSION, GENERATOR.version || "unknown"]));
+    rows.push(["bet", bet.priority, bet.rank || "", bet.wave, bet.id, bet.title, bet.status, bet.unlock_state, bet.unlock_evidence || "", "", "", "", "", "", "", "", bet.next_action || "", "", "", "", REGISTRY_SCHEMA_VERSION, GENERATOR.version || "unknown"]);
+    families.forEach((family) => rows.push(["family", bet.priority, bet.rank || "", bet.wave, bet.id, bet.title, bet.status, bet.unlock_state, bet.unlock_evidence || "", family.priority, family.rank || "", family.issue, family.slug || "", family.title, family.status, family.role || "", family.next_action || bet.next_action || "", family.artifact || "", family.url || "", linksText(family.links || []), REGISTRY_SCHEMA_VERSION, GENERATOR.version || "unknown"]));
   });
   return rows.map((row) => row.map(csvCell).join(",")).join("\\n") + "\\n";
 }
@@ -2268,6 +2335,14 @@ function renderMarkdown(registry, mermaid, familiesByBet) {
   ];
   if (registry.metadata.description) lines.push(registry.metadata.description, "");
   if (registry.metadata.updated_at) lines.push(`Updated: \\`${registry.metadata.updated_at}\\``, "");
+  if (registry.metadata.links?.length) {
+    lines.push("## Links", "");
+    registry.metadata.links.forEach((link) => {
+      const prefix = link.kind ? `${link.kind}: ` : "";
+      lines.push(`- [${prefix}${link.label}](${link.url})`);
+    });
+    lines.push("");
+  }
   lines.push("## Priority Queue", "");
   lines.push("| Priority | Big bet | Status | Idea families | Next action |");
   lines.push("| --- | --- | --- | --- | --- |");
@@ -2282,6 +2357,8 @@ function renderMarkdown(registry, mermaid, familiesByBet) {
     lines.push(`- **Near-term win:** ${bet.near_term_win}`);
     lines.push(`- **Long-term unlock:** ${bet.long_term_unlock}`);
     lines.push(`- **Status:** ${bet.status}`);
+    lines.push(`- **Unlock state:** ${bet.unlock_state}`);
+    lines.push(`- **Unlock evidence:** ${bet.unlock_evidence || "-"}`);
     lines.push(`- **Next action:** ${bet.next_action || "-"}`);
     lines.push(`- **Confidence:** ${bet.confidence || "-"}`);
     lines.push(`- **Risk:** ${bet.risk || "-"}`, "");
@@ -2295,8 +2372,8 @@ function renderMermaid(registry, edges, familiesByBet) {
   waves(registry).forEach(([wave, bets]) => {
     lines.push(`  subgraph wave_${wave}[${priorityForWave(wave)}]`);
     bets.forEach((bet) => {
-      const issueLabel = (familiesByBet.get(bet.id) || []).map(familyLabel).join(" ");
-      lines.push(`    ${nodeId(bet.id)}["${escapeMermaid(`${bet.priority} / ${bet.title}\\\\n${issueLabel}`)}"]`);
+      const issueLabel = familyChipLabel(familiesByBet.get(bet.id) || []);
+      lines.push(`    ${nodeId(bet.id)}["${escapeMermaid(`${bet.priority} / ${bet.title}\\\\n${bet.unlock_state}\\\\n${issueLabel}`)}"]`);
     });
     lines.push("  end");
   });
@@ -2371,13 +2448,14 @@ function svgCard(bet, families, position) {
   const color = priorityColor(bet.priority);
   const fill = priorityFill(bet.priority);
   const titleLines = wrapText(bet.title, 33, 3);
-  const issueLabel = families.slice(0, 4).map(familyLabel).join(", ") || "No mapped idea families";
+  const issueLabel = familyChipLabel(families) || "No mapped idea families";
   const parts = [
     `<g data-bet-id="${escapeAttr(bet.id)}" data-x="${position.x}" data-y="${position.y}" tabindex="0" role="button" aria-label="${escapeAttr(bet.title)}">`,
+    `<title>Double-click or press Enter to edit. Drag the dotted handle to move.</title>`,
     `<path d="${roundedRectPath(position.x, position.y, BOARD.cardWidth, BOARD.cardHeight, 27)}" fill="${fill}" stroke="none" filter="url(#shadow)"/>`,
     ...roughRectPaths(position.x, position.y, BOARD.cardWidth, BOARD.cardHeight, 27, stableSeed(bet.id)),
     `<path d="${roughRectPath(position.x + 13, position.y + 13, BOARD.cardWidth - 26, BOARD.cardHeight - 26, 20, stableSeed(`inner:${bet.id}`))}" fill="none" stroke="${color}" stroke-width="1.05" stroke-linecap="round" stroke-linejoin="round" opacity="0.34"/>`,
-    `<text x="${position.x + 23}" y="${position.y + 32}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="12" font-weight="400" fill="${color}">${escapeHtml(bet.priority)} / ${escapeHtml(bet.status)}</text>`,
+    `<text x="${position.x + 23}" y="${position.y + 32}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="12" font-weight="400" fill="${color}">${escapeHtml(bet.priority)} / ${escapeHtml(bet.status)} / ${escapeHtml(bet.unlock_state)}</text>`,
     `<g class="card-drag-handle" data-drag-handle="true" aria-label="Drag ${escapeAttr(bet.title)}">`,
     `<rect x="${position.x + BOARD.cardWidth - 54}" y="${position.y + 18}" width="31" height="24" rx="10" fill="#fffefa" stroke="${color}" stroke-width="1" opacity="0.78"/>`,
     `<circle cx="${position.x + BOARD.cardWidth - 44}" cy="${position.y + 27}" r="1.7" fill="${color}"/>`,
@@ -2390,7 +2468,10 @@ function svgCard(bet, families, position) {
     parts.push(`<text x="${position.x + 23}" y="${position.y + 61 + index * 19}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="16" font-weight="400" fill="#1e1e1e">${escapeHtml(line)}</text>`);
   });
   parts.push(`<text x="${position.x + 23}" y="${position.y + BOARD.cardHeight - 20}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="12" fill="#4b5563">${escapeHtml(issueLabel)}</text>`);
-  parts.push(`<text class="card-action-hint" x="${position.x + BOARD.cardWidth - 23}" y="${position.y + BOARD.cardHeight - 20}" text-anchor="end" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="11" fill="#5d6c84" opacity="0">edit</text>`);
+  parts.push(`<g class="card-action-hint" opacity="0">`);
+  parts.push(`<rect x="${position.x + BOARD.cardWidth - 102}" y="${position.y + 20}" width="39" height="21" rx="9" fill="#fffefa" stroke="${color}" stroke-width="1" opacity="0.82"/>`);
+  parts.push(`<text x="${position.x + BOARD.cardWidth - 82}" y="${position.y + 34}" text-anchor="middle" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="10.5" fill="${color}">Edit</text>`);
+  parts.push(`</g>`);
   parts.push("</g>");
   return parts.join("\\n");
 }
@@ -2467,8 +2548,8 @@ function renderExcalidraw(registry, edges, familiesByBet) {
       boundElements: [{ type: "text", id: textId }],
       roughness: 2,
     }));
-    const issues = (familiesByBet.get(bet.id) || []).map((family) => `#${family.issue}`).join(" ");
-    const text = `${bet.priority} / ${bet.title}\\n${bet.status}${issues ? `\\n${issues}` : ""}`;
+    const issues = familyChipLabel(familiesByBet.get(bet.id) || []);
+    const text = `${bet.priority} / ${bet.title}\\n${bet.status} / ${bet.unlock_state}${issues ? `\\n${issues}` : ""}`;
     elements.push({
       ...excalidrawBase(textId, "text", position.x + 22, position.y + 22, BOARD.cardWidth - 44, 90, {
         strokeColor: "#1e1e1e",
@@ -2749,6 +2830,15 @@ function status(value, label) {
   return value;
 }
 
+function unlockState(value, label) {
+  if (!UNLOCK_STATE_VALUES.has(value)) throw new Error(`${label} must be one of: ${[...UNLOCK_STATE_VALUES].join(", ")}.`);
+  return value;
+}
+
+function defaultUnlockState(value) {
+  return Array.isArray(value.depends_on) && value.depends_on.length ? "locked" : "emerging";
+}
+
 function optionalIdentifierArray(value, label) {
   if (value == null) return [];
   if (!Array.isArray(value)) throw new Error(`${label} must be an array.`);
@@ -2860,16 +2950,35 @@ function familyLabel(family) {
   return family.slug || `#${family.issue}`;
 }
 
+function familyChipLabel(families) {
+  const labels = families.slice(0, 3).map((family) => truncateLabel(familyLabel(family), 18));
+  if (families.length > 3) labels.push(`+${families.length - 3}`);
+  return labels.join(", ");
+}
+
+function truncateLabel(value, maxLength) {
+  const text = String(value || "");
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
 function linkLabel(value, fallback) {
   const text = String(value || "");
   if (!text) return fallback;
   const issue = text.match(/(?:issues|pull)\\/(\\d+)(?:\\b|$)/);
   if (issue) return `#${issue[1]}`;
   const file = text.split("/").filter(Boolean).at(-1) || fallback;
-  if (file.endsWith(".ideas.json")) return "ideas.json";
+  if (file.endsWith(".ideas.json")) return "seed";
   if (file.endsWith(".json")) return file.replace(/.*?([a-z0-9_-]+\\.json)$/i, "$1");
   if (fallback === "none") return "human-authored";
   return fallback || file;
+}
+
+function shortLinkLabel(link) {
+  const label = String(link.label || "").trim();
+  if (label) return truncateLabel(label, 18);
+  const fallback = link.kind || "ref";
+  return truncateLabel(linkLabel(link.url, fallback), 18);
 }
 
 function wrapText(text, width, maxLines) {

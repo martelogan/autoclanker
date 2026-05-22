@@ -1,0 +1,3 @@
+display_name: Bigbets Work Auditor
+short_description: Audit work artifacts into idea-family lanes and big-bet groups.
+default_prompt: Audit these work sources and propose normalized idea-family lanes plus big-bet grouping.

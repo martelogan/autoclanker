@@ -1,0 +1,3 @@
+display_name: Bigbets Portfolio Curator
+short_description: Ingest idea-family issues and maintain ranked big-bet portfolios.
+default_prompt: Curate these normalized idea-family issues into a clean bigbets registry.

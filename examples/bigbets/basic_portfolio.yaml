@@ -6,6 +6,10 @@ metadata:
     Demonstrates how to map concrete idea-family issues into a smaller ranked
     set of priority-ranked big bets with dependencies and generated meeting artifacts.
   updated_at: "2026-05-10"
+  links:
+    - label: Shared sketch board
+      url: https://example.invalid/boards/bigbets
+      kind: board
   max_p0_big_bets: 2
 
 big_bets:
@@ -15,6 +19,7 @@ big_bets:
     rank: 1
     wave: 1
     status: active
+    unlock_state: emerging
     narrative: >
       Collapse repeated request-level data fan-out now while proving reusable
       batching contracts for later compiler and scheduler work.
@@ -35,6 +40,7 @@ big_bets:
     rank: 2
     wave: 1
     status: active
+    unlock_state: emerging
     narrative: >
       Move repeated parsing and request-state admission out of hot loops and
       into narrow typed boundaries.
@@ -55,6 +61,7 @@ big_bets:
     rank: 3
     wave: 2
     status: active
+    unlock_state: locked
     narrative: >
       Use the contracts proven in P0 to let compiler/runtime layers plan
       data dependencies and consume stable request state directly.

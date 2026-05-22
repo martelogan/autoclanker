@@ -50,8 +50,14 @@ _KNOWN_ROLES = {
     "blocked",
     "shipped",
 }
+_KNOWN_UNLOCK_STATES = {
+    "locked",
+    "emerging",
+    "unlocked",
+}
 _KNOWN_LINK_KINDS = {
     "artifact",
+    "board",
     "doc",
     "evidence",
     "issue",
@@ -94,6 +100,8 @@ class BigBet:
     next_action: str | None
     confidence: str | None
     risk: str | None
+    unlock_state: str
+    unlock_evidence: str | None
     depends_on: tuple[str, ...]
     unlocks: tuple[str, ...]
     edge_labels: tuple[EdgeLabel, ...]
@@ -120,6 +128,7 @@ class BigBetsRegistry:
     title: str
     description: str | None
     updated_at: str | None
+    links: tuple[ExternalLink, ...]
     big_bets: tuple[BigBet, ...]
     idea_families: tuple[IdeaFamily, ...]
     max_p0_big_bets: int
@@ -211,6 +220,7 @@ def validate_bigbets_registry(
     title = _optional_string(metadata, "title") or "Big Bets Portfolio"
     description = _optional_string(metadata, "description")
     updated_at = _optional_string(metadata, "updated_at")
+    links = _parse_external_links(metadata.get("links"), "metadata.links")
     max_p0_big_bets = _optional_positive_int(metadata, "max_p0_big_bets") or 3
 
     big_bets = tuple(
@@ -229,6 +239,7 @@ def validate_bigbets_registry(
         title=title,
         description=description,
         updated_at=updated_at,
+        links=links,
         big_bets=tuple(sorted(big_bets, key=_big_bet_sort_key)),
         idea_families=tuple(sorted(idea_families, key=_idea_family_sort_key)),
         max_p0_big_bets=max_p0_big_bets,
@@ -265,6 +276,7 @@ def normalize_bigbets_registry(registry: BigBetsRegistry) -> dict[str, JsonValue
                 "title": registry.title,
                 "description": registry.description,
                 "updated_at": registry.updated_at,
+                "links": cast(list[JsonValue], to_json_value(list(registry.links))),
                 "max_p0_big_bets": registry.max_p0_big_bets,
             },
             "summary": {
@@ -310,6 +322,7 @@ def registry_to_input_payload(registry: BigBetsRegistry) -> dict[str, JsonValue]
                 "title": registry.title,
                 "description": registry.description,
                 "updated_at": registry.updated_at,
+                "links": cast(list[JsonValue], to_json_value(list(registry.links))),
                 "max_p0_big_bets": registry.max_p0_big_bets,
             },
             "big_bets": big_bets,
@@ -391,6 +404,8 @@ def render_rankings_csv(registry: BigBetsRegistry) -> str:
             "big_bet_id",
             "big_bet_title",
             "big_bet_status",
+            "unlock_state",
+            "unlock_evidence",
             "lane_priority",
             "lane_order",
             "issue",
@@ -419,6 +434,8 @@ def render_rankings_csv(registry: BigBetsRegistry) -> str:
                     bet.id,
                     bet.title,
                     bet.status,
+                    bet.unlock_state,
+                    bet.unlock_evidence or "",
                     "",
                     "",
                     "",
@@ -444,6 +461,8 @@ def render_rankings_csv(registry: BigBetsRegistry) -> str:
                     bet.id,
                     bet.title,
                     bet.status,
+                    bet.unlock_state,
+                    bet.unlock_evidence or "",
                     family.priority,
                     family.rank or "",
                     family.issue,
@@ -497,6 +516,12 @@ def render_markdown(registry: BigBetsRegistry, mermaid: str | None = None) -> st
         lines.extend([registry.description, ""])
     if registry.updated_at:
         lines.extend([f"Updated: `{registry.updated_at}`", ""])
+    if registry.links:
+        lines.extend(["## Links", ""])
+        for link in registry.links:
+            prefix = f"{link.kind}: " if link.kind else ""
+            lines.append(f"- [{prefix}{link.label}]({link.url})")
+        lines.append("")
     lines.extend(
         [
             "## Priority Queue",
@@ -534,6 +559,8 @@ def render_markdown(registry: BigBetsRegistry, mermaid: str | None = None) -> st
                 f"- **Near-term win:** {bet.near_term_win}",
                 f"- **Long-term unlock:** {bet.long_term_unlock}",
                 f"- **Status:** {bet.status}",
+                f"- **Unlock state:** {bet.unlock_state}",
+                f"- **Unlock evidence:** {bet.unlock_evidence or '-'}",
                 f"- **Next action:** {bet.next_action or '-'}",
                 f"- **Confidence:** {bet.confidence or '-'}",
                 f"- **Risk:** {bet.risk or '-'}",
@@ -659,7 +686,7 @@ def render_excalidraw(registry: BigBetsRegistry) -> str:
             issue_label = " ".join(
                 _family_label(family) for family in families_by_bet.get(bet.id, ())
             )
-            text = f"{bet.priority} / {bet.title}\n{bet.status}"
+            text = f"{bet.priority} / {bet.title}\n{bet.status} · {bet.unlock_state}"
             if issue_label:
                 text = f"{text}\n{issue_label}"
             elements.append(
@@ -812,6 +839,11 @@ def render_html(
     registry: BigBetsRegistry, svg: str, normalized: dict[str, JsonValue]
 ) -> str:
     data_json = json.dumps(normalized, sort_keys=True)
+    links = "".join(
+        f'<a href="{_attr(link.url)}">{_xml(link.label)}</a>'
+        for link in registry.links
+    )
+    link_section = f'<nav class="links">{links}</nav>' if links else ""
     cards: list[str] = []
     families_by_bet = _families_by_bet(registry)
     for bet in registry.big_bets:
@@ -865,6 +897,8 @@ def render_html(
     .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 18px; margin-top: 28px; }}
     .card {{ background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 18px; box-shadow: 0 10px 30px rgba(15,23,42,0.07); }}
     .card-meta {{ color: var(--accent); font-size: 0.78rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }}
+    .links {{ display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }}
+    .links a {{ border: 1px solid var(--line); border-radius: 999px; padding: 0.34rem 0.7rem; background: rgba(255,255,255,0.7); }}
     h2 {{ margin: 8px 0; letter-spacing: -0.03em; line-height: 1.05; }}
     dl {{ display: grid; grid-template-columns: 8rem 1fr; gap: 6px 12px; }}
     dt {{ color: var(--muted); font-weight: 700; }}
@@ -878,6 +912,7 @@ def render_html(
     <p>Generated by <code>bigbets {BIGBETS_VERSION}</code>. Schema <code>{BIGBETS_REGISTRY_SCHEMA_VERSION}</code>.</p>
     <h1>{_xml(registry.title)}</h1>
     <p>{_xml(registry.description or "Ranked big-bet portfolio generated from a structured registry.")}</p>
+    {link_section}
   </header>
   <main>
     <section class="graph">{svg}</section>
@@ -907,6 +942,12 @@ def _parse_big_bet(item: object, index: int) -> BigBet:
         next_action=_optional_string(mapping, "next_action"),
         confidence=_optional_string(mapping, "confidence"),
         risk=_optional_string(mapping, "risk"),
+        unlock_state=_optional_unlock_state(
+            mapping,
+            "unlock_state",
+            default=_default_unlock_state(mapping),
+        ),
+        unlock_evidence=_optional_string(mapping, "unlock_evidence"),
         depends_on=tuple(
             _required_identifier_value(value, f"big_bets[{index}].depends_on")
             for value in _optional_sequence(mapping.get("depends_on"), "depends_on")
@@ -999,6 +1040,10 @@ def _validate_registry_semantics(
                 f"{source_name} big_bet {bet.id!r} has priority {bet.priority!r} "
                 f"but wave {bet.wave} requires {expected_priority!r}."
             )
+        if bet.unlock_state == "unlocked" and not bet.unlock_evidence:
+            raise ValidationFailure(
+                f"{source_name} big_bet {bet.id!r} is unlocked and must set unlock_evidence."
+            )
         for edge_label in bet.edge_labels:
             if edge_label.target not in (*bet.depends_on, *bet.unlocks):
                 raise ValidationFailure(
@@ -1012,11 +1057,12 @@ def _validate_registry_semantics(
                 f"{family.role!r}; expected one of: {', '.join(sorted(_KNOWN_ROLES))}."
             )
         for link in family.links:
-            if link.kind is not None and link.kind not in _KNOWN_LINK_KINDS:
-                raise ValidationFailure(
-                    f"{source_name} idea_family #{family.issue} has unsupported link kind "
-                    f"{link.kind!r}; expected one of: {', '.join(sorted(_KNOWN_LINK_KINDS))}."
-                )
+            _validate_link_kind(
+                link,
+                f"{source_name} idea_family #{family.issue}",
+            )
+    for link in registry.links:
+        _validate_link_kind(link, f"{source_name} metadata")
     families_by_bet = _families_by_bet(registry)
     empty_active = [
         bet.id
@@ -1028,6 +1074,15 @@ def _validate_registry_semantics(
         raise ValidationFailure(
             f"{source_name} active big_bets need at least one idea family: {', '.join(empty_active)}"
         )
+
+
+def _validate_link_kind(link: ExternalLink, label: str) -> None:
+    if link.kind is None or link.kind in _KNOWN_LINK_KINDS:
+        return
+    raise ValidationFailure(
+        f"{label} has unsupported link kind {link.kind!r}; expected one of: "
+        f"{', '.join(sorted(_KNOWN_LINK_KINDS))}."
+    )
 
 
 def _normalized_edges(registry: BigBetsRegistry) -> list[dict[str, str]]:
@@ -1117,15 +1172,13 @@ def _svg_card(
     bet: BigBet, families: tuple[IdeaFamily, ...], x: int, y: int, color: str
 ) -> list[str]:
     title_lines = _wrap_text(bet.title, 33, max_lines=3)
-    family_label = ", ".join(_family_label(family) for family in families[:4])
-    if len(families) > 4:
-        family_label = f"{family_label}, +{len(families) - 4}"
+    family_label = _family_chip_label(families)
     parts = [
         f'<g data-bet-id="{_attr(bet.id)}" tabindex="0" role="button" aria-label="{_attr(bet.title)}">',
         f'<path d="{_rounded_rect_path(x, y, _CARD_WIDTH, _CARD_HEIGHT, 27)}" fill="{_priority_fill(bet.priority)}" stroke="none" filter="url(#shadow)"/>',
         *_rough_rect_paths(x, y, _CARD_WIDTH, _CARD_HEIGHT, 27, _stable_seed(bet.id)),
         f'<path d="{_rough_rect_path(x + 13, y + 13, _CARD_WIDTH - 26, _CARD_HEIGHT - 26, 20, _stable_seed(f"inner:{bet.id}"))}" fill="none" stroke="{color}" stroke-width="1.05" stroke-linecap="round" stroke-linejoin="round" opacity="0.34"/>',
-        f'<text x="{x + 23}" y="{y + 32}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="12" font-weight="400" fill="{color}">{_xml(bet.priority)} / {_xml(bet.status)}</text>',
+        f'<text x="{x + 23}" y="{y + 32}" font-family="Excalifont, Virgil, Comic Sans MS, Marker Felt, sans-serif" font-size="12" font-weight="400" fill="{color}">{_xml(bet.priority)} / {_xml(bet.status)} / {_xml(bet.unlock_state)}</text>',
     ]
     for index, line in enumerate(title_lines):
         parts.append(
@@ -1304,6 +1357,19 @@ def _family_label(family: IdeaFamily) -> str:
     return family.slug or f"#{family.issue}"
 
 
+def _family_chip_label(families: tuple[IdeaFamily, ...]) -> str:
+    labels = [_truncate(_family_label(family), 18) for family in families[:3]]
+    if len(families) > 3:
+        labels.append(f"+{len(families) - 3}")
+    return ", ".join(labels)
+
+
+def _truncate(value: str, max_length: int) -> str:
+    if len(value) <= max_length:
+        return value
+    return f"{value[: max_length - 3]}..."
+
+
 def _links_text(links: tuple[ExternalLink, ...]) -> str:
     return "\n".join(
         " | ".join(value for value in (link.kind, link.label, link.url) if value)
@@ -1462,6 +1528,24 @@ def _required_status(mapping: dict[str, object], key: str, label: str) -> str:
             f"Expected {label}.{key} to be one of {sorted(_KNOWN_STATUSES)}."
         )
     return value
+
+
+def _optional_unlock_state(
+    mapping: dict[str, object], key: str, *, default: str
+) -> str:
+    value = _optional_string(mapping, key) or default
+    if value not in _KNOWN_UNLOCK_STATES:
+        raise ValidationFailure(
+            f"Expected {key!r} to be one of {sorted(_KNOWN_UNLOCK_STATES)}."
+        )
+    return value
+
+
+def _default_unlock_state(mapping: dict[str, object]) -> str:
+    depends_on = mapping.get("depends_on")
+    if isinstance(depends_on, (list, tuple)) and depends_on:
+        return "locked"
+    return "emerging"
 
 
 def _required_positive_int(mapping: dict[str, object], key: str, label: str) -> int:

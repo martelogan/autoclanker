@@ -19,6 +19,11 @@ from bigbets.core import (
     render_bigbets,
     write_bigbets_artifacts,
 )
+from bigbets.issues import (
+    issue_family_patch,
+    load_issue_family_payloads,
+    merge_issue_families,
+)
 from bigbets.site import list_storage_adapters, site_result_payload, write_static_site
 from bigbets.version import (
     BIGBETS_ARTIFACT_SCHEMA_VERSION,
@@ -189,6 +194,39 @@ def handle_snapshot_list(args: argparse.Namespace) -> dict[str, JsonValue]:
     }
 
 
+def handle_issues_import(args: argparse.Namespace) -> dict[str, JsonValue]:
+    families = load_issue_family_payloads(Path(args.input))
+    patch = issue_family_patch(families)
+    return {
+        "ok": True,
+        "tool": "bigbets_issues_import",
+        "input": args.input,
+        "schema_version": BIGBETS_REGISTRY_SCHEMA_VERSION,
+        "generator": cast(dict[str, JsonValue], generator_metadata()),
+        "idea_family_count": len(families),
+        "patch": patch,
+    }
+
+
+def handle_issues_merge(args: argparse.Namespace) -> dict[str, JsonValue]:
+    registry = load_bigbets_registry(Path(args.registry))
+    families = load_issue_family_payloads(Path(args.input))
+    merged = merge_issue_families(registry, families)
+    payload = registry_to_input_payload(merged)
+    output_path = Path(args.output)
+    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {
+        "ok": True,
+        "tool": "bigbets_issues_merge",
+        "registry": args.registry,
+        "input": args.input,
+        "output": args.output,
+        "schema_version": BIGBETS_REGISTRY_SCHEMA_VERSION,
+        "generator": cast(dict[str, JsonValue], generator_metadata()),
+        "idea_family_count": len(merged.idea_families),
+    }
+
+
 def register_bigbets_leaf_commands(subparsers: Any) -> None:
     validate_parser = subparsers.add_parser(
         "validate", help="Validate a bigbets registry."
@@ -275,6 +313,29 @@ def register_bigbets_leaf_commands(subparsers: Any) -> None:
     )
     snapshot_list_parser.add_argument("--output-dir", required=True)
     snapshot_list_parser.set_defaults(handler=handle_snapshot_list)
+
+    issues_parser = subparsers.add_parser(
+        "issues",
+        help="Import normalized idea-family issues into a bigbets registry.",
+    )
+    issues_subparsers = issues_parser.add_subparsers(
+        dest="issues_command", required=True
+    )
+    issues_import_parser = issues_subparsers.add_parser(
+        "import",
+        help="Parse issue JSON or normalized Markdown and emit an idea-family patch.",
+    )
+    issues_import_parser.add_argument("--input", required=True)
+    issues_import_parser.set_defaults(handler=handle_issues_import)
+
+    issues_merge_parser = issues_subparsers.add_parser(
+        "merge",
+        help="Merge imported idea-family issues into an existing registry.",
+    )
+    issues_merge_parser.add_argument("--registry", required=True)
+    issues_merge_parser.add_argument("--input", required=True)
+    issues_merge_parser.add_argument("--output", required=True)
+    issues_merge_parser.set_defaults(handler=handle_issues_merge)
 
 
 def register_bigbets_commands(subparsers: Any) -> None:

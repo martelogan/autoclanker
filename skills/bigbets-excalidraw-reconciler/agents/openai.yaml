@@ -1,0 +1,3 @@
+display_name: Bigbets Excalidraw Reconciler
+short_description: Map edited Excalidraw boards back into bigbets registries.
+default_prompt: Reconcile this edited Excalidraw board against the canonical bigbets registry and apply safe registry changes.

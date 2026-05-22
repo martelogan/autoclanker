@@ -20,6 +20,13 @@ Use one canonical registry and generate every view from it.
 ```yaml
 schema_version: bigbets.registry.v1
 
+metadata:
+  title: Example Big Bets Portfolio
+  links:
+    - label: Shared sketch board
+      url: https://example.invalid/boards/bigbets
+      kind: board
+
 big_bets:
   - id: data_plane_batching
     title: Batch the request data plane
@@ -27,6 +34,7 @@ big_bets:
     rank: 1        # serialized position inside P0
     wave: 1        # serialized P-depth; P0 == wave 1
     status: active
+    unlock_state: emerging
     narrative: Collapse repeated request-level data fan-out now.
     near_term_win: Ship one measured batch-loader win.
     long_term_unlock: Enables static planning and adaptive prefetching.
@@ -63,6 +71,9 @@ machine artifacts:
   2 serializes P1, and so on.
 - Big-bet `priority` is derived from `wave`; the validator rejects mismatches
   so board drags cannot leave stale labels behind.
+- Big-bet `unlock_state` is `locked`, `emerging`, or `unlocked`. Use it to
+  distinguish a later bet that is truly enabled from one that is only a
+  candidate; `unlocked` requires `unlock_evidence`.
 - `rank` is the internal position inside a layer or bet. The UI makes that
   implicit through drag/drop, keyboard movement, and table ordering rather than
   labeling every row with an order number.
@@ -71,12 +82,16 @@ machine artifacts:
 - Idea-family `slug` is the short human label shown in compact views. It should
   be stable enough for meeting notes, but it is not a replacement for the issue
   or PR URL.
-- Idea-family `artifact` points at the durable lane artifact, often an
-  `*.autoclanker.ideas.json` file. `ideas-lane` is a role; `ideas.json` is a
-  concrete artifact link label.
+- Idea-family `artifact` points at the durable lane seed, often an
+  `*.autoclanker.ideas.json` file. `ideas-lane` is a role; a linked JSON file is
+  rendered as a seed/artifact, not as a separate planning state.
 - Idea-family `links` is an optional list of related project trackers, docs,
   PRs, or evidence links. Link `kind` is generic; hosts can render private
   trackers without coupling `bigbets` to that tracker.
+- Metadata `links` is the portfolio-level equivalent for shared boards, meeting
+  notes, source dashboards, or other references that belong to the whole plan.
+  A collaborative Excalidraw board should be linked there with `kind: board`
+  when one exists; the generated site surfaces it near the title.
 - Big-bet `edge_labels` is optional. Use it sparingly for short dependency
   reasons like `safe contracts` or `profile heat`; omit labels when the edge is
   already obvious.
@@ -102,6 +117,7 @@ machine artifacts:
 - dependency and unlock edges reference valid big-bet ids;
 - dependency labels reference an actual dependency/unlock edge;
 - big bets define both `near_term_win` and `long_term_unlock`.
+- big bets marked `unlocked` include `unlock_evidence`.
 
 Tooling, observability, and benchmark hygiene should usually be modeled as an
 always-on underlay rather than as a separate priority layer. Each layer should still
@@ -147,6 +163,39 @@ bigbets snapshot create \
 bigbets snapshot list --output-dir ~/bigbets-site
 ```
 
+Import normalized idea-family issues:
+
+```bash
+bigbets issues import --input issues.json
+
+bigbets issues merge \
+  --registry examples/bigbets/basic_portfolio.yaml \
+  --input issues.json \
+  --output tmp/portfolio.with-issues.json
+```
+
+`issues.json` can be a list of issue-like objects, a GitHub-style object with an
+`issues` list, or a normalized Markdown issue containing a
+`bigbets:idea-family` HTML comment or `bigbets-idea-family` code fence. The
+generic parser only reads issue metadata; it does not call any issue tracker.
+
+Minimal normalized Markdown block:
+
+```markdown
+# Bulk-resolve repeated collection projections
+
+<!-- bigbets:idea-family
+issue: 1001
+slug: collection_bulk
+big_bet: data_plane_batching
+priority: P0
+status: active
+role: ideas-lane
+artifact: artifacts/collection_projection.autoclanker.ideas.json
+next_action: Build one replay-backed projection candidate.
+-->
+```
+
 Emit one artifact:
 
 ```bash
@@ -187,6 +236,12 @@ validate the same maintenance invariants, download regenerated artifacts, and
 persist through `window.bigbetsStorageAdapter` when the host provides one.
 Without an adapter it falls back to browser localStorage.
 
+The Excalidraw export is intentionally round-trippable by an agent. After a
+collaborative board session, compare the edited `.excalidraw` against the
+registry and apply only durable changes: node renames, layer moves, explicit
+edge additions/removals, or visible issue/slug references that map back to
+idea-family lanes. Then validate and regenerate artifacts from the registry.
+
 Storage adapters are deliberately pluggable. `bigbets site adapters` lists
 built-ins. Use `--storage-adapter none` to omit `storage-adapter.js`, or
 `--storage-adapter-file /path/to/storage-adapter.js` to copy a private
@@ -223,7 +278,7 @@ producer:
 - CSV includes `schema_version` and `generator_version` columns;
 - Markdown, Mermaid, Excalidraw, SVG, and HTML include embedded
   schema/generator metadata;
-- static-site scaffolds additionally declare `bigbets.site.v1` in generated
+- static-site scaffolds additionally declare `bigbets.site.v2` in generated
   page metadata, `SITE.md`, and `big_bets.artifact_metadata.json`.
 
 When a future schema changes, bump the corresponding version constant in
@@ -244,3 +299,14 @@ Keep individual idea-family issues as the durable work/evidence units. Use
 4. render a fresh Markdown/SVG/HTML view;
 5. deploy the rendered directory to a static host if a meeting-ready surface is
    needed.
+
+## Agent Skills
+
+The repo includes host-neutral skills for repeated portfolio work:
+
+- `skills/bigbets-idea-family-author`: author normalized idea-family issues.
+- `skills/bigbets-portfolio-curator`: ingest issues and maintain the registry.
+- `skills/bigbets-work-auditor`: audit work artifacts into candidate lanes.
+- `skills/bigbets-site-operator`: regenerate and validate generated sites.
+- `skills/bigbets-excalidraw-reconciler`: map edited Excalidraw boards back
+  into registry changes.

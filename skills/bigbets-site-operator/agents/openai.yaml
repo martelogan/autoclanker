@@ -1,0 +1,3 @@
+display_name: Bigbets Site Operator
+short_description: Maintain generated bigbets static sites and artifacts.
+default_prompt: Regenerate and validate this bigbets static site from its canonical registry.

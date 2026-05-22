@@ -1,0 +1,3 @@
+display_name: Bigbets Idea-Family Author
+short_description: Create normalized self-contained idea-family issues for bigbets.
+default_prompt: Create a normalized idea-family issue from the provided evidence and rough ideas.

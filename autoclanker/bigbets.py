@@ -24,6 +24,11 @@ from bigbets.core import (
     validate_bigbets_registry,
     write_bigbets_artifacts,
 )
+from bigbets.issues import (
+    issue_family_patch,
+    load_issue_family_payloads,
+    merge_issue_families,
+)
 from bigbets.site import (
     StaticSiteScaffold,
     StorageAdapter,
@@ -54,9 +59,12 @@ __all__ = [
     "StorageAdapter",
     "ValidationFailure",
     "load_bigbets_registry",
+    "load_issue_family_payloads",
     "load_serialized_payload",
     "load_serialized_payload_from_text",
     "list_storage_adapters",
+    "issue_family_patch",
+    "merge_issue_families",
     "normalize_bigbets_registry",
     "registry_to_input_payload",
     "render_artifact_metadata_json",

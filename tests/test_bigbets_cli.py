@@ -41,6 +41,7 @@ def test_bigbets_registry_validates_and_renders_core_artifacts() -> None:
     assert normalized["summary"]["big_bet_count"] == 3
     assert normalized["summary"]["idea_family_count"] == 3
     assert normalized["summary"]["p0_big_bet_count"] == 2
+    assert normalized["big_bets"][0]["unlock_state"] == "emerging"
     assert (
         registry_to_input_payload(registry)["schema_version"]
         == BIGBETS_REGISTRY_SCHEMA_VERSION
@@ -170,9 +171,14 @@ def test_bigbets_site_scaffold_writes_editable_static_app(
     assert "REGISTRY_SCHEMA_VERSION" in app_js
     assert "artifactMetadataJson" in app_js
     assert "LINK_KIND_VALUES" in app_js
+    assert "UNLOCK_STATE_VALUES" in app_js
     assert "parseEdgeLabels" in app_js
-    assert "Project/docs links" in app_js
+    assert "portfolio-links" in index_html
+    assert "metadata.links" in app_js
+    assert "linksCell" in app_js
+    assert "w-links" in app_js
     assert "card-drag-handle" in app_js
+    assert "Double-click or press Enter to edit" in app_js
     assert "generator_version" in app_js
     assert "renderExcalidraw" in app_js
     assert "fontFamily: 5" in app_js
@@ -367,3 +373,121 @@ def test_bigbets_rejects_ambiguous_wave_priority_and_roles() -> None:
     bad_role["idea_families"][0]["role"] = "custom-label"
     with pytest.raises(ValidationFailure, match="unsupported role"):
         validate_bigbets_registry(bad_role)
+
+    bad_unlock = json.loads(json.dumps(payload))
+    bad_unlock["big_bets"][2]["unlock_state"] = "unlocked"
+    bad_unlock["big_bets"][2].pop("unlock_evidence", None)
+    with pytest.raises(ValidationFailure, match="unlock_evidence"):
+        validate_bigbets_registry(bad_unlock)
+
+
+@covers("M8-001")
+def test_bigbets_issues_import_and_merge_normalized_markdown(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    issue_path = tmp_path / "issue.md"
+    issue_path.write_text(
+        """# New batch lane
+
+<!-- bigbets:idea-family
+issue: 4242
+slug: new_batch
+big_bet: data_plane_batching
+priority: P0
+status: candidate
+role: ideas-lane
+artifact: artifacts/new_batch.autoclanker.ideas.json
+next_action: Run the smallest batch proof.
+-->
+""",
+        encoding="utf-8",
+    )
+
+    assert bigbets_main(["issues", "import", "--input", str(issue_path)]) == 0
+    import_payload = json.loads(capsys.readouterr().out)
+    assert import_payload["tool"] == "bigbets_issues_import"
+    family = import_payload["patch"]["idea_families"][0]
+    assert family["issue"] == 4242
+    assert family["slug"] == "new_batch"
+    assert family["role"] == "ideas-lane"
+
+    merged_path = tmp_path / "merged.json"
+    assert (
+        bigbets_main(
+            [
+                "issues",
+                "merge",
+                "--registry",
+                str(EXAMPLE),
+                "--input",
+                str(issue_path),
+                "--output",
+                str(merged_path),
+            ]
+        )
+        == 0
+    )
+    merge_payload = json.loads(capsys.readouterr().out)
+    assert merge_payload["tool"] == "bigbets_issues_merge"
+    merged = json.loads(merged_path.read_text(encoding="utf-8"))
+    assert any(
+        family["issue"] == 4242 for family in merged["idea_families"]
+    )
+
+
+@covers("M8-001")
+def test_generic_bigbets_skills_are_present_and_host_neutral() -> None:
+    root = Path(__file__).resolve().parents[1]
+    expected = {
+        "bigbets-idea-family-author",
+        "bigbets-portfolio-curator",
+        "bigbets-work-auditor",
+        "bigbets-site-operator",
+    }
+    forbidden = {
+        "Shopify",
+        "Storefront",
+        "River",
+        "Vault",
+        "Quick",
+        "shopify.io",
+        "github.com/shop/",
+    }
+    for name in expected:
+        skill_dir = root / "skills" / name
+        skill = skill_dir / "SKILL.md"
+        agent = skill_dir / "agents" / "openai.yaml"
+        assert skill.exists()
+        assert agent.exists()
+        rendered = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in sorted(skill_dir.rglob("*"))
+            if path.is_file()
+        )
+        assert f"name: {name}" in rendered
+        assert not any(term in rendered for term in forbidden)
+
+
+@covers("M8-001")
+def test_generic_idea_family_author_skill_requires_deep_issue_contract() -> None:
+    root = Path(__file__).resolve().parents[1]
+    skill_dir = root / "skills" / "bigbets-idea-family-author"
+    rendered = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(skill_dir.rglob("*"))
+        if path.is_file()
+    )
+
+    for phrase in [
+        "latest relevant benchmark baseline",
+        "literature/prior-art",
+        "candidate pathways",
+        "Evaluation Contract",
+        "Current Pathway Status",
+        "Remote supervisor prompt",
+        "Local setup",
+        "Maintenance Contract",
+        "Run ledger comment template",
+        "artifact bucket/object-store",
+    ]:
+        assert phrase in rendered
