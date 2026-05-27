@@ -20,6 +20,7 @@ from autoclanker.bayes_layer.types import (
     Belief,
     BeliefContext,
     CandidatePattern,
+    CodebasePatternsBelief,
     ConstraintBelief,
     ConstraintType,
     DecayOverride,
@@ -750,6 +751,38 @@ def _parse_belief(raw_belief: Mapping[str, object]) -> Belief:
             suggested_scope=_optional_string(raw_belief, "suggested_scope"),
             risk_hints=_parse_risk_vector(raw_belief.get("risk_hints"), "risk_hints"),
         )
+    if kind == "codebase_patterns":
+        pattern_fields = {
+            "preferred_patterns": _optional_string_list(
+                raw_belief, "preferred_patterns"
+            ),
+            "discouraged_patterns": _optional_string_list(
+                raw_belief, "discouraged_patterns"
+            ),
+            "plumb_points": _optional_string_list(raw_belief, "plumb_points"),
+            "test_conventions": _optional_string_list(raw_belief, "test_conventions"),
+            "review_checklist": _optional_string_list(raw_belief, "review_checklist"),
+            "artifact_paths": _optional_path_list(raw_belief, "artifact_paths"),
+        }
+        if not any(pattern_fields.values()):
+            raise ValidationFailure(
+                "codebase_patterns beliefs require at least one pattern, checklist, or artifact path."
+            )
+        return CodebasePatternsBelief(
+            id=belief_id,
+            confidence_level=confidence_level,
+            evidence_sources=evidence_sources,
+            context=context,
+            rationale=rationale,
+            scope=_optional_path_list(raw_belief, "scope"),
+            preferred_patterns=pattern_fields["preferred_patterns"],
+            discouraged_patterns=pattern_fields["discouraged_patterns"],
+            plumb_points=pattern_fields["plumb_points"],
+            test_conventions=pattern_fields["test_conventions"],
+            review_checklist=pattern_fields["review_checklist"],
+            artifact_paths=pattern_fields["artifact_paths"],
+            source_digest=_optional_string(raw_belief, "source_digest"),
+        )
     if kind == "idea":
         return IdeaBelief(
             id=belief_id,
@@ -1224,7 +1257,9 @@ def _normalize_eval_payload_raw_metrics(
     for key, value in raw_metrics_mapping.items():
         metric_key = str(key)
         if isinstance(value, list):
-            normalized_raw_metrics[f"{metric_key}_count"] = len(cast(list[object], value))
+            normalized_raw_metrics[f"{metric_key}_count"] = len(
+                cast(list[object], value)
+            )
         else:
             normalized_raw_metrics[metric_key] = value
 

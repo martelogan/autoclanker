@@ -10,6 +10,7 @@ JsonMapping: TypeAlias = Mapping[str, JsonValue]
 
 BeliefKind: TypeAlias = Literal[
     "proposal",
+    "codebase_patterns",
     "idea",
     "relation",
     "preference",
@@ -235,6 +236,19 @@ class ProposalBelief(BeliefBase):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class CodebasePatternsBelief(BeliefBase):
+    kind: Literal["codebase_patterns"] = "codebase_patterns"
+    scope: tuple[str, ...] = ()
+    preferred_patterns: tuple[str, ...] = ()
+    discouraged_patterns: tuple[str, ...] = ()
+    plumb_points: tuple[str, ...] = ()
+    test_conventions: tuple[str, ...] = ()
+    review_checklist: tuple[str, ...] = ()
+    artifact_paths: tuple[str, ...] = ()
+    source_digest: str | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class IdeaBelief(BeliefBase):
     kind: Literal["idea"] = "idea"
     gene: GeneStateRef
@@ -320,6 +334,7 @@ class GraphDirectiveBelief(BeliefBase):
 
 Belief: TypeAlias = (
     ProposalBelief
+    | CodebasePatternsBelief
     | IdeaBelief
     | RelationBelief
     | PreferenceBelief

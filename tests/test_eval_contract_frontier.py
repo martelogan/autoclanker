@@ -212,15 +212,18 @@ def test_review_bundle_uses_same_eval_contract_drift_truth_as_status(
         ]
     )
     assert _require_mapping(review_bundle["trust"])["status"] == "locked"
-    assert _require_mapping(review_bundle["trust"])[
-        "locked_eval_contract_digest"
-    ] == status["eval_contract_digest"]
-    assert _require_mapping(review_bundle["trust"])[
-        "current_eval_contract_digest"
-    ] == status["current_eval_contract_digest"]
-    assert _require_mapping(review_bundle["trust"])[
-        "status"
-    ] == status["eval_contract_drift_status"]
+    assert (
+        _require_mapping(review_bundle["trust"])["locked_eval_contract_digest"]
+        == status["eval_contract_digest"]
+    )
+    assert (
+        _require_mapping(review_bundle["trust"])["current_eval_contract_digest"]
+        == status["current_eval_contract_digest"]
+    )
+    assert (
+        _require_mapping(review_bundle["trust"])["status"]
+        == status["eval_contract_drift_status"]
+    )
 
     (workspace_root / "benchmarks" / "fixture.txt").write_text(
         "benchmark:v2\n",
@@ -251,12 +254,16 @@ def test_review_bundle_uses_same_eval_contract_drift_truth_as_status(
         ]
     )
     assert _require_mapping(drifted_review_bundle["trust"])["status"] == "drifted"
-    assert _require_mapping(drifted_review_bundle["trust"])[
-        "status"
-    ] == drifted_status["eval_contract_drift_status"]
-    assert _require_mapping(drifted_review_bundle["trust"])[
-        "eval_contract_matches_current"
-    ] is False
+    assert (
+        _require_mapping(drifted_review_bundle["trust"])["status"]
+        == drifted_status["eval_contract_drift_status"]
+    )
+    assert (
+        _require_mapping(drifted_review_bundle["trust"])[
+            "eval_contract_matches_current"
+        ]
+        is False
+    )
 
 
 @covers("M3-009", "M3-011", "M3-013")

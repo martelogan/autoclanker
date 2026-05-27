@@ -840,8 +840,7 @@ def render_html(
 ) -> str:
     data_json = json.dumps(normalized, sort_keys=True)
     links = "".join(
-        f'<a href="{_attr(link.url)}">{_xml(link.label)}</a>'
-        for link in registry.links
+        f'<a href="{_attr(link.url)}">{_xml(link.label)}</a>' for link in registry.links
     )
     link_section = f'<nav class="links">{links}</nav>' if links else ""
     cards: list[str] = []

@@ -51,6 +51,9 @@
             "$ref": "#/$defs/ProposalBelief"
           },
           {
+            "$ref": "#/$defs/CodebasePatternsBelief"
+          },
+          {
             "$ref": "#/$defs/IdeaBelief"
           },
           {
@@ -352,6 +355,153 @@
         },
         "risk_hints": {
           "$ref": "#/$defs/RiskVector"
+        }
+      }
+    },
+    "CodebasePatternsBelief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "confidence_level"
+      ],
+      "anyOf": [
+        {
+          "required": ["preferred_patterns"]
+        },
+        {
+          "required": ["discouraged_patterns"]
+        },
+        {
+          "required": ["plumb_points"]
+        },
+        {
+          "required": ["test_conventions"]
+        },
+        {
+          "required": ["review_checklist"]
+        },
+        {
+          "required": ["artifact_paths"]
+        }
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "codebase_patterns"
+        },
+        "confidence_level": {
+          "type": "integer",
+          "enum": [
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        "evidence_sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "intuition",
+              "prior_run",
+              "paper",
+              "code_inspection",
+              "benchmark",
+              "other"
+            ]
+          },
+          "default": []
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hardware_profile_id": {
+              "type": "string"
+            },
+            "budget_profile_id": {
+              "type": "string"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "rationale": {
+          "type": "string",
+          "default": ""
+        },
+        "scope": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "preferred_patterns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "discouraged_patterns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "plumb_points": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "test_conventions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "review_checklist": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "artifact_paths": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "source_digest": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },

@@ -8,11 +8,16 @@ from autoclanker.bayes_layer import (
     EraState,
     build_fixture_registry,
     compile_beliefs,
+    ingest_belief_input,
     ingest_human_beliefs,
     load_serialized_payload,
     preview_compiled_beliefs,
     validate_adapter_config,
     validate_eval_result,
+)
+from autoclanker.bayes_layer.belief_io import (
+    load_inline_ideas_payload,
+    load_serialized_payload_from_text,
 )
 from autoclanker.bayes_layer.types import ValidationFailure
 from tests.compliance import covers
@@ -64,6 +69,143 @@ def test_basic_beliefs_preview_and_compile() -> None:
     assert compiled.main_effect_priors
     assert compiled.pair_priors
     assert compiled.candidate_generation_hints
+
+
+@covers("M1-001", "M1-003")
+def test_codebase_patterns_compile_to_candidate_generation_hint() -> None:
+    batch = ingest_belief_input(
+        {
+            "session_context": {
+                "era_id": "era_patterns_v1",
+                "session_id": "patterns_session",
+            },
+            "beliefs": [
+                {
+                    "id": "patterns_001",
+                    "kind": "codebase_patterns",
+                    "confidence_level": 3,
+                    "evidence_sources": ["code_inspection"],
+                    "rationale": "Preserve existing codebase idioms when ranking designs.",
+                    "scope": ["src/parser"],
+                    "preferred_patterns": [
+                        "Prefer the existing parser registry plumb point.",
+                    ],
+                    "discouraged_patterns": [
+                        "Avoid bypassing the registry with one-off caches.",
+                    ],
+                    "test_conventions": [
+                        "Use the existing golden parser fixture shape.",
+                    ],
+                    "artifact_paths": ["tmp/clankerbench/codebase_patterns.md"],
+                    "source_digest": "sha256:patterns",
+                }
+            ],
+        }
+    )
+    registry = build_fixture_registry()
+
+    preview = preview_compiled_beliefs(
+        batch,
+        registry,
+        EraState(era_id=batch.session_context.era_id),
+    )
+    compiled = compile_beliefs(
+        batch,
+        registry,
+        EraState(era_id=batch.session_context.era_id),
+    )
+
+    assert preview.belief_previews[0].compile_status == "compiled"
+    assert compiled.candidate_generation_hints
+    hint = compiled.candidate_generation_hints[0].item
+    assert hint.target_ref == "codebase_patterns:patterns_001"
+    assert hint.prior_family == "codebase_pattern_hint"
+
+
+@covers("M1-001", "M1-003")
+def test_codebase_patterns_artifact_only_compiles_with_read_warning() -> None:
+    batch = ingest_human_beliefs(
+        {
+            "session_context": {
+                "era_id": "era_patterns_v1",
+                "session_id": "patterns_session",
+            },
+            "beliefs": [
+                {
+                    "id": "patterns_artifact",
+                    "kind": "codebase_patterns",
+                    "confidence_level": 2,
+                    "artifact_paths": ["tmp/clankerbench/codebase_patterns.md"],
+                }
+            ],
+        }
+    )
+    registry = build_fixture_registry()
+
+    preview = preview_compiled_beliefs(
+        batch,
+        registry,
+        EraState(era_id=batch.session_context.era_id),
+    )
+    compiled = compile_beliefs(
+        batch,
+        registry,
+        EraState(era_id=batch.session_context.era_id),
+    )
+
+    assert compiled.candidate_generation_hints
+    assert preview.belief_previews[0].warnings == (
+        "Read the referenced pattern artifact before candidate design; no inline pattern bullets were provided.",
+    )
+
+
+@covers("M1-001")
+def test_codebase_patterns_reject_empty_pattern_payloads() -> None:
+    empty_patterns: list[object] = []
+    payload: dict[str, object] = {
+        "session_context": {
+            "era_id": "era_patterns_v1",
+            "session_id": "patterns_session",
+        },
+        "beliefs": [
+            {
+                "id": "patterns_empty",
+                "kind": "codebase_patterns",
+                "confidence_level": 2,
+                "preferred_patterns": empty_patterns,
+            }
+        ],
+    }
+
+    with pytest.raises(ValidationFailure, match="not valid under any"):
+        ingest_human_beliefs(payload)
+
+
+@covers("M1-001")
+def test_belief_input_rejects_malformed_inline_payloads() -> None:
+    with pytest.raises(ValidationFailure, match="was empty"):
+        load_serialized_payload_from_text("")
+
+    with pytest.raises(ValidationFailure, match="Failed to parse"):
+        load_serialized_payload_from_text("{")
+
+    with pytest.raises(ValidationFailure, match="was empty"):
+        load_inline_ideas_payload("")
+
+    with pytest.raises(ValidationFailure, match="string idea was empty"):
+        load_inline_ideas_payload('""')
+
+    with pytest.raises(ValidationFailure, match="must be a JSON string idea"):
+        load_inline_ideas_payload("1")
+
+    with pytest.raises(ValidationFailure, match="top-level 'ideas'"):
+        load_inline_ideas_payload('{"unexpected": true}')
+
+    with pytest.raises(ValidationFailure, match="ideas must be a list"):
+        load_inline_ideas_payload('{"ideas": "nope"}')
+
+    with pytest.raises(ValidationFailure, match="must not be empty"):
+        load_inline_ideas_payload('[""]')
 
 
 @covers("M1-003")

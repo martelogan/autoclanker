@@ -102,8 +102,7 @@ def handle_render(args: argparse.Namespace) -> dict[str, JsonValue]:
         "artifact_schema_version": BIGBETS_ARTIFACT_SCHEMA_VERSION,
         "generator": cast(dict[str, JsonValue], generator_metadata()),
         "artifacts": [
-            {"format": _format_for_path(path), "path": str(path)}
-            for path in artifacts
+            {"format": _format_for_path(path), "path": str(path)} for path in artifacts
         ],
     }
 
@@ -148,12 +147,16 @@ def handle_snapshot_create(args: argparse.Namespace) -> dict[str, JsonValue]:
     output_dir = Path(args.output_dir)
     snapshots_dir = output_dir / "snapshots"
     snapshots_dir.mkdir(parents=True, exist_ok=True)
-    created_at = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    created_at = (
+        datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    )
     name = args.name or f"Plan {created_at[:10]}"
     snapshot_id = f"{created_at.replace('-', '').replace(':', '').replace('Z', 'Z')}-{_slug(name)}"
     snapshot_path = snapshots_dir / f"{snapshot_id}.registry.json"
     payload = registry_to_input_payload(registry)
-    snapshot_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    snapshot_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
     index_path = snapshots_dir / "index.json"
     snapshots = _read_snapshot_index(index_path)
@@ -169,7 +172,9 @@ def handle_snapshot_create(args: argparse.Namespace) -> dict[str, JsonValue]:
             "generator": cast(dict[str, JsonValue], generator_metadata()),
         },
     )
-    index_path.write_text(json.dumps(snapshots, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    index_path.write_text(
+        json.dumps(snapshots, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     return {
         "ok": True,
         "tool": "bigbets_snapshot_create",
@@ -214,7 +219,9 @@ def handle_issues_merge(args: argparse.Namespace) -> dict[str, JsonValue]:
     merged = merge_issue_families(registry, families)
     payload = registry_to_input_payload(merged)
     output_path = Path(args.output)
-    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    output_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     return {
         "ok": True,
         "tool": "bigbets_issues_merge",
@@ -348,9 +355,7 @@ def register_bigbets_commands(subparsers: Any) -> None:
         action="version",
         version=f"%(prog)s {BIGBETS_VERSION}",
     )
-    bigbets_subparsers = parser.add_subparsers(
-        dest="bigbets_command", required=True
-    )
+    bigbets_subparsers = parser.add_subparsers(dest="bigbets_command", required=True)
     register_bigbets_leaf_commands(bigbets_subparsers)
 
 
@@ -379,10 +384,16 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
     except ValidationFailure as exc:
-        print(json.dumps({"ok": False, "error": str(exc)}, sort_keys=True), file=sys.stderr)
+        print(
+            json.dumps({"ok": False, "error": str(exc)}, sort_keys=True),
+            file=sys.stderr,
+        )
         return 2
     except ValueError as exc:
-        print(json.dumps({"ok": False, "error": str(exc)}, sort_keys=True), file=sys.stderr)
+        print(
+            json.dumps({"ok": False, "error": str(exc)}, sort_keys=True),
+            file=sys.stderr,
+        )
         return 2
 
 

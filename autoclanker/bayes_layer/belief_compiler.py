@@ -11,6 +11,7 @@ from autoclanker.bayes_layer.registry import GeneRegistry
 from autoclanker.bayes_layer.types import (
     Belief,
     BeliefPreview,
+    CodebasePatternsBelief,
     CompiledPriorBundle,
     CompiledPriorItem,
     CompiledPriorPreview,
@@ -118,6 +119,58 @@ def _compile_proposal(
         influence_summary=(),
     )
     return _BeliefCompilation(preview=preview, prior_specs=())
+
+
+def _compile_codebase_patterns(
+    belief: CodebasePatternsBelief,
+    *,
+    config: BayesLayerConfig,
+) -> _BeliefCompilation:
+    notes = ["compiled from codebase pattern priors"]
+    if belief.scope:
+        notes.append(f"scope={', '.join(belief.scope[:3])}")
+    if belief.artifact_paths:
+        notes.append(f"artifacts={', '.join(belief.artifact_paths[:3])}")
+    if belief.source_digest is not None:
+        notes.append(f"source_digest={belief.source_digest}")
+    item = CompiledPriorItem(
+        target_kind="screening_hint",
+        target_ref=f"codebase_patterns:{belief.id}",
+        prior_family="codebase_pattern_hint",
+        mean=float(belief.confidence_level),
+        scale=_variance_scale(config, belief.confidence_level),
+        decay=_default_decay(config=config, target_kind="screening_hint"),
+        notes=tuple(notes),
+    )
+    warning_count = sum(
+        len(items)
+        for items in (
+            belief.preferred_patterns,
+            belief.discouraged_patterns,
+            belief.plumb_points,
+            belief.test_conventions,
+            belief.review_checklist,
+        )
+    )
+    warnings = (
+        "Codebase patterns guide candidate design and pre-PR review; they are not eval proof.",
+    )
+    if warning_count == 0 and belief.artifact_paths:
+        warnings = (
+            "Read the referenced pattern artifact before candidate design; no inline pattern bullets were provided.",
+        )
+    preview = BeliefPreview(
+        belief_id=belief.id,
+        compile_status="compiled",
+        compiled_items=(item,),
+        warnings=warnings,
+        influence_summary=(
+            f"{belief.id} biases design scoring toward the documented codebase idioms.",
+        ),
+    )
+    return _BeliefCompilation(
+        preview=preview, prior_specs=_specs_for_items(belief.id, (item,))
+    )
 
 
 def _compile_idea(
@@ -452,6 +505,8 @@ def _compile_single_belief(
 ) -> _BeliefCompilation:
     if isinstance(belief, ProposalBelief):
         return _compile_proposal(belief)
+    if isinstance(belief, CodebasePatternsBelief):
+        return _compile_codebase_patterns(belief, config=config)
     if isinstance(belief, IdeaBelief):
         return _compile_idea(belief, registry=registry, config=config)
     if isinstance(belief, RelationBelief):

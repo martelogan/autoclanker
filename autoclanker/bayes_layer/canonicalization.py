@@ -167,7 +167,9 @@ def _surface_overlay_payload_from_registry(
     if overlay_registry is None:
         return None
     return {
-        "registry": cast(dict[str, JsonValue], to_json_value(overlay_registry.to_dict())),
+        "registry": cast(
+            dict[str, JsonValue], to_json_value(overlay_registry.to_dict())
+        ),
         "surface_summary": cast(
             dict[str, JsonValue],
             to_json_value(overlay_registry.surface_summary()),
@@ -193,9 +195,13 @@ def _surface_overlay_from_payload(
     )
     raw_summary = overlay_mapping.get("surface_summary")
     surface_summary = (
-        cast(dict[str, JsonValue], to_json_value(cast(Mapping[str, object], raw_summary)))
+        cast(
+            dict[str, JsonValue], to_json_value(cast(Mapping[str, object], raw_summary))
+        )
         if isinstance(raw_summary, Mapping)
-        else cast(dict[str, JsonValue], to_json_value(overlay_registry.surface_summary()))
+        else cast(
+            dict[str, JsonValue], to_json_value(overlay_registry.surface_summary())
+        )
     )
     payload_from_registry = _surface_overlay_payload_from_registry(overlay_registry)
     if payload_from_registry is None:
@@ -522,9 +528,7 @@ def load_canonicalization_model(model_name: str | None) -> CanonicalizationModel
     if normalized == "anthropic":
         normalized = "autoclanker.bayes_layer.providers.anthropic_canonicalizer"
     if normalized in {"openai", "openai-compatible", "openai_compatible"}:
-        normalized = (
-            "autoclanker.bayes_layer.providers.openai_compatible_canonicalizer"
-        )
+        normalized = "autoclanker.bayes_layer.providers.openai_compatible_canonicalizer"
     module = importlib.import_module(normalized)
     builder = getattr(module, "build_autoclanker_canonicalization_model", None)
     if not callable(builder):
@@ -559,7 +563,9 @@ def canonicalize_belief_input(
 ) -> CanonicalizationOutcome:
     if "beliefs" in payload:
         beliefs = ingest_human_beliefs(payload)
-        overlay_registry, surface_overlay_payload = _surface_overlay_from_payload(payload)
+        overlay_registry, surface_overlay_payload = _surface_overlay_from_payload(
+            payload
+        )
         active_registry = registry or GeneRegistry(genes={})
         if overlay_registry is not None:
             active_registry = active_registry.with_overlay(overlay_registry)
@@ -576,8 +582,8 @@ def canonicalize_belief_input(
             "canonicalization mode 'llm' requires --canonicalization-model or AUTOCLANKER_CANONICALIZATION_MODEL."
         )
 
-    input_overlay_registry, input_surface_overlay_payload = _surface_overlay_from_payload(
-        payload
+    input_overlay_registry, input_surface_overlay_payload = (
+        _surface_overlay_from_payload(payload)
     )
     base_registry = registry or GeneRegistry(genes={})
     if input_overlay_registry is not None:

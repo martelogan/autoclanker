@@ -430,9 +430,7 @@ next_action: Run the smallest batch proof.
     merge_payload = json.loads(capsys.readouterr().out)
     assert merge_payload["tool"] == "bigbets_issues_merge"
     merged = json.loads(merged_path.read_text(encoding="utf-8"))
-    assert any(
-        family["issue"] == 4242 for family in merged["idea_families"]
-    )
+    assert any(family["issue"] == 4242 for family in merged["idea_families"])
 
 
 @covers("M8-001")

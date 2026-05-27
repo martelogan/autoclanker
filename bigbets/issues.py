@@ -62,7 +62,9 @@ def load_issue_family_payloads(path: Path) -> list[dict[str, JsonValue]]:
     return [_idea_family_from_issue_object(item) for item in _issue_objects(payload)]
 
 
-def issue_family_patch(families: Sequence[Mapping[str, JsonValue]]) -> dict[str, JsonValue]:
+def issue_family_patch(
+    families: Sequence[Mapping[str, JsonValue]],
+) -> dict[str, JsonValue]:
     return cast(
         dict[str, JsonValue],
         {
@@ -100,7 +102,9 @@ def merge_issue_families(
             next_rank_by_bet[big_bet] = (
                 _json_positive_int(normalized.get("rank"), "family rank") + 1
             )
-        by_issue[_json_positive_int(normalized.get("issue"), "family issue")] = normalized
+        by_issue[_json_positive_int(normalized.get("issue"), "family issue")] = (
+            normalized
+        )
 
     payload["idea_families"] = cast(list[JsonValue], list(by_issue.values()))
     return validate_bigbets_registry(cast(dict[str, object], payload))
@@ -173,7 +177,9 @@ def _issue_objects(payload: object) -> list[Mapping[str, object]]:
         mapping = cast(dict[str, object], payload)
         issues = mapping.get("issues")
         if isinstance(issues, list):
-            return [_mapping(item, "issues entry") for item in cast(list[object], issues)]
+            return [
+                _mapping(item, "issues entry") for item in cast(list[object], issues)
+            ]
         return [_mapping(mapping, "issue entry")]
     raise ValidationFailure("Issue import input must be a mapping or list.")
 
@@ -226,7 +232,9 @@ def _issue_number(source: Mapping[str, object]) -> int:
         return value
     if isinstance(value, str) and value.strip().isdigit() and int(value) > 0:
         return int(value)
-    raise ValidationFailure("Imported idea family must include a positive issue number.")
+    raise ValidationFailure(
+        "Imported idea family must include a positive issue number."
+    )
 
 
 def _required_string_any(source: Mapping[str, object], *keys: str) -> str:
@@ -272,9 +280,7 @@ def _required_priority_any(source: Mapping[str, object], *keys: str) -> str:
     return value
 
 
-def _optional_positive_int_any(
-    source: Mapping[str, object], *keys: str
-) -> int | None:
+def _optional_positive_int_any(source: Mapping[str, object], *keys: str) -> int | None:
     for key in keys:
         value = source.get(key)
         if value is None:

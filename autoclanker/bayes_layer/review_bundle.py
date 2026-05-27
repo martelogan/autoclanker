@@ -102,15 +102,15 @@ def normalized_session_status(
     if adapter_config is not None:
         try:
             current_contract = load_adapter(adapter_config).capture_eval_contract()
-        except Exception:  # pragma: no cover - status remains readable without live probe
+        except (
+            Exception
+        ):  # pragma: no cover - status remains readable without live probe
             current_contract = None
     return (
         replace(
             status,
             current_eval_contract_digest=(
-                None
-                if current_contract is None
-                else current_contract.contract_digest
+                None if current_contract is None else current_contract.contract_digest
             ),
             eval_contract_matches_current=(
                 None
@@ -905,9 +905,7 @@ def build_review_bundle(
     ranked_candidates = tuple(
         cast(Mapping[str, object], item)
         for item in _summary_list(
-            None
-            if query_payload is None
-            else query_payload.get("ranked_candidates")
+            None if query_payload is None else query_payload.get("ranked_candidates")
         )
         if isinstance(item, Mapping)
     )

@@ -163,7 +163,7 @@ The same beginner shapes also exist as commented YAML teaching files, including
 | `session_context.author` | no | non-empty string | yes |
 | `session_context.user_profile` | no | `basic`, `expert` | no |
 | `beliefs[].id` | yes | unique non-empty string within the file | yes |
-| `beliefs[].kind` | yes | `proposal`, `idea`, `relation`, `preference`, `constraint`, `expert_prior`, `graph_directive` | no |
+| `beliefs[].kind` | yes | `proposal`, `codebase_patterns`, `idea`, `relation`, `preference`, `constraint`, `expert_prior`, `graph_directive` | no |
 | `beliefs[].confidence_level` | yes | `1`, `2`, `3`, `4` | no |
 | `beliefs[].evidence_sources[]` | no | `intuition`, `prior_run`, `paper`, `code_inspection`, `benchmark`, `other` | no |
 | `beliefs[].rationale` | no | string | yes |
@@ -175,6 +175,7 @@ These are the recommended kinds for most users.
 | Kind | Required fields | Strict values | Free-form fields |
 | --- | --- | --- | --- |
 | `proposal` | `proposal_text` | `suggested_scope`: `prompt`, `gene`, `patch`, `constraint`, `other` | `proposal_text`, `rationale` |
+| `codebase_patterns` | at least one of `preferred_patterns`, `discouraged_patterns`, `plumb_points`, `test_conventions`, `review_checklist`, `artifact_paths` | `confidence_level`: `1` to `4` | all pattern, checklist, scope, and artifact strings |
 | `idea` | `gene.gene_id`, `gene.state_id`, `effect_strength` | `effect_strength`: `-3` to `3`; `risk.*`: `0` to `3` | `rationale` |
 | `relation` | `members`, `relation`, `strength` | `relation`: `synergy`, `conflict`, `dependency`, `exclusion`; `strength`: `1` to `3`; `joint_effect_strength`: `-3` to `3` if present | `rationale` |
 
@@ -210,6 +211,12 @@ These are the fields where ordinary human language is expected:
 - `beliefs[].id`
 - `beliefs[].rationale`
 - `proposal.proposal_text`
+- `codebase_patterns.preferred_patterns[]`
+- `codebase_patterns.discouraged_patterns[]`
+- `codebase_patterns.plumb_points[]`
+- `codebase_patterns.test_conventions[]`
+- `codebase_patterns.review_checklist[]`
+- `codebase_patterns.artifact_paths[]`
 - `context.tags[]`
 
 These are not free-form and must match the schema or the exercise registry:
