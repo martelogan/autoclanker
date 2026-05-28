@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 from __future__ import annotations
 
 import argparse
@@ -13,6 +14,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from autoclanker.bayes_layer.adapters.autoresearch import AutoresearchAdapter
 from autoclanker.bayes_layer.adapters.cevolve import CevolveAdapter
 from autoclanker.bayes_layer.types import (
@@ -21,8 +26,6 @@ from autoclanker.bayes_layer.types import (
     ValidEvalResult,
 )
 from autoclanker.cli import main as autoclanker_main
-
-ROOT = Path(__file__).resolve().parents[2]
 
 
 def _parse_args() -> argparse.Namespace:

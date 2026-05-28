@@ -218,6 +218,10 @@ def test_example_adapter_paths_match_runtime_resolution_rules() -> None:
     assert "mode: auto" in docs_rendered
     assert "python_module" in docs_rendered
     assert "command" in docs_rendered
+    assert "Headless supervisors and wrappers" in docs_rendered
+    assert "session run-eval" in docs_rendered
+    assert "session review-bundle" in docs_rendered
+    assert "without adding a second optimization engine" in docs_rendered
 
 
 @covers("M7-008")

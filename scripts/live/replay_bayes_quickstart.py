@@ -1,17 +1,21 @@
+# ruff: noqa: E402
 from __future__ import annotations
 
 import argparse
 import contextlib
 import io
 import json
+import sys
 import tempfile
 
 from pathlib import Path
 from typing import cast
 
-from autoclanker.cli import main as autoclanker_main
-
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from autoclanker.cli import main as autoclanker_main
 
 
 def _parse_args() -> argparse.Namespace:

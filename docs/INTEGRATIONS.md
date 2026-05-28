@@ -205,7 +205,32 @@ When an upstream adapter resolves to an importable module or subprocess command,
 provider auth and model selection keep working the way the underlying engine expects,
 instead of being remapped by `autoclanker`.
 
-## 10. Future-proofing
+## 10. Headless supervisors and wrappers
+
+`autoclanker` does not need to run inside a specific extension host. A headless
+agent or external supervisor can drive the CLI directly by keeping the same
+noninteractive loop:
+
+1. initialize or resume a session;
+2. preserve the locked eval contract and fixed eval surface;
+3. run isolated candidate measurements or frontier batches through
+   `session run-eval` or `session run-frontier`;
+4. ingest, fit, suggest, and inspect `session status` or `session review-bundle`;
+5. use frontier queries and merge suggestions to keep, drop, split, or combine
+   candidate families over time;
+6. persist uncertainty as queries, assumptions, risks, or proposal notes instead
+   of stopping a long run for late clarification.
+
+Candidate isolation is a measurement rule, not a search-limit rule. Long runs
+should still evaluate merged candidates and preserve family lineage when the
+Bayesian frontier suggests promising combinations.
+
+True blockers remain explicit: contract drift, missing required credentials with
+no fallback, destructive apply/commit behavior, or repeated infrastructure
+failure. Everything else should be recorded in the session artifacts so a
+wrapper can resume or review the run without adding a second optimization engine.
+
+## 11. Future-proofing
 
 This boundary is meant to stay extension-friendly:
 
