@@ -90,6 +90,33 @@ def test_clankergraph_validation_and_summary() -> None:
     assert cast(dict[str, object], summary["nodes_by_kind"])["action"] == 1
 
 
+@covers("M1-001", "M1-003")
+def test_external_investigation_style_evidence_graph_validates_and_compiles_safely() -> None:
+    document = load_clankergraph_document(
+        ROOT / "examples/clankergraph/investigation_evidence.clankergraph.json"
+    )
+    summary = summarize_clankergraph_document(document)
+    assert summary["graph_role"] == "evidence"
+    assert summary["node_count"] == 4
+    assert cast(dict[str, object], summary["nodes_by_kind"]) == {
+        "case": 1,
+        "explanation": 1,
+        "observation": 1,
+        "x.investigation.work_log": 1,
+    }
+
+    payload = belief_input_from_clankergraph(document, era_id="era_investigation")
+    batch = ingest_human_beliefs(payload)
+    assert len(batch.beliefs) == 1
+    belief_payload = cast(dict[str, object], cast(list[object], payload["beliefs"])[0])
+    assert belief_payload["kind"] == "proposal"
+    assert "Heavy template work" in str(belief_payload["proposal_text"])
+    context = cast(dict[str, object], belief_payload["context"])
+    metadata = cast(dict[str, object], context["metadata"])
+    graph_metadata = cast(dict[str, object], metadata["clankergraph"])
+    assert graph_metadata["compiler_policy"] == "metadata_only_proposal"
+
+
 @covers("M1-001")
 def test_clankergraph_preserves_rich_metadata_topology_and_derivations() -> None:
     document = validate_clankergraph_document(

@@ -1,0 +1,159 @@
+{
+  "schema_version": "clankergraph.v1",
+  "graph_id": "external-investigation-sample-root-cause",
+  "graph_role": "evidence",
+  "title": "External investigation sample root cause",
+  "produced_by": {
+    "tool": "investigation-bridge",
+    "version": "fixture"
+  },
+  "source_snapshot": {
+    "source_investigations": [
+      {
+        "slug": "sample-root-cause",
+        "title": "Sample investigation",
+        "source_url": "https://example.invalid/investigations/sample-root-cause"
+      }
+    ]
+  },
+  "metadata": {
+    "compiler_policy": "external_investigation_to_generic_clankergraph",
+    "source_tool": "external_investigation"
+  },
+  "nodes": [
+    {
+      "id": "case:sample-root-cause",
+      "kind": "case",
+      "title": "Sample investigation",
+      "body": "Why is the sample workload slow?",
+      "status": "confirmed",
+      "confidence": {
+        "level": "high",
+        "basis": "inferred"
+      },
+      "properties": {
+        "source_kind": "investigation",
+        "source_slug": "sample-root-cause",
+        "source_url": "https://example.invalid/investigations/sample-root-cause"
+      },
+      "provenance": {
+        "source": "extracted",
+        "source_refs": [
+          "https://example.invalid/investigations/sample-root-cause"
+        ]
+      }
+    },
+    {
+      "id": "explanation:sample-root-cause:heavy-template",
+      "kind": "explanation",
+      "title": "Heavy template work dominates render time",
+      "body": "The investigation surfaced repeated template work as the current likely root cause.",
+      "status": "likely",
+      "confidence": {
+        "level": "high",
+        "basis": "inferred"
+      },
+      "properties": {
+        "source_kind": "reason",
+        "source_id": "heavy-template",
+        "verdict": "likely",
+        "role": "primary"
+      },
+      "provenance": {
+        "source": "extracted",
+        "source_refs": [
+          "https://example.invalid/investigations/sample-root-cause"
+        ]
+      }
+    },
+    {
+      "id": "observation:sample-root-cause:section-render-stack",
+      "kind": "observation",
+      "title": "Section render stack repeats",
+      "body": "Source inspection maps the render through repeated section work.",
+      "confidence": {
+        "level": "high",
+        "basis": "inferred"
+      },
+      "properties": {
+        "source_kind": "evidence",
+        "strength": "strong"
+      },
+      "provenance": {
+        "source": "extracted",
+        "source_refs": [
+          "https://example.invalid/investigations/sample-root-cause"
+        ]
+      }
+    },
+    {
+      "id": "x.investigation.work_log:sample-root-cause:timeline",
+      "kind": "x.investigation.work_log",
+      "title": "Investigation work log",
+      "body": "Raw chronology is preserved in the sidecar evidence export.",
+      "properties": {
+        "source_kind": "work_log"
+      },
+      "provenance": {
+        "source": "extracted",
+        "source_refs": [
+          "https://example.invalid/investigations/sample-root-cause"
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge:case-sample-root-cause-decomposes-explanation-sample-root-cause-heavy-template",
+      "from": "case:sample-root-cause",
+      "to": "explanation:sample-root-cause:heavy-template",
+      "kind": "decomposes",
+      "strength": "strong",
+      "confidence": "high",
+      "provenance": {
+        "source": "compiled"
+      }
+    },
+    {
+      "id": "edge:explanation-sample-root-cause-heavy-template-supports-observation-sample-root-cause-section-render-stack",
+      "from": "explanation:sample-root-cause:heavy-template",
+      "to": "observation:sample-root-cause:section-render-stack",
+      "kind": "supports",
+      "strength": "strong",
+      "confidence": "high",
+      "provenance": {
+        "source": "compiled"
+      }
+    },
+    {
+      "id": "edge:case-sample-root-cause-decomposes-work-log-sample-root-cause-timeline",
+      "from": "case:sample-root-cause",
+      "to": "x.investigation.work_log:sample-root-cause:timeline",
+      "kind": "decomposes",
+      "provenance": {
+        "source": "compiled"
+      }
+    }
+  ],
+  "derivations": [
+    {
+      "id": "derivation:external-investigation-to-evidence-graph",
+      "from_graph_role": "evidence",
+      "from_node_ids": [
+        "case:sample-root-cause"
+      ],
+      "to_graph_role": "evidence",
+      "to_node_ids": [
+        "case:sample-root-cause",
+        "explanation:sample-root-cause:heavy-template",
+        "observation:sample-root-cause:section-render-stack",
+        "x.investigation.work_log:sample-root-cause:timeline"
+      ],
+      "transform": "external_investigation_export_to_generic_clankergraph",
+      "review_required": true,
+      "losses": [
+        "Tool-specific fields are preserved in node properties or a raw sidecar export."
+      ]
+    }
+  ]
+}
