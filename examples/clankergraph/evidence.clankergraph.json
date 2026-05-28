@@ -1,0 +1,60 @@
+{
+  "schema_version": "clankergraph.v1",
+  "graph_id": "parser-evidence",
+  "graph_role": "evidence",
+  "title": "Parser evidence graph",
+  "nodes": [
+    {
+      "id": "artifact:profile",
+      "kind": "artifact",
+      "title": "Parser profile",
+      "provenance": {
+        "source": "manual"
+      }
+    },
+    {
+      "id": "explanation:repeated-regex",
+      "kind": "explanation",
+      "title": "Repeated regex compilation is visible in hot parser paths",
+      "status": "likely",
+      "confidence": {
+        "level": "medium",
+        "basis": "inferred"
+      },
+      "provenance": {
+        "source": "manual",
+        "source_refs": ["artifact:profile"]
+      }
+    },
+    {
+      "id": "action:compiled-matcher",
+      "kind": "action",
+      "title": "Try a compiled matcher lane",
+      "body": "Measure a candidate that moves matching setup out of the per-record loop.",
+      "status": "proposed",
+      "confidence": {
+        "level": "medium",
+        "basis": "operator"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge:profile-supports-regex",
+      "from": "artifact:profile",
+      "to": "explanation:repeated-regex",
+      "kind": "supports",
+      "strength": "medium",
+      "confidence": "medium"
+    },
+    {
+      "id": "edge:regex-recommends-matcher",
+      "from": "explanation:repeated-regex",
+      "to": "action:compiled-matcher",
+      "kind": "recommends",
+      "strength": "medium",
+      "confidence": "medium"
+    }
+  ],
+  "derivations": []
+}

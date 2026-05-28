@@ -126,6 +126,18 @@ autoclanker adapter registry --input examples/adapters/autoresearch.local.yaml
 autoclanker adapter surface --input examples/adapters/autoresearch.local.yaml
 ```
 
+Generic graph artifacts use their own CLI family, independent of any adapter:
+
+```bash
+autoclanker graph validate --input graphs/evidence.clankergraph.json
+autoclanker graph summarize --input graphs/benchmark.clankergraph.json
+autoclanker beliefs from-graph --input graphs/context.clankergraph.json --era-id era_my_app_v1
+```
+
+This keeps internal or project-specific investigation tools behind a neutral
+`clankergraph.v1` file boundary. Autoclanker consumes evidence, benchmark,
+belief, and context graphs without depending on the tool that produced them.
+
 ## 6. Eval-contract metadata
 
 Adapter metadata may include:

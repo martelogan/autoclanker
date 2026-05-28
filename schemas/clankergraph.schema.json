@@ -1,0 +1,336 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clankerbench.dev/schemas/clankergraph.schema.json",
+  "title": "clankergraph document",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "graph_id", "graph_role", "title", "nodes", "edges"],
+  "properties": {
+    "schema_version": {
+      "const": "clankergraph.v1"
+    },
+    "graph_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "graph_role": {
+      "$ref": "#/$defs/graph_role"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scope": {
+      "type": "object"
+    },
+    "produced_by": {
+      "type": "object"
+    },
+    "source_snapshot": {
+      "type": "object"
+    },
+    "metadata": {
+      "type": "object"
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/edge"
+      }
+    },
+    "derivations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/derivation"
+      }
+    }
+  },
+  "$defs": {
+    "confidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level"],
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["low", "medium", "high"]
+        },
+        "basis": {
+          "type": "string",
+          "enum": ["measured", "inferred", "operator", "llm", "mixed"]
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "from", "to", "kind"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "from": {
+          "type": "string",
+          "minLength": 1
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "$ref": "#/$defs/edge_kind"
+        },
+        "strength": {
+          "type": "string",
+          "enum": ["weak", "medium", "strong"]
+        },
+        "confidence": {
+          "type": "string",
+          "enum": ["low", "medium", "high"]
+        },
+        "properties": {
+          "type": "object"
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        }
+      }
+    },
+    "derivation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "from_graph_role",
+        "from_node_ids",
+        "to_graph_role",
+        "to_node_ids",
+        "transform"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "from_graph_role": {
+          "$ref": "#/$defs/graph_role"
+        },
+        "from_node_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "to_graph_role": {
+          "$ref": "#/$defs/graph_role"
+        },
+        "to_node_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "transform": {
+          "type": "string",
+          "minLength": 1
+        },
+        "review_required": {
+          "type": "boolean"
+        },
+        "losses": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "edge_kind": {
+      "type": "string",
+      "anyOf": [
+        {
+          "enum": [
+            "produced",
+            "observed_in",
+            "supports",
+            "contradicts",
+            "contextualizes",
+            "decomposes",
+            "supersedes",
+            "recommends",
+            "validates",
+            "blocks",
+            "related_to",
+            "compiled_from",
+            "influences",
+            "depends_on",
+            "excludes",
+            "synergizes",
+            "conflicts",
+            "prefers",
+            "asks_about",
+            "selected_for_eval",
+            "weakened_by",
+            "strengthened_by",
+            "locks",
+            "covers",
+            "materializes",
+            "measures",
+            "compares_to",
+            "passes",
+            "fails",
+            "keeps",
+            "rejects",
+            "regresses",
+            "invalidates",
+            "implements",
+            "tests",
+            "owned_by"
+          ]
+        },
+        {
+          "pattern": "^x\\.[A-Za-z0-9_.-]+$"
+        }
+      ]
+    },
+    "graph_role": {
+      "type": "string",
+      "enum": ["evidence", "belief", "benchmark", "context"]
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "$ref": "#/$defs/node_kind"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "anyOf": [
+            {
+              "enum": [
+                "proposed",
+                "inconclusive",
+                "likely",
+                "confirmed",
+                "ruled_out",
+                "superseded",
+                "blocked",
+                "implemented",
+                "validated",
+                "rejected"
+              ]
+            },
+            {
+              "pattern": "^x\\.[A-Za-z0-9_.-]+$"
+            }
+          ]
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "properties": {
+          "type": "object"
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        }
+      }
+    },
+    "node_kind": {
+      "type": "string",
+      "anyOf": [
+        {
+          "enum": [
+            "case",
+            "inquiry",
+            "artifact",
+            "observation",
+            "explanation",
+            "subclaim",
+            "caveat",
+            "action",
+            "open_question",
+            "source_location",
+            "prior_work",
+            "belief",
+            "gene",
+            "state",
+            "candidate",
+            "frontier",
+            "relation",
+            "constraint",
+            "preference",
+            "risk",
+            "query",
+            "corpus",
+            "cohort",
+            "stratum",
+            "recording",
+            "metric",
+            "threshold",
+            "eval_run",
+            "compare",
+            "spec",
+            "environment",
+            "promotion_gate",
+            "design_decision",
+            "code_symbol",
+            "file",
+            "section",
+            "test_spec",
+            "issue",
+            "pull_request",
+            "owner",
+            "pattern",
+            "anti_pattern",
+            "project"
+          ]
+        },
+        {
+          "pattern": "^x\\.[A-Za-z0-9_.-]+$"
+        }
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["measured", "manual", "compiled", "inferred", "extracted"]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

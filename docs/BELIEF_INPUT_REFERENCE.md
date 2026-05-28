@@ -33,6 +33,28 @@ directly or through a thin wrapper:
 The engine learns over explicit candidate features and typed relations, not
 hidden prompt state.
 
+## Clankergraph Intake
+
+`clankergraph.v1` is the generic graph artifact used by Clankerbench-compatible
+benchmark and investigation systems. Autoclanker treats it as a source format,
+not as a direct optimizer-control API.
+
+```bash
+autoclanker graph validate --input graphs/evidence.clankergraph.json
+autoclanker beliefs from-graph \
+  --input graphs/evidence.clankergraph.json \
+  --era-id era_my_app_v1 \
+  --output autoclanker.graph-beliefs.json
+autoclanker beliefs preview --input autoclanker.graph-beliefs.json
+```
+
+The compiler is intentionally conservative:
+
+- `evidence` graphs become proposal beliefs unless a later tool supplies exact registry-backed intervention mapping.
+- `context` graphs can become `codebase_patterns` guidance when they contain `pattern`, `anti_pattern`, or `design_decision` nodes.
+- `benchmark` graphs stay evidence about measured candidates; they do not become priors.
+- every generated belief carries `context.metadata.clankergraph` so reviewers can trace which graph/node produced it and what semantic losses were accepted.
+
 ## No-file path
 
 All beginner belief commands accept stdin with `--input -`, and `session init`

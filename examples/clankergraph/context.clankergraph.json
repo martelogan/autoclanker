@@ -1,0 +1,22 @@
+{
+  "schema_version": "clankergraph.v1",
+  "graph_id": "parser-context",
+  "graph_role": "context",
+  "title": "Parser context graph",
+  "nodes": [
+    {
+      "id": "pattern:registry-plumb-point",
+      "kind": "pattern",
+      "title": "Prefer the existing matcher registry plumb point",
+      "body": "New matcher strategies should be added through the registry instead of bypassing it."
+    },
+    {
+      "id": "anti-pattern:one-off-cache",
+      "kind": "anti_pattern",
+      "title": "Avoid one-off global caches",
+      "body": "Matcher state should remain local to the configured parser surface."
+    }
+  ],
+  "edges": [],
+  "derivations": []
+}

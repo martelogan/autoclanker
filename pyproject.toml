@@ -73,6 +73,7 @@ include-package-data = true
 ]
 "schemas" = [
     "schemas/adapter_config.schema.json",
+    "schemas/clankergraph.schema.json",
     "schemas/compiled_prior_preview.schema.json",
     "schemas/eval_result.schema.json",
     "schemas/frontier_input.schema.json",

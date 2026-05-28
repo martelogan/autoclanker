@@ -10,6 +10,7 @@ from autoclanker.bayes_layer import (
     EraState,
     build_fixture_registry,
     compile_beliefs,
+    ingest_human_beliefs,
     load_inline_ideas_payload,
     load_serialized_payload,
     load_serialized_payload_from_text,
@@ -30,6 +31,10 @@ from autoclanker.bayes_layer.types import (
     SessionContext,
     UserProfile,
     to_json_value,
+)
+from autoclanker.clankergraph import (
+    belief_input_from_clankergraph,
+    load_clankergraph_document,
 )
 
 
@@ -164,6 +169,22 @@ def handle_expand_ideas(args: argparse.Namespace) -> dict[str, JsonValue]:
     return payload
 
 
+def handle_from_graph(args: argparse.Namespace) -> dict[str, JsonValue]:
+    era_id = cast(str | None, getattr(args, "era_id", None))
+    if era_id is None:
+        raise ValueError("--era-id is required when compiling beliefs from a graph.")
+    document = load_clankergraph_document(Path(cast(str, args.input)))
+    payload = belief_input_from_clankergraph(
+        document,
+        era_id=era_id,
+        session_id=cast(str | None, getattr(args, "session_id", None)),
+        author=cast(str | None, getattr(args, "author", None)),
+    )
+    # Validate before returning so graph imports never bypass the belief schema.
+    ingest_human_beliefs(payload)
+    return payload
+
+
 def _add_beginner_context_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--ideas-json",
@@ -276,3 +297,27 @@ def register_belief_commands(subparsers: Any) -> None:
     )
     _add_beginner_context_arguments(canonicalize_parser)
     canonicalize_parser.set_defaults(handler=handle_expand_ideas)
+
+    from_graph_parser = belief_subparsers.add_parser(
+        "from-graph",
+        help="Conservatively compile a clankergraph.v1 artifact into schema-valid belief input.",
+    )
+    from_graph_parser.add_argument(
+        "--input",
+        required=True,
+        help="Path to a clankergraph.v1 JSON artifact.",
+    )
+    from_graph_parser.add_argument(
+        "--era-id",
+        required=True,
+        help="Era id to attach to the generated belief batch.",
+    )
+    from_graph_parser.add_argument(
+        "--session-id",
+        help="Optional session id to attach to the generated belief batch.",
+    )
+    from_graph_parser.add_argument(
+        "--author",
+        help="Optional author to attach to the generated belief batch.",
+    )
+    from_graph_parser.set_defaults(handler=handle_from_graph)
