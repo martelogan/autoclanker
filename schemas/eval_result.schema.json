@@ -57,6 +57,11 @@
       "type": "object",
       "additionalProperties": true
     },
+    "evidence_metadata": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Structured non-scalar evidence that should be preserved with the eval observation but not modeled as a raw metric, such as paired-test statistics, callsite attribution, confidence notes, or profiler summaries."
+    },
     "eval_contract": {
       "$ref": "#/$defs/EvalContractSnapshot"
     },

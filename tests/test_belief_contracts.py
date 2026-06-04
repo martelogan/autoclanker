@@ -314,3 +314,34 @@ def test_validate_eval_result_normalizes_array_raw_metrics_to_counts() -> None:
         "empty_samples",
         "sample_ids",
     ]
+
+
+@covers("M2-003")
+def test_validate_eval_result_preserves_structured_evidence_metadata() -> None:
+    payload = load_serialized_payload(
+        ROOT / "examples/eval_results/valid_eval_result.json"
+    )
+    payload["evidence_metadata"] = {
+        "paired_evidence": {
+            "baseline_candidate_id": "cand_baseline",
+            "p_value": 0.031,
+            "confidence": "moderate",
+        },
+        "callsite_attribution": {
+            "top_callsite": "example_parser/token_scan",
+            "self_time_pct": 12.4,
+        },
+    }
+
+    result = validate_eval_result(payload)
+
+    assert result.evidence_metadata is not None
+    assert result.evidence_metadata["paired_evidence"] == {
+        "baseline_candidate_id": "cand_baseline",
+        "p_value": 0.031,
+        "confidence": "moderate",
+    }
+    assert result.evidence_metadata["callsite_attribution"] == {
+        "top_callsite": "example_parser/token_scan",
+        "self_time_pct": 12.4,
+    }

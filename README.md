@@ -355,6 +355,11 @@ outer harness parallelize what it safely can, and let `autoclanker` preserve
 the trust boundary plus the belief-aware ranking and query state around those
 results.
 
+Eval JSON should keep scalar optimization inputs in `raw_metrics`. Put
+structured, non-scalar support such as paired-test statistics, callsite
+attribution, confidence notes, or profiler summaries in `evidence_metadata` so
+the session preserves that evidence without treating it as a modeled metric.
+
 Once the session has observations, `fit`, `suggest`, `frontier-status`,
 `review-bundle`, `recommend-commit`, and `render-report` keep a small
 human-readable report bundle refreshed inside the session root. When you have
@@ -397,6 +402,7 @@ The key files are:
 - `eval_contract.json`: locked benchmark tree, eval harness, adapter, and
   environment digests for the session, plus the effective measurement policy
 - `observations.jsonl`: append-only eval results recorded for the session
+  including scalar `raw_metrics` and optional structured `evidence_metadata`
 - `frontier_status.json`: persisted family representatives, pending queries, and
   heuristic merge suggestions for the active frontier
 - `belief_delta_summary.json`: machine-readable prior-vs-posterior change

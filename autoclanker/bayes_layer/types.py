@@ -491,6 +491,7 @@ class ValidEvalResult:
     failure_metadata: dict[str, JsonValue] | None = None
     eval_contract: EvalContractSnapshot | None = None
     execution_metadata: EvalExecutionMetadata | None = None
+    evidence_metadata: dict[str, JsonValue] | None = None
 
 
 @dataclass(frozen=True, slots=True)

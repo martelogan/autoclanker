@@ -124,6 +124,7 @@ class ContractShimAdapter:
                     workspace_snapshot_id=contract.workspace_snapshot_id,
                 )
             ),
+            evidence_metadata=base.evidence_metadata,
         )
 
     def commit_candidate(self, candidate_id: str) -> Mapping[str, JsonValue]:

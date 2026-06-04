@@ -91,7 +91,9 @@ def test_clankergraph_validation_and_summary() -> None:
 
 
 @covers("M1-001", "M1-003")
-def test_external_investigation_style_evidence_graph_validates_and_compiles_safely() -> None:
+def test_external_investigation_style_evidence_graph_validates_and_compiles_safely() -> (
+    None
+):
     document = load_clankergraph_document(
         ROOT / "examples/clankergraph/investigation_evidence.clankergraph.json"
     )

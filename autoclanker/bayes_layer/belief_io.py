@@ -1306,6 +1306,14 @@ def validate_eval_result(payload: Mapping[str, object]) -> ValidEvalResult:
         if failure_metadata_raw is None
         else {key: to_json_value(value) for key, value in failure_metadata_raw.items()}
     )
+    evidence_metadata_raw = _optional_mapping(
+        normalized_payload.get("evidence_metadata"), "evidence_metadata"
+    )
+    evidence_metadata = (
+        None
+        if evidence_metadata_raw is None
+        else {key: to_json_value(value) for key, value in evidence_metadata_raw.items()}
+    )
     eval_contract_raw = _optional_mapping(
         normalized_payload.get("eval_contract"), "eval_contract"
     )
@@ -1408,6 +1416,7 @@ def validate_eval_result(payload: Mapping[str, object]) -> ValidEvalResult:
         failure_metadata=failure_metadata,
         eval_contract=eval_contract,
         execution_metadata=execution_metadata,
+        evidence_metadata=evidence_metadata,
     )
 
 

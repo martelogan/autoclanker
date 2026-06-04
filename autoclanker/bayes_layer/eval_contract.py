@@ -467,6 +467,7 @@ def hardened_eval_result(
                 None if measurement is None else measurement.stabilization_delay_sec
             ),
         ),
+        evidence_metadata=result.evidence_metadata,
     )
 
 

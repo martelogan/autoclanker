@@ -281,6 +281,7 @@ class ModuleContractAdapter:
             failure_metadata=result.failure_metadata,
             eval_contract=result.eval_contract,
             execution_metadata=result.execution_metadata,
+            evidence_metadata=result.evidence_metadata,
         )
 
     def commit_candidate(self, candidate_id: str) -> Mapping[str, JsonValue]:

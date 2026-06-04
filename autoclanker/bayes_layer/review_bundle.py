@@ -171,10 +171,19 @@ def _last_eval_summary_by_candidate(
 ) -> dict[str, str]:
     summaries: dict[str, str] = {}
     for observation in observations:
+        evidence_keys = (
+            ()
+            if observation.evidence_metadata is None
+            else tuple(sorted(observation.evidence_metadata))
+        )
+        evidence_summary = (
+            "" if not evidence_keys else f", evidence={','.join(evidence_keys[:4])}"
+        )
         summaries[observation.candidate_id] = (
             f"utility={observation.utility:.3f}, "
             f"delta_perf={observation.delta_perf:.3f}, "
             f"runtime={observation.runtime_sec:.2f}s"
+            f"{evidence_summary}"
         )
     return summaries
 

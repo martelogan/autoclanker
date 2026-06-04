@@ -225,6 +225,9 @@ Requirements:
 - preserve intended and realized genotypes;
 - preserve `patch_hash`;
 - preserve optional eval-contract echoes and execution metadata;
+- preserve optional structured `evidence_metadata` for paired-test statistics,
+  callsite attribution, confidence notes, profiler summaries, or similar
+  non-scalar evidence that should not be modeled as raw metrics;
 - support repeated observations of the same realized configuration.
 
 ### 3.6 Adapter-config validation
