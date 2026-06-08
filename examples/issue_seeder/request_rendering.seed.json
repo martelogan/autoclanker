@@ -1,0 +1,38 @@
+{
+  "title": "Explore lower-cost request rendering",
+  "goal": "Reduce request rendering cost while preserving response output and correctness under a fixed eval contract.",
+  "target_repo": "owner/repo",
+  "label": "agent-loop-idea-family",
+  "era_id": "era_request_rendering_v1",
+  "session_id": "request_rendering_seed",
+  "run_intensity": "mega",
+  "canonicalization_mode": "deterministic",
+  "ideas": [
+    "Batch repeated render-time data lookups across components in one planned load.",
+    "Precompute a compact view model in the shape consumed by the renderer.",
+    "Skip decode and transformation work for fields not referenced by the selected route."
+  ],
+  "constraints": [
+    "Preserve byte-equivalent or explicitly approved response output changes.",
+    "Keep route, cache, and error-handling semantics unchanged unless a candidate explicitly measures that change.",
+    "Use render benchmarks and trace evidence as search inputs, not as proof by themselves."
+  ],
+  "artifacts": [
+    {
+      "name": "render-benchmark-snapshot",
+      "kind": "benchmark_snapshot",
+      "url": "https://example.invalid/artifacts/render-benchmark-snapshot.json",
+      "expected_path": "artifacts/render-benchmark-snapshot.json"
+    },
+    {
+      "name": "render-evidence-graph",
+      "kind": "clankergraph",
+      "url": "https://example.invalid/artifacts/render-evidence.clankergraph.json",
+      "expected_path": "graphs/render-evidence.clankergraph.json"
+    }
+  ],
+  "evidence_notes": "Start by reading the render benchmark snapshot, trace summaries, clankergraph evidence, profiler notes, and prior run summaries. Convert repeated work, data-shape mismatch, and unused-field signals into explicit candidate lanes before measuring.",
+  "big_bet": "minimum_cost_request_rendering",
+  "priority": "P0",
+  "next_action": "Build the smallest measured request-rendering cost ledger before implementation."
+}

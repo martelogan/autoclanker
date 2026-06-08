@@ -1,0 +1,38 @@
+{
+  "title": "Explore lower-cost pipeline execution",
+  "goal": "Find lower-cost data pipeline execution plans by using benchmark and evidence artifacts to compare concrete lanes under a fixed eval contract.",
+  "target_repo": "owner/repo",
+  "label": "agent-loop-idea-family",
+  "era_id": "era_pipeline_optimization_v1",
+  "session_id": "pipeline_optimization_seed",
+  "run_intensity": "mega",
+  "canonicalization_mode": "deterministic",
+  "ideas": [
+    "Batch repeated source reads into one planned load.",
+    "Move persisted data shape closer to the runtime processing layout.",
+    "Avoid repeated decode and shape-conversion work on fields not used by downstream stages."
+  ],
+  "constraints": [
+    "Keep the eval surface fixed during lane comparison.",
+    "Use evidence artifacts as search inputs, not as proof by themselves.",
+    "Record proposal or blocker state before stopping."
+  ],
+  "artifacts": [
+    {
+      "name": "benchmark-snapshot",
+      "kind": "benchmark_snapshot",
+      "url": "https://example.invalid/artifacts/benchmark-snapshot.json",
+      "expected_path": "artifacts/benchmark-snapshot.json"
+    },
+    {
+      "name": "evidence-graph",
+      "kind": "clankergraph",
+      "url": "https://example.invalid/artifacts/evidence.clankergraph.json",
+      "expected_path": "graphs/evidence.clankergraph.json"
+    }
+  ],
+  "evidence_notes": "Start by reading the benchmark snapshot, clankergraph evidence, profiler notes, and prior run summaries. Convert those into explicit candidate lanes before measuring.",
+  "big_bet": "minimum_cost_pipeline",
+  "priority": "P0",
+  "next_action": "Build the smallest measured minimum-cost pipeline ledger before implementation."
+}

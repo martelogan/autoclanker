@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>autoclanker issue seeder</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Static seed preview</p>
+          <h1>Autoclanker issue seeder</h1>
+          <p>
+            Draft a portable issue seed, preview the generated run contract, and
+            keep hosted storage or LLM providers behind optional adapters.
+          </p>
+        </div>
+        <div class="hero-actions">
+          <button id="resetSeed" type="button">Reset demo</button>
+          <button class="secondary" id="downloadSeed" type="button">Download seed</button>
+        </div>
+      </header>
+
+      <section class="editor">
+        <div class="row">
+          <h2>Seed JSON</h2>
+          <button id="formatSeed" type="button">Format</button>
+        </div>
+        <textarea id="seedInput" spellcheck="false"></textarea>
+        <div class="template-actions" aria-label="Built-in seed templates">
+          <button class="secondary" id="loadPipelineSeed" type="button">
+            Load pipeline template
+          </button>
+          <button class="secondary" id="loadRequestRenderingSeed" type="button">
+            Load request-rendering template
+          </button>
+        </div>
+        <p class="note">
+          Browser preview stays credential-free. The CLI remains authoritative:
+          <code>autoclanker issue-seed generate --input seed.json</code>.
+        </p>
+      </section>
+
+      <section class="outputs">
+        <div class="row">
+          <h2>Generated Outputs</h2>
+          <span id="status" class="pill">pending</span>
+        </div>
+
+        <p class="note">
+          Preview is for drafting. Use the CLI before handing off a real run so
+          validation and file permissions match the package contract.
+        </p>
+
+        <article class="output">
+          <div class="row">
+            <h3>Issue body</h3>
+            <button data-copy="issueBody" type="button">Copy</button>
+          </div>
+          <textarea id="issueBody" readonly></textarea>
+        </article>
+
+        <article class="output">
+          <div class="row">
+            <h3>autoclanker.ideas.json</h3>
+            <button data-copy="ideasJson" type="button">Copy</button>
+          </div>
+          <textarea id="ideasJson" readonly></textarea>
+        </article>
+
+        <article class="output">
+          <div class="row">
+            <h3>artifact-manifest.json</h3>
+            <button data-copy="artifactManifestJson" type="button">Copy</button>
+          </div>
+          <textarea id="artifactManifestJson" readonly></textarea>
+        </article>
+
+        <article class="output">
+          <div class="row">
+            <h3>run-contract.json</h3>
+            <button data-copy="runContractJson" type="button">Copy</button>
+          </div>
+          <textarea id="runContractJson" readonly></textarea>
+        </article>
+
+        <article class="output">
+          <div class="row">
+            <h3>lane-ledger.md</h3>
+            <button data-copy="laneLedger" type="button">Copy</button>
+          </div>
+          <textarea id="laneLedger" readonly></textarea>
+        </article>
+
+        <article class="output">
+          <div class="row">
+            <h3>pi.prompt.txt</h3>
+            <button data-copy="piPrompt" type="button">Copy</button>
+          </div>
+          <textarea id="piPrompt" readonly></textarea>
+        </article>
+
+        <article class="output">
+          <div class="row">
+            <h3>headless-command.sh</h3>
+            <button data-copy="headlessCommand" type="button">Copy</button>
+          </div>
+          <textarea id="headlessCommand" readonly></textarea>
+        </article>
+
+        <article class="output">
+          <div class="row">
+            <h3>Host adapter contract</h3>
+            <button data-copy="hostAdapter" type="button">Copy</button>
+          </div>
+          <textarea id="hostAdapter" readonly></textarea>
+        </article>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
