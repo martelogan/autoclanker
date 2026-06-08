@@ -10,7 +10,7 @@ running `autoclanker` actually looks like.
 | Demo | Best for | Start with | First command |
 | --- | --- | --- | --- |
 | `issue_seeder` | turning evidence and rough lanes into a ready-to-run issue seed | `examples/issue_seeder/pipeline_optimization.seed.json` | `autoclanker issue-seed generate --input examples/issue_seeder/pipeline_optimization.seed.json --output-dir tmp/issue-seed` |
-| `clankerprof` | pprof target attribution, request-rendering cost ledgers, and ownership slice analysis | `docs/CLANKERPROF.md` | `clankerprof targets --profile profile.pb.gz --config target_config.json --format json` |
+| `clankerprof` | pprof target attribution, request-rendering cost ledgers, and ownership slice analysis | `examples/clankerprof/README.md` | `clankerprof targets --profile profile.pb.gz --config examples/clankerprof/target_config.json --format json` |
 | `bayes_quickstart` | the clearest first run; parser-based Bayes guidance | `examples/idea_inputs/minimal.json` or `examples/idea_inputs/bayes_quickstart.json` | `autoclanker beliefs preview --input examples/idea_inputs/minimal.json --era-id era_log_parser_v1` |
 | `autoresearch_simple` | real-upstream `autoresearch` contrast; mostly additive search | `examples/idea_inputs/autoresearch_simple.json` | `./bin/dev test-upstream-live` |
 | `cevolve_synergy` | real-upstream `cevolve` contrast; interaction-heavy search | `examples/idea_inputs/cevolve_synergy.json` | `./bin/dev test-upstream-live` |

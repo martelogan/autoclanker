@@ -1,21 +1,81 @@
 # clankerprof
 
 `clankerprof` is a language-neutral pprof CPU profile analyzer packaged with
-`autoclanker`. Its primary compatibility target is target-function attribution.
-Slice attribution is a separate, additive migration surface:
+`autoclanker`. It is designed for people and agents who need profile evidence
+that can survive handoff into issue seeds, benchmark loops, CI gates, and code
+review.
 
-- raw and gzipped `.pb` profile decoding;
-- target-function attribution with an `Other` catch-all;
-- optional Ruby runtime rules for native/core semantic labels;
-- runtime-internal folding and proportional CPU attributables;
-- slice/path attribution, filters, collapse rules, and attribution overrides;
-- JSON outputs suitable for comparison gates and agent handoff artifacts.
+The core idea is simple: decode a profile once into typed sample facts, then
+render independent projections for the profiling question you are asking. Target
+attribution, ownership slices, semantic runtime callers, and before/after
+comparison are related views, not one overloaded report mode.
+
+<p align="center">
+  <img src="assets/clankerprof-sample-facts.svg" width="840" alt="clankerprof sample-facts architecture">
+</p>
+
+## Why use it
+
+- Decode raw and gzipped `.pb` profiles without generated protobuf runtime files.
+- Preserve pprof IDs and inline frames in a typed call graph model.
+- Explain a known parent boundary with complete target-function attribution.
+- Opt into runtime rule packs such as Ruby core/native semantic labeling.
+- Fold runtime-internal cost into meaningful callers when that answers the
+  investigation question.
+- Emit CSV and JSON artifacts that agents, CI gates, and review tools can
+  consume without scraping terminal prose.
+- Keep slice attribution separate from target attribution so ownership views do
+  not redefine parent-boundary cost accounting.
+
+## Command surfaces
+
+| Command | Use it for | Primary output |
+| --- | --- | --- |
+| `clankerprof targets` | Explain CPU under one or more configured parent functions, request handlers, renderers, jobs, or RPC boundaries. | JSON, CSV, simple CSV, or text target reports. |
+| `clankerprof slices` | Attribute selected CPU to path-based responsibility slices with filters, collapse rules, and metadata. | JSON slice reports for humans, agents, and compare gates. |
+| `clankerprof compare` | Compare two slice JSON outputs with absolute and relative regression thresholds. | JSON delta report plus exit code `2` on regression. |
+| `autoclanker pprof ...` | Run the same subcommands through the main `autoclanker` CLI. | Same payloads as `clankerprof`. |
+
+## MVP contract
+
+The current MVP is already useful as a standalone library and CLI. It is not yet
+a claim that every historical profile report can be deleted without real-profile
+golden verification.
 
 The tested compatibility contract is tracked in
 [`CLANKERPROF_PARITY.md`](CLANKERPROF_PARITY.md). Treat that file as the source
 of truth for what compatibility is claimed versus intentionally not claimed.
 
-## Target attribution
+The next phase should deepen the sample-facts engine: make the fact graph more
+explicit as a reusable library API, add richer projection composition, and bring
+additional runtime rule packs online without making any one runtime or ownership
+system part of the core model.
+
+## Quickstart
+
+Use any pprof CPU profile exported as raw `.pb` or gzipped `.pb.gz`.
+
+```bash
+clankerprof targets \
+  --profile profile.pb.gz \
+  --config examples/clankerprof/target_config.json \
+  --runtime ruby \
+  --fold-runtime-internals \
+  --track-semantic-callers \
+  --semantic-callers-csv tmp/semantic-callers.csv \
+  --format json \
+  --output tmp/profile-targets.json
+
+clankerprof slices \
+  --profile profile.pb.gz \
+  --config examples/clankerprof/clankerprof-slices.yml \
+  --output tmp/profile-slices.json
+```
+
+See [`../examples/clankerprof`](../examples/clankerprof) for copyable target and
+slice configs.
+
+## Target Attribution
 
 Use this mode when you know the parent function or request/rendering boundary
 you want to explain.
@@ -61,7 +121,7 @@ This is intentionally framework-neutral: the parent can be an HTTP handler,
 RPC method, background job, renderer, or any other stack frame that represents
 the boundary you want to cost.
 
-## Ruby runtime rules
+## Ruby Runtime Rules
 
 Ruby support is opt-in and data-driven. Pass the runtime and the core-class CSV
 instead of relying on hardcoded application or framework assumptions. If
@@ -106,7 +166,7 @@ That writes `output/slices.csv` and `output/verbose/slices.csv`, matching older
 two-file target report artifact locations while keeping ordinary `csv` and
 `simple-csv` as explicit single-output formats.
 
-## Slice attribution
+## Slice Attribution
 
 Use this mode for slice-based responsibility or code-area views. This mode is
 kept separate from target attribution: slice CLI/config semantics such as
@@ -195,3 +255,38 @@ The command returns JSON with `has_regression`, per-slice deltas, and top
 function regressions/improvements. The CLI exits `2` when a regression exceeds
 the configured thresholds for gate-friendly automation. `autoclanker pprof ...`
 exposes the same subcommands as a convenience alias.
+
+## Library Shape
+
+The public Python modules are small enough to use directly when a CLI subprocess
+is not the right integration point:
+
+```python
+from clankerprof.analysis import TargetAnalysisOptions, analyze_targets, load_json_mapping
+from clankerprof.proto import load_profile
+from clankerprof.render import render_target_json
+
+profile = load_profile("profile.pb.gz")
+config = load_json_mapping("examples/clankerprof/target_config.json")
+results = analyze_targets(profile, config, TargetAnalysisOptions())
+payload = render_target_json(results)
+```
+
+For advanced integrations, treat `Profile.stack_for_sample(...)` as the current
+typed call graph seam. The next phase should make this seam more explicit as a
+first-class sample-facts API, but the existing model already preserves the facts
+that matter for safe projection: leaf-to-root stack order, sparse IDs, inline
+frames, leaf self-time, target containment, slice labels, folded-from lineage,
+and semantic callers.
+
+## Integration Guidance
+
+Prefer this order when adopting `clankerprof` in another harness:
+
+1. Produce `targets --format json` for parent-boundary diagnosis.
+2. Produce `slices --output profile-slices.json` for ownership or code-area
+   triage.
+3. Use `compare` only on slice JSON outputs generated from stable configs.
+4. Keep runtime-specific behavior in rule packs and config files.
+5. Keep old profile tools available until real-profile golden outputs match the
+   compatibility contract you need.

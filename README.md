@@ -227,9 +227,11 @@ See [`docs/ISSUE_SEEDER.md`](docs/ISSUE_SEEDER.md) and
 
 ## Profile Analysis
 
-`clankerprof` is a sibling CLI packaged with this repo for pprof CPU profile
-analysis. It keeps the core traversal language-neutral while letting callers opt
-into runtime-specific rule packs such as Ruby core/native labels.
+`clankerprof` is a sibling CLI and Python package for pprof CPU profile
+analysis. It is useful on its own: decode a raw or gzipped profile once, keep the
+call graph language-neutral, and project the same sample facts into target
+attribution, slice attribution, runtime-semantic caller evidence, and
+before/after comparison gates.
 
 ```bash
 clankerprof targets \
@@ -251,16 +253,18 @@ clankerprof slices \
 autoclanker pprof compare --before before.json --after after.json
 ```
 
-Use `targets` when you are explaining one request/rendering boundary or parent
-function; this is the target-attribution replacement surface. Use `slices`
-when you need separate slice attribution, collapse rules, config-file replay,
-and JSON outputs for comparison gates. The docs include a generic
-request-rendering example for route/component renderers, view-model shaping,
-and native template engines without assuming a specific web framework.
-See [`docs/CLANKERPROF.md`](docs/CLANKERPROF.md) and the tested compatibility
-matrix in
-[`docs/CLANKERPROF_PARITY.md`](docs/CLANKERPROF_PARITY.md).
-The slice-tool architecture audit is recorded in
+Use `targets` when you are explaining one request/rendering boundary, RPC
+method, background job, or other parent frame. Use `slices` when you need
+ownership-style path attribution, collapse rules, config-file replay, generic
+slice metadata, and JSON outputs for comparison gates.
+
+The standalone guide includes the sample-facts architecture visual, copyable
+target/slice configs, a generic request-rendering example, direct Python library
+usage, and migration guardrails:
+[`docs/CLANKERPROF.md`](docs/CLANKERPROF.md). Example configs live in
+[`examples/clankerprof`](examples/clankerprof). The tested compatibility matrix
+is in [`docs/CLANKERPROF_PARITY.md`](docs/CLANKERPROF_PARITY.md), and the
+slice-tool architecture audit is recorded in
 [`docs/CLANKERPROF_SLICE_AUDIT.md`](docs/CLANKERPROF_SLICE_AUDIT.md).
 
 ## Quickstart

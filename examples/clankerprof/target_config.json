@@ -1,0 +1,14 @@
+{
+  "RequestHandler#render_response": {
+    "View Model": "[/\\\\]app[/\\\\]view_models[/\\\\]",
+    "Components": "[/\\\\]app[/\\\\]components[/\\\\]",
+    "Template Engine": "[/\\\\]template_engine[/\\\\]",
+    "Cache Client": "[/\\\\]gems[/\\\\]cache-client[/\\\\]",
+    "Data Loading": "[/\\\\]app[/\\\\]data[/\\\\]"
+  },
+  "BatchJob#perform": {
+    "Pipeline": "[/\\\\]app[/\\\\]pipeline[/\\\\]",
+    "Parser": "[/\\\\]app[/\\\\]parser[/\\\\]",
+    "Storage Client": "[/\\\\]gems[/\\\\]storage-client[/\\\\]"
+  }
+}

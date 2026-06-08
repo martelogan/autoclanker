@@ -1,0 +1,12 @@
+slices: examples/clankerprof/slices.yml
+filters:
+  - <name:RequestHandler#render_response
+collapse:
+  - gem:statsd-instrument
+  - gem:opentelemetry-sdk
+attribute:
+  - name:TemplateEngine::Native,to:rendering
+by_slice: 5
+top: 10
+show_paths: true
+unattributed_gems: 5

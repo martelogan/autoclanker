@@ -1,0 +1,33 @@
+slices:
+  - name: rendering
+    paths:
+      - app/components/**
+      - app/view_models/**
+      - lib/template_engine/**
+    metadata:
+      owner: rendering-platform
+      contact: "#rendering-performance"
+      docs:
+        - https://example.invalid/rendering-performance
+
+  - name: data-loading
+    paths:
+      - app/data/**
+      - app/loaders/**
+    metadata:
+      owner: data-platform
+      contact: "#data-performance"
+
+  - name: pipeline
+    paths:
+      - app/pipeline/**
+      - app/parser/**
+    metadata:
+      owner: pipeline-platform
+      contact: "#pipeline-performance"
+
+  - name: default
+    default: true
+    metadata:
+      owner: unclassified
+      contact: "#profiling-help"
