@@ -54,9 +54,10 @@ dev = [
 [project.scripts]
 autoclanker = "autoclanker.cli:main"
 bigbets = "bigbets.cli:main"
+clankerprof = "clankerprof.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["autoclanker*", "bigbets*"]
+include = ["autoclanker*", "bigbets*", "clankerprof*"]
 
 [tool.setuptools]
 include-package-data = true
@@ -65,6 +66,7 @@ include-package-data = true
 "autoclanker" = ["py.typed"]
 "bigbets" = ["py.typed"]
 "bigbets.assets" = ["*.woff2"]
+"clankerprof" = ["py.typed", "runtime_rules/*.csv", "runtime_rules/*.yml"]
 
 [tool.setuptools.data-files]
 "configs" = [
@@ -111,7 +113,7 @@ force-single-line = false
 lines-between-types = 1
 
 [tool.pyright]
-include = ["autoclanker", "bigbets", "tests"]
+include = ["autoclanker", "bigbets", "clankerprof", "tests"]
 exclude = [".venv", ".mise", ".local", "build", "dist"]
 typeCheckingMode = "strict"
 pythonVersion = "3.11"

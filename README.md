@@ -13,6 +13,8 @@
 [![Adapters](https://img.shields.io/badge/adapters-autoresearch%20%7C%20cevolve%20%7C%20external-214E34)](docs/INTEGRATIONS.md)
 
 **[Quickstart](#quickstart)** ·
+**[Issue Seeds](#issue-seeds)** ·
+**[Profile Analysis](#profile-analysis)** ·
 **[Demo Paths](#demo-paths)** ·
 **[How It Works](#how-it-works)** ·
 **[Session Flow](#session-flow)** ·
@@ -102,6 +104,10 @@ integration target.
 - A filesystem-backed session store.
 - A standalone `bigbets` portfolio compiler for ranked strategy registries,
   dependency graphs, and host-neutral static views.
+- A standalone `clankerprof` pprof analyzer for target attribution, runtime
+  semantic labeling, slice attribution, and profile comparisons.
+- A portable issue-seed generator for turning evidence bundles into ready-to-run
+  optimization issues.
 - Public examples for Bayes-first, `autoresearch`, and `cevolve` workflows.
 
 ## Plain-Language Vocabulary
@@ -148,6 +154,7 @@ The installed CLI entry point is:
 ```bash
 autoclanker --help
 bigbets --help
+clankerprof --help
 ```
 
 If `autoresearch` or `cevolve` are already installed on your machine, the
@@ -189,6 +196,72 @@ surfaces can be audited and regenerated when `bigbets` evolves.
 
 Use it when individual idea-family issues need to roll up into a smaller set of
 ranked big bets. See [`docs/BIGBETS.md`](docs/BIGBETS.md).
+
+## Issue Seeds
+
+Use issue seeds when benchmark evidence, clankergraph files, profiler notes, or
+prior runs need to become a ready-to-run issue for a long-running agent.
+
+```bash
+autoclanker issue-seed generate \
+  --input examples/issue_seeder/pipeline_optimization.seed.json \
+  --output-dir tmp/issue-seed
+```
+
+`examples/issue_seeder/request_rendering.seed.json` is the companion example
+for generic request-rendering optimization: render plans, repeated component
+lookups, view-model shape, and response correctness without framework-specific
+assumptions.
+
+The generated bundle includes an issue body, `autoclanker.ideas.json`,
+`artifact-manifest.json`, `run-contract.json`, `lane-ledger.md`, a Pi prompt,
+an executable headless command, and an optional host-adapter contract. The
+browser preview in [`examples/issue_seeder`](examples/issue_seeder) is static
+and credential-free; generated headless commands default to deterministic
+canonicalization. Hosted storage, GitHub issue creation, artifact upload, and
+LLM canonicalization should be added through optional server-side adapters, not
+as required package dependencies.
+
+See [`docs/ISSUE_SEEDER.md`](docs/ISSUE_SEEDER.md) and
+[`docs/HOST_ADAPTERS.md`](docs/HOST_ADAPTERS.md).
+
+## Profile Analysis
+
+`clankerprof` is a sibling CLI packaged with this repo for pprof CPU profile
+analysis. It keeps the core traversal language-neutral while letting callers opt
+into runtime-specific rule packs such as Ruby core/native labels.
+
+```bash
+clankerprof targets \
+  --profile profile.pb.gz \
+  --config target_config.json \
+  --runtime ruby \
+  --fold-ruby-internals \
+  --format simple-csv \
+  --output target-slices.csv
+
+clankerprof slices \
+  --profile profile.pb.gz \
+  --slices slices.yml \
+  --filter "<name:RequestHandler#render_response" \
+  --collapse "gem:statsd-instrument" \
+  --attribute "name:TemplateEngine::Native,to:rendering-native" \
+  --output profile-slices.json
+
+autoclanker pprof compare --before before.json --after after.json
+```
+
+Use `targets` when you are explaining one request/rendering boundary or parent
+function; this is the target-attribution replacement surface. Use `slices`
+when you need separate slice attribution, collapse rules, config-file replay,
+and JSON outputs for comparison gates. The docs include a generic
+request-rendering example for route/component renderers, view-model shaping,
+and native template engines without assuming a specific web framework.
+See [`docs/CLANKERPROF.md`](docs/CLANKERPROF.md) and the tested compatibility
+matrix in
+[`docs/CLANKERPROF_PARITY.md`](docs/CLANKERPROF_PARITY.md).
+The slice-tool architecture audit is recorded in
+[`docs/CLANKERPROF_SLICE_AUDIT.md`](docs/CLANKERPROF_SLICE_AUDIT.md).
 
 ## Quickstart
 
@@ -521,6 +594,8 @@ Useful validation lanes:
 - [`docs/SPEC.md`](docs/SPEC.md): normative product contract
 - [`docs/DESIGN.md`](docs/DESIGN.md): architecture and workflow decisions
 - [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md): adapter model and upstream behavior
+- [`docs/ISSUE_SEEDER.md`](docs/ISSUE_SEEDER.md): issue seed contract and artifact bundle
+- [`docs/HOST_ADAPTERS.md`](docs/HOST_ADAPTERS.md): optional static-site, storage, and LLM adapter seams
 - [`docs/BELIEF_INPUT_REFERENCE.md`](docs/BELIEF_INPUT_REFERENCE.md): belief fields, bounds, and beginner inputs
 - [`docs/LIVE_EXERCISES.md`](docs/LIVE_EXERCISES.md): runnable demos and live lanes
 - [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md): deterministic comparison targets and report script

@@ -47,6 +47,12 @@ _REQUIRES_BEHAVIORAL_EVIDENCE = {
     "M7-006",
     "M7-007",
     "M7-011",
+    "M8-002",
+    "M9-001",
+    "M9-002",
+    "M9-003",
+    "M9-004",
+    "M9-005",
 }
 _FOCUSED_CONTRACT_CHECKS = {
     "M3-007": {
@@ -222,6 +228,12 @@ def test_example_adapter_paths_match_runtime_resolution_rules() -> None:
     assert "session run-eval" in docs_rendered
     assert "session review-bundle" in docs_rendered
     assert "without adding a second optimization engine" in docs_rendered
+    issue_docs = (root / "docs" / "ISSUE_SEEDER.md").read_text(encoding="utf-8")
+    host_docs = (root / "docs" / "HOST_ADAPTERS.md").read_text(encoding="utf-8")
+    assert "autoclanker issue-seed generate" in issue_docs
+    assert "canonicalizeIdeas" in issue_docs
+    assert "deterministic canonicalization" in issue_docs
+    assert "Supabase Reference Shape" in host_docs
 
 
 @covers("M7-008")

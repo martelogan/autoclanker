@@ -20,7 +20,9 @@ from autoclanker.bayes_layer.types import (
     ValidationFailure,
 )
 from autoclanker.cli_graph import register_graph_commands
+from autoclanker.issue_seeder import register_issue_seed_commands
 from bigbets.cli import register_bigbets_commands
+from clankerprof.cli import register_pprof_commands
 
 EXIT_VALIDATION_ERROR = 2
 EXIT_SESSION_ERROR = 3
@@ -67,7 +69,9 @@ def build_parser() -> argparse.ArgumentParser:
     register_adapter_commands(subparsers)
     register_session_commands(subparsers)
     register_graph_commands(subparsers)
+    register_issue_seed_commands(subparsers)
     register_bigbets_commands(subparsers)
+    register_pprof_commands(subparsers)
     return parser
 
 
@@ -94,6 +98,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         handler = args.handler
         payload = cast(dict[str, JsonValue], handler(args))
         _emit_json(payload, args.output)
+        if payload.get("tool") == "clankerprof_compare" and payload.get(
+            "has_regression"
+        ):
+            return EXIT_VALIDATION_ERROR
         return 0
     except ValidationFailure as exc:
         _emit_error(str(exc))

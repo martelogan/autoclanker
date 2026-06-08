@@ -322,5 +322,41 @@
     "gate": "required",
     "description": "The standalone bigbets package validates one structured versioned portfolio registry and renders schema-versioned JSON, CSV, Markdown, Mermaid, Excalidraw, SVG, static HTML, and editable static-site artifacts, with autoclanker exposing a convenience alias.",
     "status": "active"
+  },
+  {
+    "requirement_id": "M8-002",
+    "gate": "required",
+    "description": "The issue-seed generator turns evidence, benchmark, and rough-lane seed input into a portable issue body, autoclanker ideas, run contract, lane ledger, kickoff prompts, executable headless command, deterministic default canonicalization, and optional host-adapter contract without requiring hosted services or provider secrets.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M9-001",
+    "gate": "required",
+    "description": "The standalone clankerprof package decodes raw and gzipped pprof CPU profiles into a typed, language-neutral call graph model without requiring generated protobuf code at runtime.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M9-002",
+    "gate": "required",
+    "description": "clankerprof preserves target-function attribution semantics by assigning target-contained sample self time to configured categories with complete Other catch-all attribution.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M9-003",
+    "gate": "required",
+    "description": "clankerprof supports Ruby runtime rule packs for core-class/native semantic labeling, simplified versus verbose categories, runtime-internal folding, semantic caller tracking, and proportional CPU attributables without hardcoding Ruby as the core engine.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M9-004",
+    "gate": "required",
+    "description": "As secondary migration coverage, clankerprof covers profile slicing with slice path attribution, generic declarative metadata, filters, collapse rules, attribution overrides, JSON slice output, and structured profile comparison without defining target-attribution semantics.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M9-005",
+    "gate": "required",
+    "description": "clankerprof is usable both as a standalone CLI and through the autoclanker pprof alias, with machine-readable JSON results and file output for report formats.",
+    "status": "active"
   }
 ]

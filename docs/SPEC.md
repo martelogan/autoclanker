@@ -82,6 +82,7 @@ autoclanker session review-bundle
 autoclanker session recommend-commit
 autoclanker session render-report
 autoclanker session status
+autoclanker issue-seed generate
 ```
 
 ### 2.3 Machine-readable I/O contract
@@ -257,6 +258,33 @@ Requirements:
 - persist a stable `frontier_status.json` artifact;
 - expose frontier summaries through `session suggest` and `session frontier-status`;
 - keep legacy candidate pools valid by normalizing them into a default frontier family.
+
+### 3.8 Issue-seed generation
+
+`autoclanker` must provide a host-neutral issue-seeding contract for turning
+evidence, benchmark snapshots, corpus snapshots, and rough ideas into
+ready-to-run optimization issues.
+
+```text
+autoclanker issue-seed generate --input seed.json --output-dir out
+```
+
+Requirements:
+- accept JSON or YAML seed input;
+- generate a copyable issue body plus `autoclanker.ideas.json`,
+  `artifact-manifest.json`, `run-contract.json`, `lane-ledger.md`, Pi prompt,
+  executable headless command, and host-adapter contract artifacts;
+- keep the default path static, local-first, and credential-free;
+- default generated commands to deterministic canonicalization unless a seed
+  explicitly opts into `hybrid` or `llm` with a configured model/provider;
+- make setup/execution separation explicit: setup commands prepare or resume
+  state, and supervising agents must execute returned handoff prompts;
+- treat clankergraph, benchmark, profiler, and prior-run artifacts as
+  exploratory search inputs, not promotion proof;
+- support optional `bigbets` metadata so portfolio tooling can import the
+  generated issue without coupling `autoclanker` to a specific issue tracker;
+- keep hosted persistence, artifact upload, issue creation, and model-provider
+  canonicalization behind optional adapters with server-side secrets.
 
 ### 3.7a Objective posterior and acquisition honesty
 

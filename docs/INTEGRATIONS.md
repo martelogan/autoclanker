@@ -138,6 +138,19 @@ This keeps internal or project-specific investigation tools behind a neutral
 `clankergraph.v1` file boundary. Autoclanker consumes evidence, benchmark,
 belief, and context graphs without depending on the tool that produced them.
 
+Profile artifacts use the sibling `clankerprof` CLI, also independent of
+adapters:
+
+```bash
+clankerprof targets --profile profile.pb.gz --config target_config.json --format json
+clankerprof slices --profile profile.pb.gz --slices slices.yml --output profile-slices.json
+clankerprof slices --profile profile.pb.gz --config clankerprof-slices.yml --output profile-slices.json
+autoclanker pprof compare --before before.json --after after.json
+```
+
+This keeps pprof analysis reusable by local users, CI gates, and agent harnesses
+without making a specific optimization loop depend on profiling internals.
+
 ## 6. Eval-contract metadata
 
 Adapter metadata may include:

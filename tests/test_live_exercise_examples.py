@@ -155,6 +155,49 @@ def test_belief_input_reference_documents_minimum_files_and_bounds() -> None:
         assert token in rendered
 
 
+@covers("M8-002")
+def test_issue_seeder_docs_and_static_preview_are_discoverable() -> None:
+    docs = (ROOT / "docs" / "ISSUE_SEEDER.md").read_text(encoding="utf-8")
+    host_docs = (ROOT / "docs" / "HOST_ADAPTERS.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    examples = (ROOT / "examples" / "README.md").read_text(encoding="utf-8")
+    static_app = (ROOT / "examples" / "issue_seeder" / "app.js").read_text(
+        encoding="utf-8"
+    )
+    static_html = (ROOT / "examples" / "issue_seeder" / "index.html").read_text(
+        encoding="utf-8"
+    )
+
+    for token in (
+        "autoclanker issue-seed generate",
+        "artifact-manifest.json",
+        "run-contract.json",
+        "lane-ledger.md",
+        "setup commands prepare or resume the workspace",
+        "deterministic canonicalization",
+        "canonicalizeIdeas",
+        "bigbets:idea-family",
+    ):
+        assert token in docs
+
+    assert "server-side LLM canonicalization" in host_docs
+    assert "Supabase Reference Shape" in host_docs
+    assert "provider keys" in host_docs
+    assert "deterministic canonicalization" in host_docs
+    assert "Issue Seeds" in readme
+    assert "examples/issue_seeder" in readme
+    assert "request_rendering.seed.json" in readme
+    assert "issue_seeder" in examples
+    assert "request_rendering.seed.json" in examples
+    assert "autoclanker.issue-seed" in static_app
+    assert "requestRenderingSeed" in static_app
+    assert "provider keys belong behind canonicalizeIdeas" in static_app
+    assert "artifact-manifest.json" in static_html
+    assert "headless-command.sh" in static_html
+    assert "Load request-rendering template" in static_html
+    assert "autoclanker issue-seed generate --input seed.json" in static_html
+
+
 @covers("M7-005")
 def test_bayes_quickstart_live_exercise_files_drive_real_cli_flow(
     tmp_path: Path,

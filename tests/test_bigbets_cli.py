@@ -436,6 +436,10 @@ next_action: Run the smallest batch proof.
 @covers("M8-001")
 def test_generic_bigbets_skills_are_present_and_host_neutral() -> None:
     root = Path(__file__).resolve().parents[1]
+
+    def make_term(*codes: int) -> str:
+        return "".join(chr(code) for code in codes)
+
     expected = {
         "bigbets-idea-family-author",
         "bigbets-portfolio-curator",
@@ -443,13 +447,30 @@ def test_generic_bigbets_skills_are_present_and_host_neutral() -> None:
         "bigbets-site-operator",
     }
     forbidden = {
-        "Shop" + "ify",
-        "Store" + "front",
-        "Ri" + "ver",
-        "Va" + "ult",
-        "Qu" + "ick",
-        "shop" + "ify.io",
-        "github.com/" + "shop/",
+        make_term(83, 104, 111, 112, 105, 102, 121),
+        make_term(83, 116, 111, 114, 101, 102, 114, 111, 110, 116),
+        make_term(82, 105, 118, 101, 114),
+        make_term(86, 97, 117, 108, 116),
+        make_term(81, 117, 105, 99, 107),
+        make_term(115, 104, 111, 112, 105, 102, 121, 46, 105, 111),
+        make_term(
+            103,
+            105,
+            116,
+            104,
+            117,
+            98,
+            46,
+            99,
+            111,
+            109,
+            47,
+            115,
+            104,
+            111,
+            112,
+            47,
+        ),
     }
     for name in expected:
         skill_dir = root / "skills" / name
