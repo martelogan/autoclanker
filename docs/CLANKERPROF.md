@@ -107,7 +107,7 @@ clankerprof targets \
 {
   "Target#render": {
     "Application": "app/**",
-    "Cache Client": "gem:cache-client"
+    "Cache Client": "library:cache-client"
   }
 }
 ```
@@ -117,9 +117,10 @@ self-time frame. If no configured category matches, time goes to `Other`, so the
 target total stays fully accounted for.
 
 Prefer path patterns such as `app/**` or `app/components/**` in new configs.
-Use `gem:cache-client` for versioned gem paths. Existing regex strings are
-still supported for compatibility, and `regex:...` can make intentional regex
-matching explicit.
+Use `library:cache-client` or `dependency:cache-client` for versioned
+third-party paths. `gem:` is retained as a compatibility selector for older
+Ruby-oriented configs, and `regex:...` can make intentional regex matching
+explicit.
 
 For request-rendering investigations, use the same shape with the request
 boundary as the parent and neutral categories for app code, component rendering,
@@ -130,7 +131,7 @@ client libraries, native engines, or data-shape work:
   "RequestHandler#render_response": {
     "View Model": "app/view_models/**",
     "Components": "app/components/**",
-    "Cache Client": "gem:cache-client"
+    "Cache Client": "library:cache-client"
   }
 }
 ```
@@ -139,10 +140,58 @@ This is intentionally framework-neutral: the parent can be an HTTP handler,
 RPC method, background job, renderer, or any other stack frame that represents
 the boundary you want to cost.
 
+### Output Example: Boundary Cost
+
+Use `simple-csv` when you want a compact summary for an issue, PR, or agent
+handoff. If you pass `--cpu-attributables`, each category also gets a
+proportional estimate for that metric.
+
+```bash
+cat > request_metrics.json <<'JSON'
+{
+  "p90_ms": {
+    "RequestHandler#render_response": 96.0
+  }
+}
+JSON
+
+clankerprof targets \
+  --profile profile.pb.gz \
+  --config target_config.json \
+  --runtime ruby \
+  --fold-runtime-internals \
+  --cpu-attributables request_metrics.json \
+  --format simple-csv \
+  --output tmp/request-summary.csv
+```
+
+`simple-csv` writes one CSV row per category. The same rows are wrapped below
+as a table so the important shape is easy to scan:
+
+| Parent | Category | CPU % | p90 ms est. | Main app callsites | Low-level work |
+| --- | --- | ---: | ---: | --- | --- |
+| `RequestHandler#render_response` | Components | 34.9 | 33.5 | `ComponentRenderer#render` 19.8%; `CardPresenter#render` 10.1% | `TemplateEngine::Native#render` 14.7%; `String#gsub` 8.4% |
+| `RequestHandler#render_response` | I/O Overhead | 22.3 | 21.4 | `CacheClient#get_multi` 12.8%; `InventoryClient#batch_fetch` 9.5% | `Net::HTTP#request` 8.9%; `CacheClient#get_multi` 7.1% |
+| `RequestHandler#render_response` | Serialization Overhead | 18.1 | 17.4 | `ResponseEnvelope#to_json` 9.3%; `Money#as_json` 5.7% | `JSON.generate` 10.8%; `Marshal.load` 3.9% |
+| `RequestHandler#render_response` | Third-party Libraries | 13.6 | 13.1 | `TelemetryWrapper#call` 7.4%; `StatsClient#increment` 3.5% | `TraceSDK::Span#record` 7.4%; `StatsClient#increment` 3.5% |
+| `RequestHandler#render_response` | Other | 11.1 | 10.7 | `PathHelpers#normalize` 4.2%; `Timezone#convert` 3.1% | `Object#new` 4.9%; `Hash#[]` 2.0% |
+
+Interpretation:
+
+- `CPU %` is sampled CPU share below the configured parent boundary.
+- `p90_ms` is `CPU % * parent p90_ms`, so it is a prioritization estimate, not
+  direct per-category latency measurement.
+- `Main app callsites` tells you where in the application stack the cost was
+  introduced.
+- `Low-level work` tells you the CPU mechanics or library frames that burned the
+  samples.
+
 ## Ruby Runtime Rules
 
 Ruby support is opt-in and data-driven. Pass the runtime and the core-class CSV
-instead of relying on hardcoded application or framework assumptions. If
+instead of relying on hardcoded application or framework assumptions. The Ruby
+rule pack declares stdlib paths, native path patterns, and library extraction
+patterns such as versioned `gems/<name>-<version>` directories. If
 `--ruby-core-classes` is omitted, `clankerprof` uses the packaged Ruby core
 class list:
 
@@ -195,8 +244,8 @@ clankerprof slices \
   --profile profile.pb.gz \
   --slices slices.yml \
   --filter "<name:Target#render" \
-  --collapse "gem:statsd-instrument" \
-  --attribute "gem:renderer,to:rendering" \
+  --collapse "library:telemetry-client" \
+  --attribute "library:renderer,to:rendering" \
   --output profile-slices.json
 ```
 
@@ -217,9 +266,11 @@ slices:
     default: true
 ```
 
-Filters support `name:`, `path:`, `gem:`, and descendant prefix `<`. Collapse
-rules skip matching frames when choosing the attribution frame. Attribute rules
-override slice assignment, including descendant rules such as
+Filters support `name:`, `path:`, `library:`, `dependency:`, and descendant
+prefix `<`. `gem:` remains a compatibility selector for older Ruby-oriented
+configs.
+Collapse rules skip matching frames when choosing the attribution frame.
+Attribute rules override slice assignment, including descendant rules such as
 `<name:GraphQL::Execute,to:graphql`.
 Unknown slice keys are preserved as generic JSON-compatible `metadata` in
 slice output. A nested `metadata:` object is flattened into that same payload,
@@ -233,13 +284,14 @@ slices: ./slices.yml
 filters:
   - <name:RequestHandler#render_response
 collapse:
-  - gem:statsd-instrument
-  - gem:opentelemetry-sdk
+  - library:telemetry-client
+  - library:trace-sdk
 attribute:
   - name:TemplateEngine::Native,to:rendering-native
 by_slice: 5
 top: 10
 show_paths: true
+unattributed_libraries: 5
 ```
 
 Run it with:
@@ -256,6 +308,67 @@ TOML config files are also accepted, and
 Attribute targets must name a configured slice by default so typos are caught
 early. If you intentionally want an output-only virtual slice, pass
 `--allow-virtual-attribute-slices`.
+
+### Output Example: Responsibility Slices
+
+Slice output is the compact ownership view. It answers which configured code
+areas still carry cost after filters, collapse rules, and explicit attribution:
+
+```json
+{
+  "tool": "clankerprof_slices",
+  "summary": {
+    "matching_time_ns": 128000000,
+    "total_time_ns": 180000000,
+    "matching_pct": 71.1
+  },
+  "slices": [
+    {
+      "name": "components",
+      "time_ns": 52000000,
+      "pct": 40.6,
+      "metadata": {
+        "owner": "rendering-platform"
+      },
+      "frames": [
+        {
+          "function": "ComponentRenderer#render",
+          "filename": "/app/components/card.rb",
+          "line": 43,
+          "time_ns": 25400000,
+          "pct": 19.8
+        }
+      ],
+      "unattributed_libraries": []
+    },
+    {
+      "name": "default",
+      "time_ns": 17400000,
+      "pct": 13.6,
+      "is_default": true,
+      "frames": [
+        {
+          "function": "TraceSDK::Span#record",
+          "filename": "/vendor/trace-sdk-2.4.1/lib/span.rb",
+          "time_ns": 7400000,
+          "pct": 5.8
+        }
+      ],
+      "unattributed_libraries": [
+        {
+          "name": "trace-sdk",
+          "time_ns": 7400000,
+          "pct": 5.8
+        }
+      ]
+    }
+  ]
+}
+```
+
+The default slice is a triage aid. If code falls through configured slices,
+`unattributed_libraries` makes unclaimed dependency CPU visible without forcing
+the dependency concept into the core analyzer.
 
 ## Compare
 

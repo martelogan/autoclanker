@@ -120,7 +120,7 @@ strategy. `clankerprof` keeps the pieces separate:
 ## Command Map
 
 ```bash
-clankerprof targets --profile profile.pb.gz --target HotelSearch#rank_results
+clankerprof targets --profile profile.pb.gz --target TripPlanner#rank_itineraries
 clankerprof slices --profile profile.pb.gz --config clankerprof-slices.yml
 clankerprof compare --before before-slices.json --after after-slices.json
 ```
@@ -128,7 +128,7 @@ clankerprof compare --before before-slices.json --after after-slices.json
 The same commands are exposed through the umbrella CLI:
 
 ```bash
-autoclanker pprof targets --profile profile.pb.gz --target HotelSearch#rank_results
+autoclanker pprof targets --profile profile.pb.gz --target TripPlanner#rank_itineraries
 autoclanker pprof slices --profile profile.pb.gz --config clankerprof-slices.yml
 autoclanker pprof compare --before before-slices.json --after after-slices.json
 ```
@@ -142,7 +142,7 @@ other parent frame that represents the work you want to explain.
 ```bash
 clankerprof targets \
   --profile profile.pb.gz \
-  --target HotelSearch#rank_results \
+  --target TripPlanner#rank_itineraries \
   --format json \
   --output tmp/profile-targets.json
 ```
@@ -154,11 +154,11 @@ Add a target config when you want stable category labels:
 
 ```json
 {
-  "HotelSearch#rank_results": {
-    "Ranking": "app/ranking/**",
+  "TripPlanner#rank_itineraries": {
+    "Ranking": "app/trip_ranking/**",
     "Availability": "lib/availability/**",
     "Maps": "lib/maps/**",
-    "Cache Client": "gem:cache-client"
+    "Cache Client": "library:cache-client"
   }
 }
 ```
@@ -167,10 +167,58 @@ Every sample whose stack contains the configured parent is attributed by the
 leaf self-time frame. If no category matches, the time remains accounted for as
 `Other`; target totals do not silently disappear.
 
-Prefer path patterns such as `app/ranking/**` or `lib/maps/**` in new target
-configs. Use `gem:cache-client` for versioned gem paths. Existing regex
-patterns still work, and `regex:...` can make that intent explicit when a
-category genuinely needs regex matching.
+Prefer path patterns such as `app/trip_ranking/**` or `lib/maps/**` in new
+target configs. Use `library:cache-client` or `dependency:cache-client` for
+versioned third-party paths. `gem:` is retained as a compatibility selector for
+older Ruby-oriented configs, and `regex:...` can make intentional regex
+matching explicit when a category genuinely needs it.
+
+### Reading Target Output
+
+For a crisp first-pass diagnosis, render target attribution as `simple-csv`.
+It keeps the fields people usually need during performance triage:
+category-level CPU share, a proportional latency estimate, and the hottest
+application callsites or leaf functions that explain that share.
+
+```bash
+cat > request_metrics.json <<'JSON'
+{
+  "p90_ms": {
+    "TripPlanner#rank_itineraries": 142.0
+  }
+}
+JSON
+
+clankerprof targets \
+  --profile profile.pb.gz \
+  --config target_config.json \
+  --runtime ruby \
+  --fold-runtime-internals \
+  --cpu-attributables request_metrics.json \
+  --format simple-csv \
+  --output tmp/target-summary.csv
+```
+
+`simple-csv` writes one CSV row per category. The same rows are wrapped below
+as a table so the signal is visible in a README:
+
+| Parent | Category | CPU % | p90 ms est. | Main app callsites | Low-level work |
+| --- | --- | ---: | ---: | --- | --- |
+| `TripPlanner#rank_itineraries` | Ranking | 38.4 | 54.5 | `TripRanker#score` 21.0%; `CrowdCalendar#blend` 10.3% | `RankingModel#score` 16.4%; `Array#sort_by` 9.2% |
+| `TripPlanner#rank_itineraries` | I/O Overhead | 24.8 | 35.2 | `WeatherClient#forecast_batch` 18.9%; `CacheClient#get_multi` 5.9% | `Net::HTTP#request` 12.1%; `CacheClient#get_multi` 5.9% |
+| `TripPlanner#rank_itineraries` | Serialization Overhead | 17.6 | 25.0 | `ItineraryPresenter#as_json` 9.6%; `TicketBundle#to_json` 8.0% | `JSON.generate` 10.4%; `String#gsub` 4.1% |
+| `TripPlanner#rank_itineraries` | Third-party Libraries | 11.5 | 16.3 | `TelemetryWrapper#call` 7.2%; `Flags#enabled?` 4.3% | `TraceSDK::Span#record` 6.8%; `StatsClient#increment` 3.1% |
+| `TripPlanner#rank_itineraries` | Other | 7.7 | 10.9 | `RouteHelpers#normalize` 4.0%; `Timezone#convert` 3.7% | `Object#new` 3.5%; `Hash#[]` 2.4% |
+
+`p90_ms` is computed as `category CPU share * p90_ms` for the parent boundary.
+That makes it useful for prioritization: the example says ranking owns 38.4%
+of sampled CPU below `TripPlanner#rank_itineraries`, which corresponds to
+about 54.5 ms of a 142 ms p90 request if CPU share tracks the request latency
+shape. It is not a direct per-category latency measurement.
+
+Use full `csv` or `text` output when you need deeper callsite evidence. Full
+CSV includes sample counts, file counts, top caller-to-leaf pairs, and both raw
+nanoseconds and human-readable time.
 
 ## Slice Attribution
 
@@ -192,9 +240,9 @@ Slice config:
 ```yaml
 slices: ./slices.yml
 filters:
-  - <name:HotelSearch#rank_results
+  - <name:TripPlanner#rank_itineraries
 collapse:
-  - gem:telemetry-client
+  - library:telemetry-client
 attribute:
   - name:MapTileEngine::Native,to:maps-native
 by_slice: 5
@@ -208,10 +256,10 @@ Slice definitions:
 slices:
   - name: search-ranking
     paths:
-      - app/ranking/**
+      - app/trip_ranking/**
       - lib/availability/**
     metadata:
-      owner: search-platform
+      owner: journey-platform
       docs:
         - https://example.invalid/search
   - name: default
@@ -221,6 +269,68 @@ slices:
 Unknown slice keys are preserved as generic metadata in the JSON output, so
 callers can attach owners, contacts, docs, escalation hints, or any other
 domain-specific labels without changing `clankerprof`.
+
+### Reading Slice Output
+
+Slice JSON is better when the question is "which code area owns this cost after
+filters and collapse rules?" It keeps summary percentages, top frames, metadata,
+and optional unattributed dependency lists in one stable payload:
+
+```json
+{
+  "tool": "clankerprof_slices",
+  "summary": {
+    "matching_time_ns": 91000000,
+    "total_time_ns": 128000000,
+    "matching_pct": 71.1
+  },
+  "slices": [
+    {
+      "name": "search-ranking",
+      "time_ns": 42000000,
+      "pct": 46.2,
+      "metadata": {
+        "owner": "journey-platform"
+      },
+      "frames": [
+        {
+          "function": "TripRanker#score",
+          "filename": "/app/trip_ranking/ranker.rb",
+          "line": 84,
+          "time_ns": 21000000,
+          "pct": 23.1
+        }
+      ],
+      "unattributed_libraries": []
+    },
+    {
+      "name": "default",
+      "time_ns": 16000000,
+      "pct": 17.6,
+      "is_default": true,
+      "frames": [
+        {
+          "function": "TraceSDK::Span#record",
+          "filename": "/vendor/trace-sdk-2.4.1/lib/span.rb",
+          "time_ns": 6800000,
+          "pct": 7.5
+        }
+      ],
+      "unattributed_libraries": [
+        {
+          "name": "trace-sdk",
+          "time_ns": 6800000,
+          "pct": 7.5
+        }
+      ]
+    }
+  ]
+}
+```
+
+The default slice is intentionally useful: if third-party or vendor code falls
+through your configured slices, `unattributed_libraries` gives you a quick list
+of dependencies still carrying CPU that nobody has explicitly claimed.
 
 ## Runtime Rules
 
@@ -237,9 +347,10 @@ clankerprof targets \
   --semantic-callers-csv tmp/semantic-callers.csv
 ```
 
-The packaged Ruby rule pack can label native/core frames and fold
-runtime-internal cost into meaningful callers. Additional runtimes should be
-added as data files plus tests, not as special cases in the decoder.
+The packaged Ruby rule pack can label native/core frames, recognize Ruby
+library paths, and fold runtime-internal cost into meaningful callers.
+Additional runtimes should be added as data files plus tests, not as special
+cases in the decoder.
 
 ## Compare Gates
 

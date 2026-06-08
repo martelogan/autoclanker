@@ -245,8 +245,9 @@ clankerprof targets \
 clankerprof slices \
   --profile profile.pb.gz \
   --slices slices.yml \
+  --runtime ruby \
   --filter "<name:RequestHandler#render_response" \
-  --collapse "gem:statsd-instrument" \
+  --collapse "library:telemetry-client" \
   --attribute "name:TemplateEngine::Native,to:rendering-native" \
   --output profile-slices.json
 
@@ -257,6 +258,11 @@ Use `targets` when you are explaining one request/rendering boundary, RPC
 method, background job, or other parent frame. Use `slices` when you need
 ownership-style path attribution, collapse rules, config-file replay, generic
 slice metadata, and JSON outputs for comparison gates.
+
+Target reports are meant to be reviewable evidence, not just raw profile dumps:
+for a parent such as `TripPlanner#rank_itineraries`, the compact output can show
+`I/O Overhead` at `24.8%` CPU, a proportional `35.2` ms p90 estimate, and the
+app callsites and leaf functions that explain that bucket.
 
 The standalone guide includes the sample-facts architecture visual, copyable
 target/slice configs, a generic request-rendering example, direct Python library
