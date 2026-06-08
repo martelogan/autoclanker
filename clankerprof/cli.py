@@ -13,6 +13,7 @@ import yaml
 
 from clankerprof import __version__
 from clankerprof.analysis import (
+    DEFAULT_RUNTIME_RULES,
     AttributionRule,
     JsonValue,
     RuntimeRuleSet,
@@ -109,10 +110,19 @@ def _optional_by_slice(payload: dict[str, object]) -> str | None:
     return str(value)
 
 
-def _optional_unattributed_gems(payload: dict[str, object]) -> int | None:
-    value = payload.get("unattributed_gems")
-    if value is None:
+def _optional_unattributed_libraries(payload: dict[str, object]) -> int | None:
+    values = {
+        key: payload[key]
+        for key in ("unattributed_gems", "unattributed_libraries")
+        if key in payload and payload[key] is not None
+    }
+    if not values:
         return None
+    if len(values) > 1:
+        raise ValueError(
+            "unattributed_gems and unattributed_libraries are aliases; use only one."
+        )
+    value = next(iter(values.values()))
     if isinstance(value, bool):
         return 2**63 - 1 if value else None
     return int(cast(Any, value))
@@ -169,7 +179,16 @@ def _filter_body(raw_filter: str) -> str:
 
 def _validate_slice_options(options: SliceAnalysisOptions) -> None:
     names = {item.name for item in options.slices}
-    valid_filter_keys = {"name", "path", "gem", "slice"}
+    valid_filter_keys = {
+        "dependency",
+        "gem",
+        "library",
+        "name",
+        "package",
+        "path",
+        "slice",
+        "vendor",
+    }
     if not options.slices:
         if options.by_slice is not None:
             raise ValueError("--by-slice requires --slices=<file>.")
@@ -198,7 +217,15 @@ def _validate_slice_options(options: SliceAnalysisOptions) -> None:
     seen_attributes: set[tuple[str, str]] = set()
     for attribute in options.attributes:
         key = (attribute.key, attribute.value)
-        if attribute.key not in {"name", "path", "gem"}:
+        if attribute.key not in {
+            "dependency",
+            "gem",
+            "library",
+            "name",
+            "package",
+            "path",
+            "vendor",
+        }:
             raise ValueError(f"Unsupported attribute filter key: {attribute.key}")
         if (
             attribute.target_slice not in names
@@ -216,7 +243,7 @@ def _runtime_rules(args: argparse.Namespace) -> RuntimeRuleSet:
     runtime = str(getattr(args, "runtime", "generic"))
     no_enhanced = bool(getattr(args, "no_enhanced", False))
     if runtime == "generic" and not no_enhanced:
-        return RuntimeRuleSet(name="generic")
+        return DEFAULT_RUNTIME_RULES
     if runtime not in {"generic", "ruby"}:
         raise ValueError(f"Unsupported runtime: {runtime}")
     core_classes = (
@@ -355,11 +382,12 @@ def run_targets(args: argparse.Namespace) -> dict[str, Any]:
     if not config:
         raise ValueError("--config or --target is required.")
     attributables = _load_attributables(args.cpu_attributables)
+    runtime_rules = _runtime_rules(args)
     results = analyze_targets(
         profile,
         config,
         TargetAnalysisOptions(
-            runtime_rules=_runtime_rules(args),
+            runtime_rules=runtime_rules,
             enhanced_runtime_categorization=not bool(args.no_enhanced),
             fold_runtime_internals=bool(args.fold_runtime_internals),
             track_semantic_callers=bool(args.track_semantic_callers),
@@ -373,7 +401,7 @@ def run_targets(args: argparse.Namespace) -> dict[str, Any]:
                 "--semantic-callers-csv requires --track-semantic-callers."
             )
         Path(args.semantic_callers_csv).write_text(
-            render_semantic_callers_csv(results) + "\n",
+            render_semantic_callers_csv(results, runtime_rules=runtime_rules) + "\n",
             encoding="utf-8",
         )
     if args.format == "json":
@@ -441,15 +469,19 @@ def run_slices(args: argparse.Namespace) -> dict[str, Any]:
         if args.no_collapse_native
         else bool(raw_no_collapse_native)
     )
-    raw_unattributed_gems = _optional_unattributed_gems(config)
-    if args.unattributed_gems is not None and raw_unattributed_gems is not None:
+    raw_unattributed_libraries = _optional_unattributed_libraries(config)
+    if (
+        args.unattributed_libraries is not None
+        and raw_unattributed_libraries is not None
+    ):
         raise ValueError(
-            "unattributed_gems specified both on command line and in config file."
+            "unattributed_libraries specified both on command line and in config file "
+            "(--unattributed-gems is a compatibility alias)."
         )
-    unattributed_gems = (
-        args.unattributed_gems
-        if args.unattributed_gems is not None
-        else raw_unattributed_gems
+    unattributed_libraries = (
+        args.unattributed_libraries
+        if args.unattributed_libraries is not None
+        else raw_unattributed_libraries
     )
     raw_filters = (
         *_string_array(config, "filters"),
@@ -472,6 +504,7 @@ def run_slices(args: argparse.Namespace) -> dict[str, Any]:
         if default_slices.exists():
             raw_slices = str(default_slices)
     options = SliceAnalysisOptions(
+        runtime_rules=_runtime_rules(args),
         slices=_load_slices(raw_slices),
         filters=raw_filters,
         collapse=raw_collapse,
@@ -480,7 +513,8 @@ def run_slices(args: argparse.Namespace) -> dict[str, Any]:
         by_slice=by_slice,
         show_paths=show_paths,
         no_collapse_native=no_collapse_native,
-        unattributed_gems=unattributed_gems,
+        unattributed_gems=unattributed_libraries,
+        unattributed_libraries=unattributed_libraries,
         allow_virtual_attribute_slices=bool(args.allow_virtual_attribute_slices),
     )
     _validate_slice_options(options)
@@ -601,7 +635,22 @@ def register_commands(subparsers: Any) -> None:
     slices.add_argument("--by-slice", nargs="?", const="0.1%")
     slices.add_argument("--show-paths", action="store_true")
     slices.add_argument("--no-collapse-native", action="store_true")
-    slices.add_argument("--unattributed-gems", nargs="?", const=2**63 - 1, type=int)
+    slices.add_argument(
+        "--unattributed-gems",
+        "--unattributed-libraries",
+        dest="unattributed_libraries",
+        nargs="?",
+        const=2**63 - 1,
+        type=int,
+    )
+    slices.add_argument("--runtime", choices=("generic", "ruby"), default="generic")
+    slices.add_argument("--ruby-core-classes")
+    slices.add_argument(
+        "--verbose-runtime-internals",
+        "--verbose-ruby-internals",
+        action="store_true",
+        dest="verbose_runtime_internals",
+    )
     slices.add_argument("--allow-virtual-attribute-slices", action="store_true")
     slices.add_argument("--output")
     slices.set_defaults(handler=run_slices)

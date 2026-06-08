@@ -16,6 +16,9 @@ from clankerprof.analysis import (
     analyze_slices,
     analyze_targets,
     categorize_ruby_frame,
+    extract_gem_name,
+    extract_library_name,
+    is_runtime_stdlib_path,
     load_default_ruby_core_classes,
     match_category_pattern,
     match_path_pattern,
@@ -32,6 +35,7 @@ from clankerprof.render import (
     render_target_json,
     render_target_text,
 )
+from clankerprof.rules import load_runtime_rules
 from tests.compliance import covers
 from tests.fixtures.pprof_builder import PprofFixtureBuilder
 
@@ -229,7 +233,10 @@ def _request_rendering_profile_bytes() -> bytes:
         builder.function("ComponentRenderer#render", "/app/components/product_card.rb")
     )
     cache = builder.location(
-        builder.function("CacheClient#get_multi", "/gems/cache-client/lib/client.rb")
+        builder.function(
+            "CacheClient#get_multi",
+            "/vendor/cache-client-1.2.3/lib/client.rb",
+        )
     )
     template_engine = builder.location(
         builder.function("TemplateEngine::Native#render", "<cfunc>")
@@ -261,7 +268,7 @@ def _descendant_attribute_profile_bytes() -> bytes:
         builder.function("TelemetryWrapper#call", "/app/lib/telemetry.rb")
     )
     cache = builder.location(
-        builder.function("CacheClient#get", "/gems/cache-client/lib/client.rb")
+        builder.function("CacheClient#get", "/vendor/cache-client-1.2.3/lib/client.rb")
     )
     builder.sample((cache, wrapper, component, request), 70_000_000)
     return builder.encode()
@@ -336,6 +343,24 @@ def _legacy_no_enhanced_profile_bytes() -> bytes:
     )
     native_leaf = builder.location(builder.function("NativeExtension#work", "<cfunc>"))
     builder.sample((native_leaf, app_caller, target), 5_000_000)
+    return builder.encode()
+
+
+def _rule_driven_native_path_profile_bytes() -> bytes:
+    builder = PprofFixtureBuilder.create()
+    request = builder.location(
+        builder.function("RequestHandler#render_response", "/app/http/request.rb")
+    )
+    component = builder.location(
+        builder.function("ComponentRenderer#render", "/app/components/card.rb")
+    )
+    native_runtime = builder.location(
+        builder.function(
+            "RuntimeCore#dispatch",
+            "/opt/runtime/ruby/4.0.0/core/runtime_core.rb",
+        )
+    )
+    builder.sample((native_runtime, component, request), 15_000_000)
     return builder.encode()
 
 
@@ -429,7 +454,7 @@ def test_clankerprof_supports_generic_request_rendering_attribution() -> None:
             "RequestHandler#render_response": {
                 "View Model": r"[/\\]app[/\\]view_models[/\\]",
                 "Components": r"[/\\]app[/\\]components[/\\]",
-                "Cache Client": r"[/\\]gems[/\\]cache-client[/\\]",
+                "Cache Client": r"[/\\]vendor[/\\]cache-client",
             }
         },
     )["RequestHandler#render_response"]
@@ -450,7 +475,7 @@ def test_clankerprof_target_categories_support_simplified_path_patterns() -> Non
             "RequestHandler#render_response": {
                 "View Model": "app/view_models/**",
                 "Components": "path:app/components/**",
-                "Cache Client": "gem:cache-client",
+                "Cache Client": "library:cache-client",
             }
         },
     )["RequestHandler#render_response"]
@@ -462,7 +487,9 @@ def test_clankerprof_target_categories_support_simplified_path_patterns() -> Non
 
 
 @covers("M9-002")
-def test_clankerprof_path_pattern_matching_keeps_legacy_regex_compatibility() -> None:
+def test_clankerprof_path_pattern_matching_keeps_legacy_regex_and_gem_compatibility() -> (
+    None
+):
     path = "/workspace/app/view_models/card.rb"
 
     assert match_category_pattern(r"[/\\]app[/\\]view_models[/\\]", path)
@@ -474,6 +501,65 @@ def test_clankerprof_path_pattern_matching_keeps_legacy_regex_compatibility() ->
     assert match_category_pattern(
         "gem:cache-client",
         "/bundle/ruby/4.0.0/gems/cache-client-1.2.3/lib/client.rb",
+    )
+    assert match_category_pattern(
+        "library:cache-client",
+        "/bundle/ruby/4.0.0/gems/cache-client-1.2.3/lib/client.rb",
+        ruby_rules(_ruby_core_classes()),
+    )
+
+
+@covers("M9-003", "M9-004")
+def test_clankerprof_dependency_selectors_are_runtime_rule_driven() -> None:
+    generic_rules = load_runtime_rules("generic")
+    ruby = ruby_rules(_ruby_core_classes())
+
+    assert (
+        extract_library_name(
+            "/srv/app/vendor/cache-client-1.2.3/lib/client.rb",
+            generic_rules,
+        )
+        == "cache-client"
+    )
+    assert (
+        extract_library_name(
+            "/workspace/node_modules/@maps/tile-cache/dist/index.js",
+            generic_rules,
+        )
+        == "@maps/tile-cache"
+    )
+    assert (
+        extract_library_name(
+            "/bundle/ruby/4.0.0/gems/cache-client-1.2.3/lib/client.rb",
+            generic_rules,
+        )
+        is None
+    )
+    assert (
+        extract_library_name(
+            "/bundle/ruby/4.0.0/gems/cache-client-1.2.3/lib/client.rb",
+            ruby,
+        )
+        == "cache-client"
+    )
+    assert (
+        extract_gem_name("/bundle/ruby/4.0.0/gems/cache-client-1.2.3/lib/client.rb")
+        == "cache-client"
+    )
+    assert match_path_pattern(
+        "dependency:cache-client",
+        "/srv/app/vendor/cache-client-1.2.3/lib/client.rb",
+        generic_rules,
+    )
+    assert match_path_pattern(
+        "library:cache-client",
+        "/bundle/ruby/4.0.0/gems/cache-client-1.2.3/lib/client.rb",
+        ruby,
+    )
+    assert match_path_pattern(
+        "gem:cache-client",
+        "/bundle/ruby/4.0.0/gems/cache-client-1.2.3/lib/client.rb",
+        generic_rules,
     )
 
 
@@ -883,13 +969,17 @@ def test_clankerprof_exports_semantic_caller_csv(tmp_path: Path) -> None:
             track_semantic_callers=True,
         ),
     )
-    rendered = render_semantic_callers_csv(results)
+    rendered = render_semantic_callers_csv(
+        results,
+        runtime_rules=ruby_rules(_ruby_core_classes()),
+    )
     assert (
         "Parent Function,Category,Leaf Function,Leaf Samples,Top Caller,"
         "Caller Samples,Caller File"
     ) in rendered
     assert "Kernel#clone" in rendered
     assert "StatsD::Instrument::Aggregator#increment" in rendered
+    assert "deps/statsd-instrument/lib/statsd/instrument/aggregator.rb" in rendered
 
     profile_path = tmp_path / "profile.pb"
     config_path = tmp_path / "target-config.json"
@@ -1080,7 +1170,7 @@ def test_clankerprof_slice_analysis_supports_filters_collapse_attributes_and_com
                 SliceDefinition("app", ("app/**",)),
                 SliceDefinition("default", (), is_default=True),
             ),
-            collapse=("gem:*",),
+            collapse=("library:*",),
             attributes=(
                 AttributionRule(
                     "name",
@@ -1108,7 +1198,7 @@ def test_clankerprof_slice_analysis_supports_filters_collapse_attributes_and_com
                 SliceDefinition("app", ("app/**",)),
                 SliceDefinition("default", (), is_default=True),
             ),
-            collapse=("gem:*",),
+            collapse=("library:*",),
             filters=("<name:Target#render",),
         ),
     )
@@ -1167,9 +1257,10 @@ def test_clankerprof_slice_paths_support_legacy_regex_and_simplified_patterns() 
         "app/components/**",
         "path:app/components/**",
         r"regex:[/\\]app[/\\]components[/\\]",
+        "library:*",
         "gem:*",
     ):
-        if raw_pattern == "gem:*":
+        if raw_pattern in {"gem:*", "library:*"}:
             profile = decode_profile_bytes(_slice_semantics_profile_bytes())
             filters = ("name:Instrumentation#wrap",)
             expected_time_ns = 20_000_000
@@ -1180,6 +1271,11 @@ def test_clankerprof_slice_paths_support_legacy_regex_and_simplified_patterns() 
         result = analyze_slices(
             profile,
             SliceAnalysisOptions(
+                runtime_rules=(
+                    ruby_rules(_ruby_core_classes())
+                    if raw_pattern == "library:*"
+                    else load_runtime_rules("generic")
+                ),
                 filters=filters,
                 slices=(SliceDefinition("components", (raw_pattern,)),),
             ),
@@ -1188,6 +1284,45 @@ def test_clankerprof_slice_paths_support_legacy_regex_and_simplified_patterns() 
         slices = cast(list[dict[str, object]], payload["slices"])
         assert slices[0]["name"] == "components"
         assert slices[0]["time_ns"] == expected_time_ns
+
+
+@covers("M9-003", "M9-004")
+def test_clankerprof_slice_native_collapse_uses_runtime_rules() -> None:
+    profile = decode_profile_bytes(_rule_driven_native_path_profile_bytes())
+
+    generic = analyze_slices(
+        profile,
+        SliceAnalysisOptions(
+            filters=("<name:RequestHandler#render_response",),
+            slices=(
+                SliceDefinition("runtime", ("path:opt/runtime/ruby/4.0.0/**",)),
+                SliceDefinition("components", ("app/components/**",)),
+            ),
+        ),
+    )
+    generic_payload = render_slice_json(generic)
+    generic_slices = cast(list[dict[str, object]], generic_payload["slices"])
+    assert generic_slices[0]["name"] == "runtime"
+
+    ruby = analyze_slices(
+        profile,
+        SliceAnalysisOptions(
+            runtime_rules=ruby_rules(_ruby_core_classes()),
+            filters=("<name:RequestHandler#render_response",),
+            slices=(
+                SliceDefinition("runtime", ("path:opt/runtime/ruby/4.0.0/**",)),
+                SliceDefinition("components", ("app/components/**",)),
+            ),
+        ),
+    )
+    ruby_payload = render_slice_json(ruby)
+    ruby_slices = cast(list[dict[str, object]], ruby_payload["slices"])
+    assert ruby_slices[0]["name"] == "components"
+    assert ruby_slices[0]["time_ns"] == 15_000_000
+    assert is_runtime_stdlib_path(
+        "/usr/local/lib/ruby/3.2.0/forwardable.rb",
+        ruby_rules(_ruby_core_classes()),
+    )
 
 
 @covers("M9-004")
@@ -1303,22 +1438,26 @@ def test_clankerprof_slice_collapse_does_not_use_descendant_attribute_rescue() -
 
 
 @covers("M9-004")
-def test_clankerprof_slice_outputs_gc_uncollapsible_and_unattributed_gems() -> None:
+def test_clankerprof_slice_outputs_gc_uncollapsible_and_unattributed_libraries() -> (
+    None
+):
     profile = decode_profile_bytes(_slice_semantics_profile_bytes())
     result = analyze_slices(
         profile,
         SliceAnalysisOptions(
-            collapse=("gem:*",),
+            runtime_rules=ruby_rules(_ruby_core_classes()),
+            collapse=("library:*",),
             slices=(SliceDefinition("default", (), is_default=True),),
-            unattributed_gems=1,
+            unattributed_libraries=1,
         ),
     )
     payload = render_slice_json(
         result,
         SliceAnalysisOptions(
-            collapse=("gem:*",),
+            runtime_rules=ruby_rules(_ruby_core_classes()),
+            collapse=("library:*",),
             slices=(SliceDefinition("default", (), is_default=True),),
-            unattributed_gems=1,
+            unattributed_libraries=1,
         ),
     )
 
@@ -1327,6 +1466,8 @@ def test_clankerprof_slice_outputs_gc_uncollapsible_and_unattributed_gems() -> N
     assert uncollapsible["name"] == "(uncollapsible)"
     assert uncollapsible["time_ns"] == 20_000_000
     default_slice = cast(list[dict[str, object]], payload["slices"])[0]
+    libraries = cast(list[dict[str, object]], default_slice["unattributed_libraries"])
+    assert libraries[0]["name"] == "statsd-instrument"
     gems = cast(list[dict[str, object]], default_slice["unattributed_gems"])
     assert gems[0]["name"] == "statsd-instrument"
 
@@ -1383,7 +1524,7 @@ slices: {slices_path}
 filters:
   - <name:RequestHandler#render_response
 collapse:
-  - gem:*
+  - library:*
 attribute:
   - name:TemplateEngine::Native,to:rendering-native
 by_slice: 2
@@ -1437,7 +1578,7 @@ slices:
     )
 
     for raw_attribute, expected in [
-        ("!gem:cache-client,to:default", "do not support '!'"),
+        ("!library:cache-client,to:default", "do not support '!'"),
         ("slice:default,to:default", "do not support slice: filters"),
     ]:
         assert (
@@ -1465,9 +1606,9 @@ slices:
                 "--slices",
                 str(slices_path),
                 "--attribute",
-                "gem:cache-client,to:default",
+                "library:cache-client,to:default",
                 "--attribute",
-                "<gem:cache-client,to:default",
+                "<library:cache-client,to:default",
             ]
         )
         == 2
@@ -1483,7 +1624,7 @@ slices:
                 "--slices",
                 str(slices_path),
                 "--attribute",
-                "gem:cache-client,to:virtual-cache",
+                "library:cache-client,to:virtual-cache",
                 "--filter",
                 "<name:RequestHandler#render_response",
             ]
@@ -1501,7 +1642,7 @@ slices:
                 "--slices",
                 str(slices_path),
                 "--attribute",
-                "gem:cache-client,to:virtual-cache",
+                "library:cache-client,to:virtual-cache",
                 "--allow-virtual-attribute-slices",
                 "--filter",
                 "<name:RequestHandler#render_response",
@@ -1565,7 +1706,7 @@ def test_clankerprof_slice_cli_rejects_duplicate_scalar_config_options(
 profile = "{profile_path}"
 show_paths = true
 no_collapse_native = false
-unattributed_gems = 1
+unattributed_libraries = 1
 '''.strip(),
         encoding="utf-8",
     )
@@ -1573,10 +1714,10 @@ unattributed_gems = 1
     for flag, expected in [
         ("--show-paths", "show_paths specified both"),
         ("--no-collapse-native", "no_collapse_native specified both"),
-        ("--unattributed-gems", "unattributed_gems specified both"),
+        ("--unattributed-libraries", "unattributed_libraries specified both"),
     ]:
         args = ["slices", "--config", str(config_path), flag]
-        if flag == "--unattributed-gems":
+        if flag == "--unattributed-libraries":
             args.append("2")
         assert clankerprof_main(args) == 2
         assert expected in capsys.readouterr().err
@@ -1607,7 +1748,7 @@ slices:
 profile = "{profile_path}"
 filter = ["<name:RequestHandler#render_response"]
 top = 1
-unattributed_gems = 1
+unattributed_libraries = 1
 '''.strip(),
         encoding="utf-8",
     )
@@ -1628,9 +1769,9 @@ unattributed_gems = 1
     slices = cast(list[dict[str, object]], payload["slices"])
     assert [item["name"] for item in slices] == ["components", "default"]
     default_slice = next(item for item in slices if item["name"] == "default")
-    gems = cast(list[dict[str, object]], default_slice["unattributed_gems"])
-    assert len(gems) == 1
-    assert gems[0]["name"] == "cache-client"
+    libraries = cast(list[dict[str, object]], default_slice["unattributed_libraries"])
+    assert len(libraries) == 1
+    assert libraries[0]["name"] == "cache-client"
 
 
 @covers("M9-005")

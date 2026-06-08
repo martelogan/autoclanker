@@ -3,12 +3,12 @@
     "View Model": "app/view_models/**",
     "Components": "app/components/**",
     "Template Engine": "lib/template_engine/**",
-    "Cache Client": "gem:cache-client",
+    "Cache Client": "library:cache-client",
     "Data Loading": "app/data/**"
   },
   "BatchJob#perform": {
     "Pipeline": "app/pipeline/**",
     "Parser": "app/parser/**",
-    "Storage Client": "gem:storage-client"
+    "Storage Client": "library:storage-client"
   }
 }

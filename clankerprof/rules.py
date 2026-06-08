@@ -28,6 +28,10 @@ def _empty_string_map() -> dict[str, str]:
     return {}
 
 
+def _empty_string_tuple_map() -> dict[str, tuple[str, ...]]:
+    return {}
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeRuleSet:
     name: str
@@ -42,6 +46,16 @@ class RuntimeRuleSet:
     verbose_only_foldable_categories: frozenset[str] = frozenset()
     special_namespace_prefixes: frozenset[str] = frozenset()
     stdlib_path_markers: tuple[str, ...] = ()
+    native_path_markers: tuple[str, ...] = ()
+    native_path_patterns: tuple[str, ...] = ()
+    native_path_exclude_markers: tuple[str, ...] = ()
+    native_path_exclude_patterns: tuple[str, ...] = ()
+    library_path_patterns: tuple[str, ...] = ()
+    library_selector_path_patterns: Mapping[str, tuple[str, ...]] = field(
+        default_factory=_empty_string_tuple_map
+    )
+    library_name_suffix_patterns: tuple[str, ...] = ()
+    legacy_caller_fallback_name_prefixes: tuple[str, ...] = ()
     core_native_categories: Mapping[str, str] = field(default_factory=_empty_string_map)
     core_native_default_category: str = "Runtime Core (Native)"
     stdlib_category: str = "Runtime Stdlib"
@@ -67,6 +81,28 @@ def _string_map(payload: Mapping[str, object], key: str) -> dict[str, str]:
         str(raw_key): str(raw_value)
         for raw_key, raw_value in cast(dict[object, object], value).items()
     }
+
+
+def _string_tuple_map(
+    payload: Mapping[str, object],
+    key: str,
+) -> dict[str, tuple[str, ...]]:
+    value = payload.get(key, {})
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"Runtime rule field {key} must be an object.")
+    result: dict[str, tuple[str, ...]] = {}
+    for raw_key, raw_patterns in cast(dict[object, object], value).items():
+        if raw_patterns is None:
+            result[str(raw_key)] = ()
+            continue
+        if not isinstance(raw_patterns, list):
+            raise ValueError(f"Runtime rule field {key}.{raw_key} must be an array.")
+        result[str(raw_key)] = tuple(
+            str(item) for item in cast(list[object], raw_patterns)
+        )
+    return result
 
 
 def _load_match_rules(
@@ -132,6 +168,20 @@ def load_runtime_rules(
             _string_tuple(raw, "special_namespace_prefixes")
         ),
         stdlib_path_markers=_string_tuple(raw, "stdlib_path_markers"),
+        native_path_markers=_string_tuple(raw, "native_path_markers"),
+        native_path_patterns=_string_tuple(raw, "native_path_patterns"),
+        native_path_exclude_markers=_string_tuple(raw, "native_path_exclude_markers"),
+        native_path_exclude_patterns=_string_tuple(raw, "native_path_exclude_patterns"),
+        library_path_patterns=_string_tuple(raw, "library_path_patterns"),
+        library_selector_path_patterns=_string_tuple_map(
+            raw,
+            "library_selector_path_patterns",
+        ),
+        library_name_suffix_patterns=_string_tuple(raw, "library_name_suffix_patterns"),
+        legacy_caller_fallback_name_prefixes=_string_tuple(
+            raw,
+            "legacy_caller_fallback_name_prefixes",
+        ),
         core_native_categories=_string_map(raw, "core_native_categories"),
         core_native_default_category=str(
             raw.get("core_native_default_category", "Runtime Core (Native)")

@@ -20,6 +20,24 @@ stdlib_path_markers:
   - /usr/local/ruby/
   - /usr/share/ruby/
   - /opt/ruby/
+native_path_markers:
+  - <cfunc>
+  - <internal:
+native_path_patterns:
+  - regex:/ruby/[0-9][^/]*
+native_path_exclude_markers:
+  - /gems/
+library_path_patterns:
+  - regex:/gems/([^/]+)/
+library_selector_path_patterns:
+  gem:
+    - regex:/gems/([^/]+)/
+library_name_suffix_patterns:
+  - -[0-9].*
+  - -[0-9a-fA-F]{7,}.*
+legacy_caller_fallback_name_prefixes:
+  - StatsD.
+  - "StatsD::"
 core_native_categories:
   Digest: Digest (Native)
   Marshal: Serialization (Native)

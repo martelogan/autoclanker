@@ -40,9 +40,9 @@ behavior must not define or override target-attribution semantics.
 | Capability | Status | Test coverage |
 | --- | --- | --- |
 | Ruby support is opt-in instead of the core engine default | covered | `test_clankerprof_ruby_rules_support_simplification_folding_and_attributables` |
-| Runtime labels, simplification maps, foldability, namespace exclusions, and stdlib path markers are loaded from packaged config | covered | `test_clankerprof_ruby_rule_pack_preserves_legacy_categorization_cases` |
+| Runtime labels, simplification maps, foldability, namespace exclusions, stdlib paths, native paths, and dependency-library extraction are loaded from packaged config | covered | `test_clankerprof_ruby_rule_pack_preserves_legacy_categorization_cases`, `test_clankerprof_dependency_selectors_are_runtime_rule_driven`, `test_clankerprof_slice_native_collapse_uses_runtime_rules` |
 | Application-specific labels live in the Ruby rule pack rather than hardcoded core logic | covered | `clankerprof/runtime_rules/ruby.yml` plus categorization tests |
-| Fully arbitrary third-party runtime rule packs | not claimed | The loader shape supports more packs, but only Ruby is packaged and tested. |
+| Fully arbitrary third-party runtime rule packs | not claimed | The loader shape supports more packs, but only generic and Ruby rule packs are packaged and tested. |
 
 ## Ownership slice attribution
 
@@ -55,7 +55,7 @@ semantics.
 | --- | --- | --- |
 | Slice path attribution and default catch-all slice | covered | `test_clankerprof_slice_analysis_supports_filters_collapse_attributes_and_compare` |
 | Generic declarative slice metadata in JSON output | covered | `test_clankerprof_slice_cli_supports_config_and_output_limits` |
-| Collapse rules, including `gem:*` | covered | `test_clankerprof_slice_analysis_supports_filters_collapse_attributes_and_compare` |
+| Collapse rules, including `library:*` and legacy `gem:*` | covered | `test_clankerprof_slice_analysis_supports_filters_collapse_attributes_and_compare`, `test_clankerprof_slice_paths_support_legacy_regex_and_simplified_patterns` |
 | Attribution overrides, including invalid/duplicate filter rejection | covered | `test_clankerprof_slice_cli_validates_attribute_contract` |
 | Virtual output slices from `--attribute` | covered with explicit opt-in extension | `test_clankerprof_slice_cli_validates_attribute_contract` |
 | Descendant filters such as `<name:RequestHandler#render_response`, including OR semantics across descendant filters | covered | `test_clankerprof_slice_descendant_filters_use_or_semantics` |
@@ -69,10 +69,10 @@ semantics.
 | YAML config for common slice options | covered | `test_clankerprof_slice_cli_supports_config_and_output_limits` |
 | TOML config with profile path, `filter`, and scalar options | covered | `test_clankerprof_slice_cli_supports_toml_config_default_slices_and_optional_by_slice` |
 | Default `./slices.yml` discovery when slice-aware options are used | covered | `test_clankerprof_slice_cli_supports_toml_config_default_slices_and_optional_by_slice` |
-| GC pseudo-output for `(marking)` and `(sweeping)` | covered | `test_clankerprof_slice_outputs_gc_uncollapsible_and_unattributed_gems` |
+| GC pseudo-output for `(marking)` and `(sweeping)` | covered | `test_clankerprof_slice_outputs_gc_uncollapsible_and_unattributed_libraries` |
 | Uncollapsible pseudo-output when all eligible frames are collapsed, using root eligible frame reporting | covered | `test_clankerprof_uncollapsible_reports_root_eligible_frame` |
-| Unattributed gem summaries for default slice views | covered | `test_clankerprof_slice_outputs_gc_uncollapsible_and_unattributed_gems` |
-| Slice frame output includes decoded pprof line numbers when present | covered | `test_clankerprof_slice_outputs_gc_uncollapsible_and_unattributed_gems` |
+| Unattributed library summaries for default slice views, with legacy gem output retained | covered | `test_clankerprof_slice_outputs_gc_uncollapsible_and_unattributed_libraries` |
+| Slice frame output includes decoded pprof line numbers when present | covered | `test_clankerprof_slice_outputs_gc_uncollapsible_and_unattributed_libraries` |
 | Terminal text formatting, coloring, width wrapping, and timing output from older slice tools | not claimed | `clankerprof` prioritizes machine-readable JSON plus CSV/text target reports. |
 | Domain-specific responsibility fields as first-class concepts | not claimed | Slice metadata is preserved generically instead of hardcoding any one responsibility system. |
 

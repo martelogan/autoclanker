@@ -8,9 +8,12 @@ from collections.abc import Mapping
 from dataclasses import asdict
 
 from clankerprof.analysis import (
+    DEFAULT_RUNTIME_RULES,
+    RuntimeRuleSet,
     SliceAnalysisOptions,
     SliceAnalysisResult,
     SliceStats,
+    extract_library_path,
     format_time,
 )
 from clankerprof.model import CategoryStats
@@ -81,6 +84,8 @@ def render_target_json(
 
 def render_semantic_callers_csv(
     results: Mapping[str, Mapping[str, CategoryStats]],
+    *,
+    runtime_rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES,
 ) -> str:
     output = io.StringIO()
     writer = csv.writer(output)
@@ -120,16 +125,19 @@ def render_semantic_callers_csv(
                         metrics.count,
                         top_caller,
                         caller_samples,
-                        _shorten_semantic_caller_file(caller_file),
+                        _shorten_semantic_caller_file(caller_file, runtime_rules),
                     ]
                 )
     return output.getvalue().rstrip("\r\n")
 
 
-def _shorten_semantic_caller_file(file_path: str) -> str:
-    if "/gems/" in file_path:
-        parts = file_path.split("/gems/")
-        return f"gems/{parts[-1]}" if len(parts) > 1 else file_path
+def _shorten_semantic_caller_file(
+    file_path: str,
+    runtime_rules: RuntimeRuleSet,
+) -> str:
+    library_path = extract_library_path(file_path, runtime_rules)
+    if library_path is not None:
+        return f"deps/{library_path.relative_path}"
     return file_path
 
 
@@ -343,6 +351,16 @@ def render_slice_json(
 ) -> dict[str, object]:
     resolved_options = options or SliceAnalysisOptions()
     total = result.matching_time_ns or result.total_time_ns
+    library_limit = (
+        resolved_options.unattributed_libraries
+        if resolved_options.unattributed_libraries is not None
+        else resolved_options.unattributed_gems
+    )
+    legacy_library_limit = (
+        resolved_options.unattributed_gems
+        if resolved_options.unattributed_gems is not None
+        else resolved_options.unattributed_libraries
+    )
     selected_slices = list(result.slices)
     selected_slices = [
         item for item in selected_slices if item.name not in {"(gc)", "(uncollapsible)"}
@@ -395,7 +413,19 @@ def render_slice_json(
                     slice_item.unattributed_gems.items(),
                     key=lambda pair: pair[1],
                     reverse=True,
-                )[: resolved_options.unattributed_gems]
+                )[:legacy_library_limit]
+            ],
+            "unattributed_libraries": [
+                {
+                    "name": name,
+                    "time_ns": time_ns,
+                    "pct": (time_ns / total * 100) if total else 0,
+                }
+                for name, time_ns in sorted(
+                    slice_item.unattributed_libraries.items(),
+                    key=lambda pair: pair[1],
+                    reverse=True,
+                )[:library_limit]
             ],
         }
         if metadata:
@@ -438,6 +468,7 @@ def render_slice_json(
                 )[: resolved_options.top]
             ],
             "unattributed_gems": [],
+            "unattributed_libraries": [],
         }
     return payload
 

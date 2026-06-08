@@ -19,7 +19,11 @@ OutputMode = Literal["text", "csv", "json", "simple-csv"]
 JsonValue: TypeAlias = (
     str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
 )
-PatternMode: TypeAlias = Literal["auto", "gem", "path", "regex"]
+PatternMode: TypeAlias = Literal["auto", "library", "path", "regex"]
+LibrarySelector: TypeAlias = Literal[
+    "dependency", "gem", "library", "package", "vendor"
+]
+DEFAULT_RUNTIME_RULES = load_runtime_rules("generic")
 
 
 def _json_metadata() -> dict[str, JsonValue]:
@@ -28,12 +32,18 @@ def _json_metadata() -> dict[str, JsonValue]:
 
 @dataclass(frozen=True, slots=True)
 class TargetAnalysisOptions:
-    runtime_rules: RuntimeRuleSet = RuntimeRuleSet(name="generic")
+    runtime_rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES
     enhanced_runtime_categorization: bool = True
     fold_runtime_internals: bool = False
     track_semantic_callers: bool = False
     attributables: Mapping[str, Mapping[str, float]] | None = None
     legacy_no_enhanced_caller_fallback: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class LibraryPath:
+    name: str
+    relative_path: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +54,16 @@ class SliceDefinition:
     metadata: Mapping[str, JsonValue] = field(default_factory=_json_metadata)
 
     def matches_path(self, path: str) -> bool:
-        return any(match_path_pattern(pattern, path) for pattern in self.path_patterns)
+        return any(
+            match_path_pattern(pattern, path, DEFAULT_RUNTIME_RULES)
+            for pattern in self.path_patterns
+        )
+
+    def matches_frame(self, frame: Frame, rules: RuntimeRuleSet) -> bool:
+        return any(
+            match_path_pattern(pattern, frame.filename, rules)
+            for pattern in self.path_patterns
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,7 +85,9 @@ class SliceAnalysisOptions:
     show_paths: bool = False
     no_collapse_native: bool = False
     unattributed_gems: int | None = None
+    unattributed_libraries: int | None = None
     allow_virtual_attribute_slices: bool = False
+    runtime_rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES
 
 
 @dataclass(slots=True)
@@ -93,6 +114,7 @@ class SliceStats:
         default_factory=_slice_frame_stats_by_string
     )
     unattributed_gems: dict[str, TimeNs] = field(default_factory=_time_by_string)
+    unattributed_libraries: dict[str, TimeNs] = field(default_factory=_time_by_string)
     is_default: bool = False
 
 
@@ -163,15 +185,15 @@ def format_time(nanoseconds: TimeNs) -> str:
     return f"{milliseconds:.2f} ms"
 
 
-def _pattern_mode(pattern: str) -> tuple[PatternMode, str]:
+def _pattern_mode(pattern: str) -> tuple[PatternMode, str, LibrarySelector | None]:
     mode, separator, rest = pattern.partition(":")
-    if separator and mode == "gem":
-        return "gem", rest
+    if separator and mode in {"dependency", "gem", "library", "package", "vendor"}:
+        return "library", rest, cast(LibrarySelector, mode)
     if separator and mode in {"path", "glob"}:
-        return "path", rest
+        return "path", rest, None
     if separator and mode == "regex":
-        return "regex", rest
-    return "auto", pattern
+        return "regex", rest, None
+    return "auto", pattern, None
 
 
 def _normalize_profile_path(path: str) -> str:
@@ -186,14 +208,18 @@ def _looks_like_path_pattern(pattern: str) -> bool:
     return "/" in pattern or "\\" in pattern or pattern.startswith(("./", "../"))
 
 
-def match_path_pattern(pattern: str, path: str) -> bool:
-    mode, resolved_pattern = _pattern_mode(pattern)
-    if mode == "gem":
-        gem_name = extract_gem_name(path)
+def match_path_pattern(
+    pattern: str,
+    path: str,
+    rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES,
+) -> bool:
+    mode, resolved_pattern, selector = _pattern_mode(pattern)
+    if mode == "library":
+        library_name = extract_library_name(path, rules, selector=selector)
         return (
-            gem_name is not None
+            library_name is not None
             if resolved_pattern == "*"
-            else gem_name == resolved_pattern
+            else library_name == resolved_pattern
         )
     if mode == "regex":
         return match_regex(resolved_pattern, path)
@@ -227,18 +253,22 @@ def match_regex(pattern: str, path: str) -> bool:
         raise ValueError(f"Invalid regex pattern {pattern!r}: {exc}") from exc
 
 
-def match_category_pattern(pattern: str, path: str) -> bool:
-    mode, resolved_pattern = _pattern_mode(pattern)
+def match_category_pattern(
+    pattern: str,
+    path: str,
+    rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES,
+) -> bool:
+    mode, resolved_pattern, selector = _pattern_mode(pattern)
     if mode == "path":
-        return match_path_pattern(resolved_pattern, path)
+        return match_path_pattern(resolved_pattern, path, rules)
     if mode == "regex":
         return match_regex(resolved_pattern, path)
-    if mode == "gem":
-        gem_name = extract_gem_name(path)
+    if mode == "library":
+        library_name = extract_library_name(path, rules, selector=selector)
         return (
-            gem_name is not None
+            library_name is not None
             if resolved_pattern == "*"
-            else gem_name == resolved_pattern
+            else library_name == resolved_pattern
         )
 
     try:
@@ -246,10 +276,10 @@ def match_category_pattern(pattern: str, path: str) -> bool:
             return True
     except ValueError:
         if _looks_like_path_pattern(resolved_pattern):
-            return match_path_pattern(resolved_pattern, path)
+            return match_path_pattern(resolved_pattern, path, rules)
         raise
     if _looks_like_path_pattern(resolved_pattern):
-        return match_path_pattern(resolved_pattern, path)
+        return match_path_pattern(resolved_pattern, path, rules)
     return False
 
 
@@ -271,7 +301,7 @@ def simplify_category(
 ) -> str | None:
     if verbose or category is None:
         return category
-    resolved_rules = rules or ruby_rules(())
+    resolved_rules = rules or DEFAULT_RUNTIME_RULES
     return resolved_rules.simplification_map.get(category, category)
 
 
@@ -300,7 +330,7 @@ def _direct_core_class(function_name: str, rules: RuntimeRuleSet) -> str | None:
     return None
 
 
-def categorize_ruby_frame(frame: Frame, rules: RuntimeRuleSet) -> str | None:
+def categorize_runtime_frame(frame: Frame, rules: RuntimeRuleSet) -> str | None:
     name = frame.name
     path = frame.filename
 
@@ -313,8 +343,6 @@ def categorize_ruby_frame(frame: Frame, rules: RuntimeRuleSet) -> str | None:
     core_class = _direct_core_class(name, rules)
     if core_class is not None:
         if path == "<cfunc>":
-            if core_class == "Thread" and "Thread" not in rules.core_native_categories:
-                return "Ruby Threading"
             return rules.core_native_categories.get(
                 core_class, rules.core_native_default_category
             )
@@ -339,9 +367,13 @@ def categorize_ruby_frame(frame: Frame, rules: RuntimeRuleSet) -> str | None:
     return None
 
 
+def categorize_ruby_frame(frame: Frame, rules: RuntimeRuleSet) -> str | None:
+    return categorize_runtime_frame(frame, rules)
+
+
 def categorize_frame(frame: Frame, rules: RuntimeRuleSet) -> str | None:
-    if rules.enabled and rules.name == "ruby":
-        return categorize_ruby_frame(frame, rules)
+    if rules.enabled and _has_runtime_categories(rules):
+        return categorize_runtime_frame(frame, rules)
     return None
 
 
@@ -447,7 +479,10 @@ def _target_category(
     if category is None and options.legacy_no_enhanced_caller_fallback:
         should_walk_up = leaf.filename.startswith("<") or (
             is_runtime_stdlib_path(leaf.filename, options.runtime_rules)
-            and (leaf.name.startswith("StatsD.") or leaf.name.startswith("StatsD::"))
+            and any(
+                leaf.name.startswith(prefix)
+                for prefix in options.runtime_rules.legacy_caller_fallback_name_prefixes
+            )
         )
         if should_walk_up:
             caller = _first_non_runtime_file_caller(stack, options.runtime_rules)
@@ -456,7 +491,11 @@ def _target_category(
 
     if category is None:
         for configured_category, pattern in parent_config.items():
-            if match_category_pattern(pattern, frame_to_categorize.filename):
+            if match_category_pattern(
+                pattern,
+                frame_to_categorize.filename,
+                options.runtime_rules,
+            ):
                 category = configured_category
                 break
 
@@ -522,45 +561,121 @@ def analyze_targets(
     return results
 
 
-def _is_native_path(path: str) -> bool:
+def _has_runtime_categories(rules: RuntimeRuleSet) -> bool:
+    return bool(
+        rules.semantic_rules
+        or rules.native_rules
+        or rules.core_classes
+        or rules.stdlib_path_markers
+        or rules.core_native_categories
+    )
+
+
+def _is_native_path(path: str, rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES) -> bool:
     if not path or path.startswith("<"):
         return True
-    if "/ruby/" in path:
-        after = path.rsplit("/ruby/", 1)[1]
-        return bool(after[:1].isdigit()) and "/gems/" not in after
-    return False
+    if any(marker in path for marker in rules.native_path_exclude_markers):
+        return False
+    if any(
+        match_regex(pattern, path) for pattern in rules.native_path_exclude_patterns
+    ):
+        return False
+    if any(marker in path for marker in rules.native_path_markers):
+        return True
+    return any(
+        match_category_pattern(pattern, path, rules)
+        for pattern in rules.native_path_patterns
+    )
 
 
 def is_gc_function(name: str) -> bool:
     return name in {"(marking)", "(sweeping)"}
 
 
+def _normalize_library_component(component: str, rules: RuntimeRuleSet) -> str:
+    normalized = component.strip("/")
+    if not normalized:
+        return normalized
+    for pattern in rules.library_name_suffix_patterns:
+        match = re.search(pattern, normalized)
+        if match and match.start() > 0:
+            return normalized[: match.start()]
+    return normalized
+
+
+def extract_library_path(
+    path: str,
+    rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES,
+    *,
+    selector: str | None = None,
+) -> LibraryPath | None:
+    normalized = _normalize_profile_path(path)
+    selector_patterns = (
+        rules.library_selector_path_patterns.get(selector, ()) if selector else ()
+    )
+    patterns = selector_patterns or rules.library_path_patterns
+    for pattern in patterns:
+        mode, resolved_pattern, _selector = _pattern_mode(pattern)
+        if mode == "regex":
+            try:
+                match = re.search(resolved_pattern, normalized)
+            except re.error as exc:
+                raise ValueError(
+                    f"Invalid library regex pattern {resolved_pattern!r}: {exc}"
+                ) from exc
+            if match:
+                component = match.group(1) if match.groups() else match.group(0)
+                relative_path = (
+                    normalized[match.start(1) :] if match.groups() else component
+                )
+                return LibraryPath(
+                    name=_normalize_library_component(component, rules),
+                    relative_path=relative_path,
+                )
+            continue
+        marker = _normalize_profile_path(resolved_pattern).strip("/")
+        if not marker:
+            continue
+        marker_text = f"/{marker}/"
+        haystack = f"/{normalized.strip('/')}/"
+        if marker_text not in haystack:
+            continue
+        relative_path = haystack.split(marker_text, 1)[1].rstrip("/")
+        component = relative_path.split("/", 1)[0]
+        return LibraryPath(
+            name=_normalize_library_component(component, rules),
+            relative_path=relative_path,
+        )
+    return None
+
+
+def extract_library_name(
+    path: str,
+    rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES,
+    *,
+    selector: str | None = None,
+) -> str | None:
+    library_path = extract_library_path(path, rules, selector=selector)
+    return library_path.name if library_path is not None else None
+
+
 def extract_gem_name(path: str) -> str | None:
-    marker = "/gems/"
-    if marker not in path:
-        return None
-    component = path.split(marker, 1)[1].split("/", 1)[0]
-    parts = component.split("-")
-    if len(parts) <= 1:
-        return component
-    for index in range(1, len(parts)):
-        suffix = "-".join(parts[index:])
-        if suffix[:1].isdigit() or (
-            len(suffix) >= 7 and all(ch in "0123456789abcdefABCDEF" for ch in suffix)
-        ):
-            return "-".join(parts[:index])
-    return component
+    return extract_library_name(path, ruby_rules(()), selector="gem")
 
 
-def _matches_frame_filter(frame: Frame, raw_filter: str) -> bool:
+def _matches_frame_filter(
+    frame: Frame,
+    raw_filter: str,
+    rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES,
+) -> bool:
     key, _, value = raw_filter.partition(":")
     if key == "name":
         return value in frame.name
     if key == "path":
         return value in frame.filename
-    if key == "gem":
-        gem_name = extract_gem_name(frame.filename)
-        return gem_name is not None if value == "*" else gem_name == value
+    if key in {"dependency", "gem", "library", "package", "vendor"}:
+        library_name = extract_library_name(frame.filename, rules, selector=key)
+        return library_name is not None if value == "*" else library_name == value
     raise ValueError(f"Unsupported filter key: {key}")
 
 
@@ -592,6 +707,7 @@ def _filter_matches_stack(
             _slice_for_frame(
                 frame,
                 stack,
+                options,
                 options.slices,
                 options.attributes,
                 include_descendant_attributes=False,
@@ -605,13 +721,17 @@ def _filter_matches_stack(
             and bottom is not None
             and _sample_has_descendant_attribute_for_slice(
                 stack,
+                options,
                 options.attributes,
                 value,
             )
         ):
             return True
     else:
-        matches = (_matches_frame_filter(frame, body) for frame in frames)
+        matches = (
+            _matches_frame_filter(frame, body, options.runtime_rules)
+            for frame in frames
+        )
     if inverted:
         return any(not matched for matched in matches)
     return any(matches)
@@ -655,13 +775,14 @@ def _collapse_matches_frame(
             _slice_for_frame(
                 frame,
                 stack,
+                options,
                 options.slices,
                 options.attributes,
                 include_descendant_attributes=False,
             )
             == value
         )
-    return _matches_frame_filter(frame, raw_filter)
+    return _matches_frame_filter(frame, raw_filter, options.runtime_rules)
 
 
 def _is_collapsed_frame(
@@ -678,6 +799,7 @@ def _is_collapsed_frame(
 def _slice_for_frame(
     frame: Frame,
     stack: Sequence[Frame],
+    options: SliceAnalysisOptions,
     slices: Sequence[SliceDefinition],
     attributes: Sequence[AttributionRule],
     *,
@@ -688,7 +810,11 @@ def _slice_for_frame(
             continue
         frames = stack if rule.descendant else (frame,)
         if any(
-            _matches_frame_filter(candidate, f"{rule.key}:{rule.value}")
+            _matches_frame_filter(
+                candidate,
+                f"{rule.key}:{rule.value}",
+                options.runtime_rules,
+            )
             for candidate in frames
         ):
             return rule.target_slice
@@ -697,13 +823,14 @@ def _slice_for_frame(
         if slice_definition.is_default:
             default = slice_definition.name
             continue
-        if slice_definition.matches_path(frame.filename):
+        if slice_definition.matches_frame(frame, options.runtime_rules):
             return slice_definition.name
     return default
 
 
 def _sample_has_descendant_attribute_for_slice(
     stack: Sequence[Frame],
+    options: SliceAnalysisOptions,
     attributes: Sequence[AttributionRule],
     slice_name: str,
 ) -> bool:
@@ -711,7 +838,11 @@ def _sample_has_descendant_attribute_for_slice(
         if not rule.descendant or rule.target_slice != slice_name:
             continue
         if any(
-            _matches_frame_filter(candidate, f"{rule.key}:{rule.value}")
+            _matches_frame_filter(
+                candidate,
+                f"{rule.key}:{rule.value}",
+                options.runtime_rules,
+            )
             for candidate in stack
         ):
             return True
@@ -722,9 +853,10 @@ def _root_eligible_frame(
     stack: Sequence[Frame],
     *,
     no_collapse_native: bool,
+    rules: RuntimeRuleSet,
 ) -> Frame | None:
     for frame in reversed(stack):
-        if no_collapse_native or not _is_native_path(frame.filename):
+        if no_collapse_native or not _is_native_path(frame.filename, rules):
             return frame
     return None
 
@@ -755,7 +887,10 @@ def analyze_slices(
         bottom_is_collapsed = False
         found_uncollapsed_eligible = False
         for frame in stack:
-            eligible = options.no_collapse_native or not _is_native_path(frame.filename)
+            eligible = options.no_collapse_native or not _is_native_path(
+                frame.filename,
+                options.runtime_rules,
+            )
             if not eligible:
                 continue
             first_eligible = first_eligible or frame
@@ -766,7 +901,7 @@ def analyze_slices(
             break
         if (
             first_eligible is not None
-            and _is_native_path(bottom.filename)
+            and _is_native_path(bottom.filename, options.runtime_rules)
             and not options.no_collapse_native
         ):
             bottom = first_eligible
@@ -776,6 +911,7 @@ def analyze_slices(
             uncollapsible_frame = _root_eligible_frame(
                 stack,
                 no_collapse_native=options.no_collapse_native,
+                rules=options.runtime_rules,
             )
         if options.filters and not _filters_match_sample(
             options.filters,
@@ -805,7 +941,13 @@ def analyze_slices(
             frame_stats.time_ns += value
             continue
 
-        slice_name = _slice_for_frame(bottom, stack, options.slices, options.attributes)
+        slice_name = _slice_for_frame(
+            bottom,
+            stack,
+            options,
+            options.slices,
+            options.attributes,
+        )
         slice_stats = stats_by_slice.setdefault(
             slice_name,
             SliceStats(name=slice_name, is_default=slice_name == default_slice),
@@ -822,10 +964,13 @@ def analyze_slices(
         )
         frame_stats.time_ns += value
         if slice_name == default_slice:
-            gem_name = extract_gem_name(bottom.filename)
-            if gem_name is not None:
-                slice_stats.unattributed_gems[gem_name] = (
-                    slice_stats.unattributed_gems.get(gem_name, 0) + value
+            library_name = extract_library_name(bottom.filename, options.runtime_rules)
+            if library_name is not None:
+                slice_stats.unattributed_libraries[library_name] = (
+                    slice_stats.unattributed_libraries.get(library_name, 0) + value
+                )
+                slice_stats.unattributed_gems[library_name] = (
+                    slice_stats.unattributed_gems.get(library_name, 0) + value
                 )
         if bottom_is_collapsed:
             uncollapsible_stats.time_ns += value
