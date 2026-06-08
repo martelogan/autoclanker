@@ -17,6 +17,8 @@ from clankerprof.analysis import (
     analyze_targets,
     categorize_ruby_frame,
     load_default_ruby_core_classes,
+    match_category_pattern,
+    match_path_pattern,
     ruby_rules,
 )
 from clankerprof.cli import main as clankerprof_main
@@ -221,7 +223,7 @@ def _request_rendering_profile_bytes() -> bytes:
         builder.function("RequestHandler#render_response", "/app/http/request.rb")
     )
     view_model = builder.location(
-        builder.function("CatalogView#build", "/app/view_models/catalog_view.rb")
+        builder.function("ReportView#build", "/app/view_models/report_view.rb")
     )
     component = builder.location(
         builder.function("ComponentRenderer#render", "/app/components/product_card.rb")
@@ -437,6 +439,74 @@ def test_clankerprof_supports_generic_request_rendering_attribution() -> None:
     assert results["Cache Client"].cpu_time == 30_000_000
     assert results["Other"].cpu_time == 40_000_000
     assert sum(item.cpu_time for item in results.values()) == 100_000_000
+
+
+@covers("M9-002")
+def test_clankerprof_target_categories_support_simplified_path_patterns() -> None:
+    profile = decode_profile_bytes(_request_rendering_profile_bytes())
+    results = analyze_targets(
+        profile,
+        {
+            "RequestHandler#render_response": {
+                "View Model": "app/view_models/**",
+                "Components": "path:app/components/**",
+                "Cache Client": "gem:cache-client",
+            }
+        },
+    )["RequestHandler#render_response"]
+
+    assert results["View Model"].cpu_time == 10_000_000
+    assert results["Components"].cpu_time == 20_000_000
+    assert results["Cache Client"].cpu_time == 30_000_000
+    assert results["Other"].cpu_time == 40_000_000
+
+
+@covers("M9-002")
+def test_clankerprof_path_pattern_matching_keeps_legacy_regex_compatibility() -> None:
+    path = "/workspace/app/view_models/card.rb"
+
+    assert match_category_pattern(r"[/\\]app[/\\]view_models[/\\]", path)
+    assert match_category_pattern("app/view_models/**", path)
+    assert match_category_pattern("path:app/view_models/**", path)
+    assert match_category_pattern(r"regex:[/\\]app[/\\]view_models[/\\]", path)
+    assert match_path_pattern("app/view_models/**", path)
+    assert match_path_pattern("regex:[/\\\\]app[/\\\\]view_models[/\\\\]", path)
+    assert match_category_pattern(
+        "gem:cache-client",
+        "/bundle/ruby/4.0.0/gems/cache-client-1.2.3/lib/client.rb",
+    )
+
+
+@covers("M9-005")
+def test_clankerprof_target_cli_supports_minimal_target_shortcut(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(_request_rendering_profile_bytes())
+
+    assert (
+        clankerprof_main(
+            [
+                "targets",
+                "--profile",
+                str(profile_path),
+                "--target",
+                "RequestHandler#render_response",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    parent = cast(
+        dict[str, object],
+        cast(dict[str, object], payload["parents"])["RequestHandler#render_response"],
+    )
+    categories = cast(list[dict[str, object]], parent["categories"])
+    assert parent["total_time_ns"] == 100_000_000
+    assert categories[0]["name"] == "Other"
+    assert categories[0]["time_ns"] == 100_000_000
+    assert categories[0]["samples"] == 4
 
 
 @covers("M9-003")
@@ -1089,6 +1159,35 @@ def test_clankerprof_slice_filters_apply_to_bottom_frame_after_native_collapse()
     slices = cast(list[dict[str, object]], payload["slices"])
     assert slices[0]["name"] == "components"
     assert slices[0]["time_ns"] == 10_000_000
+
+
+@covers("M9-004")
+def test_clankerprof_slice_paths_support_legacy_regex_and_simplified_patterns() -> None:
+    for raw_pattern in (
+        "app/components/**",
+        "path:app/components/**",
+        r"regex:[/\\]app[/\\]components[/\\]",
+        "gem:*",
+    ):
+        if raw_pattern == "gem:*":
+            profile = decode_profile_bytes(_slice_semantics_profile_bytes())
+            filters = ("name:Instrumentation#wrap",)
+            expected_time_ns = 20_000_000
+        else:
+            profile = decode_profile_bytes(_slice_semantics_profile_bytes())
+            filters = ("name:ComponentRenderer#render",)
+            expected_time_ns = 10_000_000
+        result = analyze_slices(
+            profile,
+            SliceAnalysisOptions(
+                filters=filters,
+                slices=(SliceDefinition("components", (raw_pattern,)),),
+            ),
+        )
+        payload = render_slice_json(result)
+        slices = cast(list[dict[str, object]], payload["slices"])
+        assert slices[0]["name"] == "components"
+        assert slices[0]["time_ns"] == expected_time_ns
 
 
 @covers("M9-004")

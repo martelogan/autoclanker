@@ -19,6 +19,7 @@ OutputMode = Literal["text", "csv", "json", "simple-csv"]
 JsonValue: TypeAlias = (
     str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
 )
+PatternMode: TypeAlias = Literal["auto", "gem", "path", "regex"]
 
 
 def _json_metadata() -> dict[str, JsonValue]:
@@ -43,18 +44,7 @@ class SliceDefinition:
     metadata: Mapping[str, JsonValue] = field(default_factory=_json_metadata)
 
     def matches_path(self, path: str) -> bool:
-        normalized = path.replace("\\", "/")
-        for pattern in self.path_patterns:
-            normalized_pattern = pattern.replace("\\", "/")
-            if fnmatch.fnmatch(normalized, normalized_pattern):
-                return True
-            if not normalized_pattern.startswith("*") and fnmatch.fnmatch(
-                normalized, f"**/{normalized_pattern}"
-            ):
-                return True
-            if normalized.endswith(normalized_pattern):
-                return True
-        return False
+        return any(match_path_pattern(pattern, path) for pattern in self.path_patterns)
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,11 +163,94 @@ def format_time(nanoseconds: TimeNs) -> str:
     return f"{milliseconds:.2f} ms"
 
 
+def _pattern_mode(pattern: str) -> tuple[PatternMode, str]:
+    mode, separator, rest = pattern.partition(":")
+    if separator and mode == "gem":
+        return "gem", rest
+    if separator and mode in {"path", "glob"}:
+        return "path", rest
+    if separator and mode == "regex":
+        return "regex", rest
+    return "auto", pattern
+
+
+def _normalize_profile_path(path: str) -> str:
+    return path.replace("\\", "/")
+
+
+def _has_glob_token(pattern: str) -> bool:
+    return any(token in pattern for token in ("*", "?", "["))
+
+
+def _looks_like_path_pattern(pattern: str) -> bool:
+    return "/" in pattern or "\\" in pattern or pattern.startswith(("./", "../"))
+
+
+def match_path_pattern(pattern: str, path: str) -> bool:
+    mode, resolved_pattern = _pattern_mode(pattern)
+    if mode == "gem":
+        gem_name = extract_gem_name(path)
+        return (
+            gem_name is not None
+            if resolved_pattern == "*"
+            else gem_name == resolved_pattern
+        )
+    if mode == "regex":
+        return match_regex(resolved_pattern, path)
+
+    normalized = _normalize_profile_path(path)
+    normalized_pattern = _normalize_profile_path(resolved_pattern).removeprefix("./")
+    if not normalized_pattern:
+        return False
+
+    if _has_glob_token(normalized_pattern):
+        if fnmatch.fnmatch(normalized, normalized_pattern):
+            return True
+        return not normalized_pattern.startswith(("*", "/")) and fnmatch.fnmatch(
+            normalized, f"**/{normalized_pattern}"
+        )
+
+    path_segments = normalized.strip("/")
+    pattern_segments = normalized_pattern.strip("/")
+    return (
+        path_segments == pattern_segments
+        or path_segments.startswith(f"{pattern_segments}/")
+        or path_segments.endswith(f"/{pattern_segments}")
+        or f"/{pattern_segments}/" in f"/{path_segments}/"
+    )
+
+
 def match_regex(pattern: str, path: str) -> bool:
     try:
-        return bool(re.search(pattern, path.replace("\\", "/")))
+        return bool(re.search(pattern, _normalize_profile_path(path)))
     except re.error as exc:
         raise ValueError(f"Invalid regex pattern {pattern!r}: {exc}") from exc
+
+
+def match_category_pattern(pattern: str, path: str) -> bool:
+    mode, resolved_pattern = _pattern_mode(pattern)
+    if mode == "path":
+        return match_path_pattern(resolved_pattern, path)
+    if mode == "regex":
+        return match_regex(resolved_pattern, path)
+    if mode == "gem":
+        gem_name = extract_gem_name(path)
+        return (
+            gem_name is not None
+            if resolved_pattern == "*"
+            else gem_name == resolved_pattern
+        )
+
+    try:
+        if match_regex(resolved_pattern, path):
+            return True
+    except ValueError:
+        if _looks_like_path_pattern(resolved_pattern):
+            return match_path_pattern(resolved_pattern, path)
+        raise
+    if _looks_like_path_pattern(resolved_pattern):
+        return match_path_pattern(resolved_pattern, path)
+    return False
 
 
 def is_runtime_stdlib_path(path: str, rules: RuntimeRuleSet) -> bool:
@@ -383,7 +456,7 @@ def _target_category(
 
     if category is None:
         for configured_category, pattern in parent_config.items():
-            if match_regex(pattern, frame_to_categorize.filename):
+            if match_category_pattern(pattern, frame_to_categorize.filename):
                 category = configured_category
                 break
 

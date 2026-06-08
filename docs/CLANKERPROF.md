@@ -1,17 +1,30 @@
 # clankerprof
 
 `clankerprof` is a language-neutral pprof CPU profile analyzer packaged with
-`autoclanker`. It is designed for people and agents who need profile evidence
-that can survive handoff into issue seeds, benchmark loops, CI gates, and code
-review.
-
-The core idea is simple: decode a profile once into typed sample facts, then
-render independent projections for the profiling question you are asking. Target
-attribution, ownership slices, semantic runtime callers, and before/after
-comparison are related views, not one overloaded report mode.
+`autoclanker`. It turns raw profile samples into a typed call graph and stable
+artifacts that can survive handoff into issue seeds, benchmark loops, CI gates,
+and code review.
 
 <p align="center">
-  <img src="assets/clankerprof-sample-facts.svg" width="840" alt="clankerprof sample-facts architecture">
+  <img src="assets/clankerprof-sample-facts-hero.png" width="840" alt="clankerprof call graph to sample facts visual">
+</p>
+
+The core strategy is call-graph first. Leaf frames often describe CPU
+mechanics: `Object#new`, `String#gsub`, `JSON.parse`, native runtime work,
+template execution, compression, or I/O clients. Those are useful clues, but
+the actionable caller is usually higher in the stack: `HotelSearch#rank_results`,
+`CalendarExport#to_json`, or `MapView#load_tiles`.
+
+`clankerprof` keeps those views connected. It can show the low-level CPU
+mechanics, then fold or attribute that cost back to the caller, boundary,
+semantic bucket, or responsibility slice that made the work happen.
+
+The same sample-facts model can be rendered as target-boundary reports,
+responsibility slices, semantic caller exports, or before/after regression
+gates.
+
+<p align="center">
+  <img src="assets/clankerprof-sample-facts.svg" width="760" alt="clankerprof sample-facts architecture">
 </p>
 
 ## Why use it
@@ -88,13 +101,13 @@ clankerprof targets \
   --output slices.csv
 ```
 
-`target_config.json` maps parent function names to category regexes:
+`target_config.json` maps parent function names to category path patterns:
 
 ```json
 {
   "Target#render": {
-    "Application": "[/\\\\]app[/\\\\]",
-    "Gems": "[/\\\\]gems[/\\\\]"
+    "Application": "app/**",
+    "Cache Client": "gem:cache-client"
   }
 }
 ```
@@ -103,6 +116,11 @@ Every sample whose stack contains `Target#render` is attributed by the leaf
 self-time frame. If no configured category matches, time goes to `Other`, so the
 target total stays fully accounted for.
 
+Prefer path patterns such as `app/**` or `app/components/**` in new configs.
+Use `gem:cache-client` for versioned gem paths. Existing regex strings are
+still supported for compatibility, and `regex:...` can make intentional regex
+matching explicit.
+
 For request-rendering investigations, use the same shape with the request
 boundary as the parent and neutral categories for app code, component rendering,
 client libraries, native engines, or data-shape work:
@@ -110,9 +128,9 @@ client libraries, native engines, or data-shape work:
 ```json
 {
   "RequestHandler#render_response": {
-    "View Model": "[/\\\\]app[/\\\\]view_models[/\\\\]",
-    "Components": "[/\\\\]app[/\\\\]components[/\\\\]",
-    "Cache Client": "[/\\\\]gems[/\\\\]cache-client[/\\\\]"
+    "View Model": "app/view_models/**",
+    "Components": "app/components/**",
+    "Cache Client": "gem:cache-client"
   }
 }
 ```
@@ -147,7 +165,7 @@ verbose-only native categories when folding is enabled.
 
 For compatibility with older target-attribution runs, pass `--no-enhanced`.
 That disables semantic runtime labels and uses the legacy native/delegated
-caller fallback before category regex matching.
+caller fallback before category matching.
 
 To reproduce the old two-file CSV artifact layout from
 `--format csv --output slices.csv`, add:

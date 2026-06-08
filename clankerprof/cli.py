@@ -349,7 +349,11 @@ def _slice_metadata(raw_item: dict[object, object]) -> dict[str, JsonValue]:
 
 def run_targets(args: argparse.Namespace) -> dict[str, Any]:
     profile = load_profile(args.profile)
-    config = load_json_mapping(args.config)
+    config = load_json_mapping(args.config) if args.config is not None else {}
+    for target in args.targets:
+        config.setdefault(target, {})
+    if not config:
+        raise ValueError("--config or --target is required.")
     attributables = _load_attributables(args.cpu_attributables)
     results = analyze_targets(
         profile,
@@ -523,7 +527,24 @@ def register_commands(subparsers: Any) -> None:
         help="Attribute target-function self time to configured categories.",
     )
     targets.add_argument("--profile", required=True)
-    targets.add_argument("--config", required=True)
+    targets.add_argument(
+        "--config",
+        help=(
+            "JSON target config mapping parent functions to category path "
+            "patterns or explicit regex: patterns. Use --target for the "
+            "minimal no-config path."
+        ),
+    )
+    targets.add_argument(
+        "--target",
+        dest="targets",
+        action="append",
+        default=[],
+        help=(
+            "Parent function to explain without a config file. Repeat for "
+            "multiple targets; uncategorized cost is reported as Other."
+        ),
+    )
     targets.add_argument("--output")
     targets.add_argument(
         "--format",
@@ -537,7 +558,7 @@ def register_commands(subparsers: Any) -> None:
         action="store_true",
         help=(
             "Disable runtime semantic categorization and use the legacy "
-            "Ruby native-caller fallback before regex matching."
+            "Ruby native-caller fallback before category matching."
         ),
     )
     targets.add_argument(
