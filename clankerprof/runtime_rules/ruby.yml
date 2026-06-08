@@ -1,0 +1,164 @@
+name: ruby
+core_native_default_category: Ruby Core (Native)
+stdlib_category: Ruby Stdlib
+internals_category: Ruby Internals
+special_namespace_prefixes:
+  - OpenSSL
+  - Net
+  - JSON
+  - Psych
+  - MessagePack
+  - Trilogy
+  - Zlib
+stdlib_path_markers:
+  - /lib/ruby/3.
+  - /lib/ruby/2.
+  - /ruby/lib/ruby/3.
+  - /ruby/lib/ruby/2.
+  - /.rbenv/versions/
+  - /.rvm/rubies/
+  - /usr/local/ruby/
+  - /usr/share/ruby/
+  - /opt/ruby/
+core_native_categories:
+  Digest: Digest (Native)
+  Marshal: Serialization (Native)
+  JSON: JSON (Native)
+  YAML: YAML (Native)
+  Psych: YAML (Native)
+  IO: IO (Native)
+  Thread: Ruby Threading
+semantic_rules:
+  - category: StatsD Gem
+    native_category: StatsD (Native)
+    name_contains:
+      - StatsD
+    name_prefixes:
+      - StatsD
+  - category: OpenTelemetry Gems
+    native_category: OpenTelemetry (Native)
+    name_contains:
+      - OpenTelemetry
+  - category: ActiveSupport Gem
+    name_contains:
+      - ActiveSupport
+  - category: ActiveRecord Gem
+    name_contains:
+      - ActiveRecord
+  - category: I18n Gem
+    name_contains:
+      - I18n
+    name_prefixes:
+      - I18n.
+      - "I18n::"
+  - category: Cache Client Gem
+    native_category: Cache Client (Native)
+    name_contains:
+      - CacheClient
+    name_prefixes:
+      - "CacheClient::"
+  - category: Dalli Gem
+    native_category: Dalli (Native)
+    name_contains:
+      - Dalli
+    name_prefixes:
+      - "Dalli::"
+  - category: Trilogy Gem
+    name_contains:
+      - Trilogy
+    except_paths:
+      - <cfunc>
+  - category: Message Codec Gem
+    native_category: Serialization (Native)
+    name_contains:
+      - MessageCodec
+    name_prefixes:
+      - "MessageCodec::"
+native_rules:
+  - category: Template Engine Native
+    name_contains:
+      - TemplateEngine::Native
+  - category: Serialization (Native)
+    name_contains:
+      - MessagePack
+    name_prefixes:
+      - Marshal.
+      - "Marshal::"
+  - category: Compression (Native)
+    name_contains:
+      - Snappy
+      - Lz4Flex
+      - Zstd
+    name_prefixes:
+      - "Zlib::"
+  - category: Trilogy (Native)
+    name_contains:
+      - Trilogy
+  - category: OpenSSL (Native)
+    name_contains:
+      - "OpenSSL::"
+  - category: JSON (Native)
+    name_contains:
+      - "JSON::"
+      - JSONC.
+    name_prefixes:
+      - JSON.
+  - category: YAML (Native)
+    name_contains:
+      - "Psych::"
+    name_prefixes:
+      - Psych.
+  - category: Digest (Native)
+    name_contains:
+      - "Digest::"
+      - Digest#
+  - category: Ruby Threading
+    name_contains:
+      - "Thread::"
+      - Mutex#
+  - category: IO (Native)
+    name_contains:
+      - "IO::"
+      - IO#
+    name_prefixes:
+      - IO.
+simplification_map:
+  Cache Client Gem: I/O Overhead
+  Cache Client (Native): I/O Overhead
+  IO (Native): I/O Overhead
+  Trilogy (Native): I/O Overhead
+  Trilogy Gem: I/O Overhead
+  Dalli Gem: I/O Overhead
+  Dalli (Native): I/O Overhead
+  OpenTelemetry Gems: Instrumentation Overhead
+  OpenTelemetry (Native): Instrumentation Overhead
+  StatsD Gem: Instrumentation Overhead
+  StatsD (Native): Instrumentation Overhead
+  Serialization (Native): Serialization Overhead
+  Compression (Native): Serialization Overhead
+  OpenSSL (Native): Serialization Overhead
+  JSON (Native): Serialization Overhead
+  YAML (Native): Serialization Overhead
+  Digest (Native): Serialization Overhead
+  Message Codec Gem: Serialization Overhead
+  ActiveSupport Gem: Translation & HTML Sanitization
+  ActiveRecord Gem: Translation & HTML Sanitization
+  I18n Gem: Translation & HTML Sanitization
+main_simplified_categories:
+  - I/O Overhead
+  - Serialization Overhead
+  - Instrumentation Overhead
+  - Translation & HTML Sanitization
+always_foldable_categories:
+  - Ruby Core (Native)
+  - Ruby Internals
+  - Ruby Stdlib
+  - Ruby Threading
+verbose_only_foldable_categories:
+  - Serialization (Native)
+  - Compression (Native)
+  - JSON (Native)
+  - YAML (Native)
+  - Digest (Native)
+  - IO (Native)
+  - OpenSSL (Native)
