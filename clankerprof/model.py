@@ -22,6 +22,7 @@ class Frame:
     name: str
     filename: str
     line: int = 0
+    location_is_folded: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +33,39 @@ class Sample:
     @property
     def primary_value(self) -> int:
         return self.values[0] if self.values else 0
+
+
+@dataclass(frozen=True, slots=True)
+class SampleFact:
+    sample_index: int
+    sample: Sample
+    stack: tuple[Frame, ...]
+
+    @property
+    def primary_value(self) -> TimeNs:
+        return self.sample.primary_value
+
+    @property
+    def leaf(self) -> Frame | None:
+        return self.stack[0] if self.stack else None
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.stack
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileFacts:
+    samples: tuple[SampleFact, ...]
+    total_primary_value: TimeNs
+    empty_sample_count: int
+
+    @property
+    def non_empty_sample_count(self) -> int:
+        return len(self.samples) - self.empty_sample_count
+
+    def non_empty_samples(self) -> tuple[SampleFact, ...]:
+        return tuple(fact for fact in self.samples if not fact.is_empty)
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,9 +99,31 @@ class Profile:
                         name=function.name,
                         filename=function.filename,
                         line=line,
+                        location_is_folded=location.is_folded,
                     )
                 )
         return tuple(frames)
+
+    def to_sample_facts(self) -> ProfileFacts:
+        facts = tuple(
+            SampleFact(
+                sample_index=index,
+                sample=sample,
+                stack=self.stack_for_sample(sample),
+            )
+            for index, sample in enumerate(self.samples)
+        )
+        return ProfileFacts(
+            samples=facts,
+            total_primary_value=sum(fact.primary_value for fact in facts),
+            empty_sample_count=sum(1 for fact in facts if fact.is_empty),
+        )
+
+    def sample_facts(self) -> tuple[SampleFact, ...]:
+        return self.to_sample_facts().samples
+
+    def total_primary_value(self) -> TimeNs:
+        return self.to_sample_facts().total_primary_value
 
 
 @dataclass(slots=True)

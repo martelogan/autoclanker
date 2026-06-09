@@ -403,12 +403,14 @@ results = analyze_targets(profile, config, TargetAnalysisOptions())
 payload = render_target_json(results)
 ```
 
-For advanced integrations, treat `Profile.stack_for_sample(...)` as the current
-typed call graph seam. The next phase should make this seam more explicit as a
-first-class sample-facts API, but the existing model already preserves the facts
-that matter for safe projection: leaf-to-root stack order, sparse IDs, inline
-frames, leaf self-time, target containment, slice labels, folded-from lineage,
-and semantic callers.
+For advanced integrations, `Profile.to_sample_facts()` is the stable typed
+seam. It returns a `ProfileFacts` aggregate with per-sample facts, total primary
+value, and empty-stack accounting. Each `SampleFact` keeps the sample index,
+primary value, original sample, and expanded leaf-to-root frames. Target and
+slice projections can consume those facts directly through
+`analyze_target_facts(...)` and `analyze_slice_facts(...)`, which is the
+intended path for reusable libraries, future indexes, and cross-language golden
+tests.
 
 ## Integration Guidance
 

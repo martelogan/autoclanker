@@ -12,7 +12,14 @@ from importlib import resources
 from pathlib import Path
 from typing import Literal, TypeAlias, cast
 
-from clankerprof.model import CategoryStats, Frame, Profile, TimeNs
+from clankerprof.model import (
+    CategoryStats,
+    Frame,
+    Profile,
+    ProfileFacts,
+    SampleFact,
+    TimeNs,
+)
 from clankerprof.rules import RuntimeRuleSet, load_runtime_rules
 
 OutputMode = Literal["text", "csv", "json", "simple-csv"]
@@ -24,6 +31,7 @@ LibrarySelector: TypeAlias = Literal[
     "dependency", "gem", "library", "package", "vendor"
 ]
 DEFAULT_RUNTIME_RULES = load_runtime_rules("generic")
+SampleFactsInput: TypeAlias = Iterable[SampleFact] | ProfileFacts
 
 
 def _json_metadata() -> dict[str, JsonValue]:
@@ -520,12 +528,20 @@ def analyze_targets(
     target_config: Mapping[str, Mapping[str, str]],
     options: TargetAnalysisOptions | None = None,
 ) -> dict[str, dict[str, CategoryStats]]:
+    return analyze_target_facts(profile.sample_facts(), target_config, options)
+
+
+def analyze_target_facts(
+    sample_facts: SampleFactsInput,
+    target_config: Mapping[str, Mapping[str, str]],
+    options: TargetAnalysisOptions | None = None,
+) -> dict[str, dict[str, CategoryStats]]:
     resolved_options = options or TargetAnalysisOptions()
     results: dict[str, dict[str, CategoryStats]] = {}
 
-    for sample in profile.samples:
-        value = sample.primary_value
-        stack = profile.stack_for_sample(sample)
+    for fact in _iter_sample_facts(sample_facts):
+        value = fact.primary_value
+        stack = fact.stack
         if not stack:
             continue
         leaf = stack[0]
@@ -865,6 +881,13 @@ def analyze_slices(
     profile: Profile,
     options: SliceAnalysisOptions,
 ) -> SliceAnalysisResult:
+    return analyze_slice_facts(profile.sample_facts(), options)
+
+
+def analyze_slice_facts(
+    sample_facts: SampleFactsInput,
+    options: SliceAnalysisOptions,
+) -> SliceAnalysisResult:
     total_time = 0
     matching_time = 0
     gc_time = 0
@@ -874,10 +897,10 @@ def analyze_slices(
         (item.name for item in options.slices if item.is_default), "(all)"
     )
 
-    for sample in profile.samples:
-        value = sample.primary_value
+    for fact in _iter_sample_facts(sample_facts):
+        value = fact.primary_value
         total_time += value
-        stack = profile.stack_for_sample(sample)
+        stack = fact.stack
         if not stack:
             continue
         leaf = stack[0]
@@ -996,3 +1019,9 @@ def analyze_slices(
         gc_time_ns=gc_time,
         uncollapsible=uncollapsible_stats if uncollapsible_stats.time_ns > 0 else None,
     )
+
+
+def _iter_sample_facts(sample_facts: SampleFactsInput) -> Iterable[SampleFact]:
+    if isinstance(sample_facts, ProfileFacts):
+        return sample_facts.samples
+    return sample_facts

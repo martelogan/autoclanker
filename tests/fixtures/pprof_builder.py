@@ -36,7 +36,7 @@ def _field_string(field: int, value: str) -> bytes:
 class PprofFixtureBuilder:
     strings: list[str]
     functions: list[tuple[int, int, int]]
-    locations: list[tuple[int, ...]]
+    locations: list[tuple[tuple[int, ...], bool]]
     samples: list[tuple[tuple[int, ...], int]]
 
     @classmethod
@@ -54,12 +54,17 @@ class PprofFixtureBuilder:
 
     def location(self, function_id: int) -> int:
         location_id = len(self.locations) + 1
-        self.locations.append((function_id,))
+        self.locations.append(((function_id,), False))
         return location_id
 
     def inline_location(self, function_ids: tuple[int, ...]) -> int:
         location_id = len(self.locations) + 1
-        self.locations.append(function_ids)
+        self.locations.append((function_ids, False))
+        return location_id
+
+    def folded_location(self, function_id: int) -> int:
+        location_id = len(self.locations) + 1
+        self.locations.append(((function_id,), True))
         return location_id
 
     def sample(self, location_ids: tuple[int, ...], value: int) -> None:
@@ -80,16 +85,24 @@ class PprofFixtureBuilder:
                 sample_payload.extend(_field_varint(1, location_id))
             sample_payload.extend(_field_varint(2, value))
             payload.extend(_field_bytes(2, bytes(sample_payload)))
-        for location_id, function_ids in enumerate(self.locations, start=1):
+        for location_id, (function_ids, is_folded) in enumerate(
+            self.locations,
+            start=1,
+        ):
             line_payload = bytearray()
             for function_id in function_ids:
                 line_payload.extend(
                     _field_bytes(4, _field_varint(1, function_id) + _field_varint(2, 1))
                 )
+            location_payload = (
+                _field_varint(1, location_id)
+                + bytes(line_payload)
+                + (_field_varint(5, 1) if is_folded else b"")
+            )
             payload.extend(
                 _field_bytes(
                     4,
-                    _field_varint(1, location_id) + bytes(line_payload),
+                    location_payload,
                 )
             )
         for function_id, name_index, filename_index in self.functions:

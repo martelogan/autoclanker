@@ -13,7 +13,9 @@ from clankerprof.analysis import (
     SliceAnalysisOptions,
     SliceDefinition,
     TargetAnalysisOptions,
+    analyze_slice_facts,
     analyze_slices,
+    analyze_target_facts,
     analyze_targets,
     categorize_ruby_frame,
     extract_gem_name,
@@ -319,6 +321,18 @@ def _inline_target_profile_bytes() -> bytes:
     return builder.encode()
 
 
+def _folded_location_profile_bytes() -> bytes:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(
+        builder.function("Target#render", "/app/responders/target.rb")
+    )
+    folded_leaf = builder.folded_location(
+        builder.function("FoldedLeaf#work", "/app/folded_leaf.rb")
+    )
+    builder.sample((folded_leaf, target), 6_000_000)
+    return builder.encode()
+
+
 def _non_contiguous_function_id_profile_bytes() -> bytes:
     builder = PprofFixtureBuilder.create()
     target = builder.function("Target#render", "/app/responders/target.rb")
@@ -417,6 +431,82 @@ def test_clankerprof_supports_non_contiguous_pprof_function_ids() -> None:
 
     assert results["Application"].cpu_time == 13_000_000
     assert results["Application"].functions["Leaf#work"].cpu_time == 13_000_000
+
+
+@covers("M9-001", "M9-002")
+def test_clankerprof_sample_facts_are_the_shared_projection_surface() -> None:
+    profile = decode_profile_bytes(_inline_target_profile_bytes())
+    profile_facts = profile.to_sample_facts()
+    facts = profile.sample_facts()
+
+    assert profile_facts.samples == facts
+    assert profile_facts.total_primary_value == 9_000_000
+    assert profile_facts.empty_sample_count == 0
+    assert profile_facts.non_empty_sample_count == 1
+    assert profile_facts.non_empty_samples() == facts
+    assert profile.total_primary_value() == 9_000_000
+    assert len(facts) == 1
+    assert facts[0].sample_index == 0
+    assert facts[0].primary_value == 9_000_000
+    assert facts[0].leaf is not None
+    assert facts[0].leaf.name == "InlineLeaf#work"
+    assert [frame.name for frame in facts[0].stack] == [
+        "InlineLeaf#work",
+        "Target#render",
+    ]
+    assert [frame.location_id for frame in facts[0].stack] == [1, 1]
+
+
+@covers("M9-001")
+def test_clankerprof_sample_facts_preserve_location_folded_markers() -> None:
+    profile = decode_profile_bytes(_folded_location_profile_bytes())
+    facts = profile.sample_facts()
+
+    assert facts[0].leaf is not None
+    assert facts[0].leaf.name == "FoldedLeaf#work"
+    assert facts[0].leaf.location_is_folded is True
+    assert facts[0].stack[1].location_is_folded is False
+
+
+@covers("M9-001", "M9-002")
+def test_clankerprof_target_projection_matches_sample_fact_projection() -> None:
+    profile = decode_profile_bytes(_request_rendering_profile_bytes())
+    config = {
+        "RequestHandler#render_response": {
+            "View Model": "app/view_models/**",
+            "Components": "path:app/components/**",
+            "Cache Client": "library:cache-client",
+        }
+    }
+
+    profile_results = render_target_json(analyze_targets(profile, config))
+    fact_results = render_target_json(
+        analyze_target_facts(profile.to_sample_facts(), config)
+    )
+
+    assert fact_results == profile_results
+
+
+@covers("M9-001", "M9-006")
+def test_clankerprof_slice_projection_matches_sample_fact_projection() -> None:
+    profile = decode_profile_bytes(_slice_semantics_profile_bytes())
+    options = SliceAnalysisOptions(
+        slices=(
+            SliceDefinition("components", ("app/components/**",)),
+            SliceDefinition("default", is_default=True),
+        ),
+        collapse=("library:*",),
+        runtime_rules=ruby_rules(_ruby_core_classes()),
+        unattributed_libraries=1,
+    )
+
+    profile_results = render_slice_json(analyze_slices(profile, options), options)
+    fact_results = render_slice_json(
+        analyze_slice_facts(profile.to_sample_facts(), options),
+        options,
+    )
+
+    assert fact_results == profile_results
 
 
 @covers("M9-002")
