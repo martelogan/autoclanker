@@ -20,7 +20,10 @@ behavior must not define or override target-attribution semantics.
 | Raw and gzipped pprof profile decoding without generated protobuf runtime files | covered | `test_clankerprof_decodes_raw_and_gzipped_pprof_profiles` |
 | Inline frames from repeated `Location.line` entries participate in leaf-to-root target traversal | covered | `test_clankerprof_expands_inline_location_frames_for_target_traversal` |
 | First-class sample-facts API exposes per-sample value, leaf-to-root stack, inline frames, and stable sample index | covered | `test_clankerprof_sample_facts_are_the_shared_projection_surface` |
+| Versioned sample-facts JSON export/import preserves projection behavior and rejects malformed frame entries | covered | `test_clankerprof_sample_facts_export_round_trips_projection_inputs`, `test_clankerprof_sample_facts_import_rejects_malformed_frames` |
+| Projection-neutral fact index exposes shared stack helpers without owning target or slice policy | covered | `test_clankerprof_fact_index_exposes_shared_stack_operations` |
 | Target projection can consume sample facts directly with identical output to profile-based analysis | covered | `test_clankerprof_target_projection_matches_sample_fact_projection` |
+| Target CLI can replay `clankerprof facts` JSON through standalone and umbrella command surfaces | covered | `test_clankerprof_cli_and_autoclanker_alias_generate_outputs` |
 | Target-contained sample self-time attribution by leaf frame | covered | `test_clankerprof_preserves_target_attribution_parity` |
 | Complete target accounting with `Other` catch-all | covered | `test_clankerprof_preserves_target_attribution_parity` |
 | Generic request/rendering boundary attribution outside a specific application domain | covered | `test_clankerprof_supports_generic_request_rendering_attribution` |
@@ -32,9 +35,9 @@ behavior must not define or override target-attribution semantics.
 | Folded-from accounting | covered | `test_clankerprof_ruby_rules_support_simplification_folding_and_attributables` |
 | Folded and semantic caller sections are available in text reports | covered with intentional extension | `test_clankerprof_text_report_includes_folded_and_semantic_caller_sections` |
 | Caller-site summaries skip runtime stdlib delegators when choosing the meaningful caller | covered | `test_clankerprof_target_csv_skips_runtime_stdlib_when_selecting_callsite` |
-| Semantic caller tracking and legacy top-caller CSV export shape | covered | `test_clankerprof_exports_semantic_caller_csv` |
-| Legacy `--no-enhanced` native-caller fallback before regex matching | covered | `test_clankerprof_supports_legacy_no_enhanced_native_caller_fallback` |
-| Legacy two-file CSV artifact pair, `output/<name>` and `output/verbose/<name>` | covered with explicit opt-in | `test_clankerprof_can_emit_legacy_target_csv_artifact_pair` |
+| Semantic caller tracking and compatibility top-caller CSV export shape | covered | `test_clankerprof_exports_semantic_caller_csv` |
+| `--no-enhanced` native/delegated caller fallback before regex matching, configured through `caller_fallback_name_prefixes` | covered | `test_clankerprof_supports_legacy_no_enhanced_native_caller_fallback`, `test_clankerprof_caller_fallback_prefixes_are_generic_rule_config` |
+| Compatibility two-file CSV artifact pair, `output/<name>` and `output/verbose/<name>`, via `--target-csv-layout compat` or the older alias flag | covered with explicit opt-in | `test_clankerprof_can_emit_legacy_target_csv_artifact_pair` |
 | Legacy text report phrasing byte-for-byte | not claimed | Prefer structured JSON/CSV compatibility over exact prose output. |
 
 ## Runtime rules
@@ -42,9 +45,10 @@ behavior must not define or override target-attribution semantics.
 | Capability | Status | Test coverage |
 | --- | --- | --- |
 | Ruby support is opt-in instead of the core engine default | covered | `test_clankerprof_ruby_rules_support_simplification_folding_and_attributables` |
-| Runtime labels, simplification maps, foldability, namespace exclusions, stdlib paths, native paths, and dependency-library extraction are loaded from packaged config | covered | `test_clankerprof_ruby_rule_pack_preserves_legacy_categorization_cases`, `test_clankerprof_dependency_selectors_are_runtime_rule_driven`, `test_clankerprof_slice_native_collapse_uses_runtime_rules` |
+| Runtime labels, simplification maps, foldability, namespace exclusions, stdlib paths, native paths, dependency-library extraction, and selector-specific dependency paths are loaded from packaged or external config | covered | `test_clankerprof_ruby_rule_pack_preserves_legacy_categorization_cases`, `test_clankerprof_dependency_selectors_are_runtime_rule_driven`, `test_clankerprof_loads_external_runtime_rule_packs`, `test_clankerprof_slice_native_collapse_uses_runtime_rules` |
 | Application-specific labels live in the Ruby rule pack rather than hardcoded core logic | covered | `clankerprof/runtime_rules/ruby.yml` plus categorization tests |
-| Fully arbitrary third-party runtime rule packs | not claimed | The loader shape supports more packs, but only generic and Ruby rule packs are packaged and tested. |
+| Ordered native-name category rules can classify folded native constructor callers before broad fallbacks | covered | `test_clankerprof_loads_external_runtime_rule_packs` |
+| Project-local runtime rule packs with custom semantic labels, library extraction, foldability, and CLI usage | covered | `test_clankerprof_loads_external_runtime_rule_packs` |
 
 ## Ownership slice attribution
 
@@ -57,6 +61,7 @@ semantics.
 | --- | --- | --- |
 | Slice path attribution and default catch-all slice | covered | `test_clankerprof_slice_analysis_supports_filters_collapse_attributes_and_compare` |
 | Slice projection can consume sample facts directly with identical output to profile-based analysis | covered | `test_clankerprof_slice_projection_matches_sample_fact_projection` |
+| Slice CLI can replay `clankerprof facts` JSON through standalone, umbrella, and config-file inputs | covered | `test_clankerprof_cli_uses_sample_facts_for_slice_projection` |
 | Generic declarative slice metadata in JSON output | covered | `test_clankerprof_slice_cli_supports_config_and_output_limits` |
 | Collapse rules, including `library:*` and legacy `gem:*` | covered | `test_clankerprof_slice_analysis_supports_filters_collapse_attributes_and_compare`, `test_clankerprof_slice_paths_support_legacy_regex_and_simplified_patterns` |
 | Attribution overrides, including invalid/duplicate filter rejection | covered | `test_clankerprof_slice_cli_validates_attribute_contract` |

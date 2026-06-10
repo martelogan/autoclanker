@@ -28,6 +28,22 @@ EXIT_VALIDATION_ERROR = 2
 EXIT_SESSION_ERROR = 3
 EXIT_ADAPTER_ERROR = 4
 
+_LOCAL_OUTPUT_COMMAND_PREFIXES = (
+    ("bigbets", "emit"),
+    ("bigbets", "issues", "merge"),
+    ("pprof", "facts"),
+    ("pprof", "slices"),
+    ("pprof", "targets"),
+)
+
+
+def _is_local_output_arg(argv: Sequence[str], index: int) -> bool:
+    command_parts = tuple(item for item in argv[:index] if not item.startswith("-"))
+    return any(
+        command_parts[: len(prefix)] == prefix
+        for prefix in _LOCAL_OUTPUT_COMMAND_PREFIXES
+    )
+
 
 def _normalize_global_output_position(argv: Sequence[str]) -> list[str]:
     normalized = list(argv)
@@ -38,10 +54,16 @@ def _normalize_global_output_position(argv: Sequence[str]) -> list[str]:
         if item == "--output":
             if index + 1 >= len(normalized):
                 raise ValueError("--output requires a path argument.")
+            if _is_local_output_arg(normalized, index):
+                index += 2
+                continue
             extracted = [item, normalized[index + 1]]
             del normalized[index : index + 2]
             continue
         if item.startswith("--output="):
+            if _is_local_output_arg(normalized, index):
+                index += 1
+                continue
             extracted = [item]
             del normalized[index]
             continue
@@ -97,7 +119,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args = parser.parse_args(normalized_argv)
         handler = args.handler
         payload = cast(dict[str, JsonValue], handler(args))
-        _emit_json(payload, args.output)
+        _emit_json(payload, None if payload.get("output") else args.output)
         if payload.get("tool") == "clankerprof_compare" and payload.get(
             "has_regression"
         ):

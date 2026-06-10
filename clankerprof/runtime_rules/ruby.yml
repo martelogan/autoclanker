@@ -35,7 +35,7 @@ library_selector_path_patterns:
 library_name_suffix_patterns:
   - -[0-9].*
   - -[0-9a-fA-F]{7,}.*
-legacy_caller_fallback_name_prefixes:
+caller_fallback_name_prefixes:
   - StatsD.
   - "StatsD::"
 core_native_categories:
@@ -46,6 +46,21 @@ core_native_categories:
   Psych: YAML (Native)
   IO: IO (Native)
   Thread: Ruby Threading
+core_semantic_categories:
+  Marshal: Serialization (Native)
+  JSON: JSON (Native)
+  YAML: YAML (Native)
+  Psych: YAML (Native)
+core_stdlib_categories:
+  Marshal: Serialization (Native)
+  JSON: JSON (Native)
+  YAML: YAML (Native)
+  Psych: YAML (Native)
+core_internal_categories:
+  Marshal: Serialization (Native)
+  JSON: JSON (Native)
+  YAML: YAML (Native)
+  Psych: YAML (Native)
 semantic_rules:
   - category: StatsD Gem
     native_category: StatsD (Native)

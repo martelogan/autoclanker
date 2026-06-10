@@ -13,6 +13,7 @@ import yaml
 
 from clankerprof import __version__
 from clankerprof.analysis import (
+    DEFAULT_LIBRARY_SELECTORS,
     DEFAULT_RUNTIME_RULES,
     AttributionRule,
     JsonValue,
@@ -20,14 +21,20 @@ from clankerprof.analysis import (
     SliceAnalysisOptions,
     SliceDefinition,
     TargetAnalysisOptions,
-    analyze_slices,
-    analyze_targets,
+    analyze_slice_facts,
+    analyze_target_facts,
     load_default_ruby_core_classes,
     load_json_mapping,
     load_ruby_core_classes,
     ruby_rules,
+    runtime_rules_from_file,
 )
 from clankerprof.compare import CompareOptions, compare_slice_json
+from clankerprof.facts import (
+    SampleFactsInput,
+    read_sample_facts,
+    sample_facts_to_jsonable,
+)
 from clankerprof.model import CategoryStats
 from clankerprof.proto import load_profile
 from clankerprof.render import (
@@ -55,6 +62,19 @@ def _load_attributables(path: str | None) -> dict[str, dict[str, float]] | None:
             str(key): float(cast(Any, value)) for key, value in raw_values.items()
         }
     return result
+
+
+def _load_projection_input(
+    profile_path: str | None,
+    facts_path: str | None,
+) -> SampleFactsInput:
+    if profile_path is not None and facts_path is not None:
+        raise ValueError("--profile and --facts are mutually exclusive.")
+    if facts_path is not None:
+        return read_sample_facts(facts_path)
+    if profile_path is None:
+        raise ValueError("--profile or --facts is required.")
+    return load_profile(profile_path).to_sample_facts()
 
 
 def _load_slices_config(path: str | None) -> dict[str, object]:
@@ -179,16 +199,7 @@ def _filter_body(raw_filter: str) -> str:
 
 def _validate_slice_options(options: SliceAnalysisOptions) -> None:
     names = {item.name for item in options.slices}
-    valid_filter_keys = {
-        "dependency",
-        "gem",
-        "library",
-        "name",
-        "package",
-        "path",
-        "slice",
-        "vendor",
-    }
+    valid_filter_keys = _valid_filter_keys(options.runtime_rules)
     if not options.slices:
         if options.by_slice is not None:
             raise ValueError("--by-slice requires --slices=<file>.")
@@ -215,17 +226,10 @@ def _validate_slice_options(options: SliceAnalysisOptions) -> None:
                 f"Collapse filters do not support prefixes: {raw_collapse}"
             )
     seen_attributes: set[tuple[str, str]] = set()
+    valid_attribute_keys = valid_filter_keys - {"slice"}
     for attribute in options.attributes:
         key = (attribute.key, attribute.value)
-        if attribute.key not in {
-            "dependency",
-            "gem",
-            "library",
-            "name",
-            "package",
-            "path",
-            "vendor",
-        }:
+        if attribute.key not in valid_attribute_keys:
             raise ValueError(f"Unsupported attribute filter key: {attribute.key}")
         if (
             attribute.target_slice not in names
@@ -239,22 +243,55 @@ def _validate_slice_options(options: SliceAnalysisOptions) -> None:
         seen_attributes.add(key)
 
 
+def _valid_filter_keys(rules: RuntimeRuleSet) -> frozenset[str]:
+    return frozenset(
+        {
+            "name",
+            "path",
+            "slice",
+            *DEFAULT_LIBRARY_SELECTORS,
+            *rules.library_selector_path_patterns,
+        }
+    )
+
+
 def _runtime_rules(args: argparse.Namespace) -> RuntimeRuleSet:
     runtime = str(getattr(args, "runtime", "generic"))
     no_enhanced = bool(getattr(args, "no_enhanced", False))
-    if runtime == "generic" and not no_enhanced:
-        return DEFAULT_RUNTIME_RULES
-    if runtime not in {"generic", "ruby"}:
-        raise ValueError(f"Unsupported runtime: {runtime}")
-    core_classes = (
+    runtime_rules_path = getattr(args, "runtime_rules", None)
+    core_classes: frozenset[str] = (
         load_ruby_core_classes(args.ruby_core_classes)
         if args.ruby_core_classes is not None
         else load_default_ruby_core_classes()
+        if runtime == "ruby"
+        else frozenset[str]()
     )
+    if runtime_rules_path is not None:
+        return runtime_rules_from_file(
+            runtime_rules_path,
+            core_classes=core_classes,
+            verbose=bool(args.verbose_runtime_internals),
+        )
+    if runtime == "generic" and not no_enhanced:
+        return DEFAULT_RUNTIME_RULES
+    if runtime == "generic" and no_enhanced:
+        core_classes = load_default_ruby_core_classes()
+    elif runtime != "ruby":
+        raise ValueError(f"Unsupported runtime: {runtime}")
     return ruby_rules(
         core_classes,
         verbose=bool(args.verbose_runtime_internals),
     )
+
+
+def _use_compat_target_csv_layout(args: argparse.Namespace) -> bool:
+    layout = getattr(args, "target_csv_layout", None)
+    legacy_layout = bool(getattr(args, "legacy_target_csv_layout", False))
+    if legacy_layout and layout == "standard":
+        raise ValueError(
+            "--legacy-target-csv-layout conflicts with --target-csv-layout=standard."
+        )
+    return legacy_layout or layout == "compat"
 
 
 def _write_legacy_target_csv_artifacts(
@@ -270,17 +307,28 @@ def _write_legacy_target_csv_artifacts(
     simplified_path = output_dir / base_name
     verbose_path = verbose_dir / base_name
     simplified_path.write_text(
-        render_target_csv(results, attributables=attributables, simplified=True),
+        render_target_csv(
+            results,
+            attributables=attributables,
+            simplified=True,
+            legacy_layout=True,
+        ),
         encoding="utf-8",
     )
     verbose_path.write_text(
-        render_target_csv(results, attributables=attributables, simplified=False),
+        render_target_csv(
+            results,
+            attributables=attributables,
+            simplified=False,
+            legacy_layout=True,
+        ),
         encoding="utf-8",
     )
     return {
         "tool": "clankerprof_targets",
         "ok": True,
         "output": str(simplified_path),
+        "compat_target_csv_layout": True,
         "legacy_target_csv_layout": True,
         "outputs": {
             "simplified_csv": str(simplified_path),
@@ -375,7 +423,7 @@ def _slice_metadata(raw_item: dict[object, object]) -> dict[str, JsonValue]:
 
 
 def run_targets(args: argparse.Namespace) -> dict[str, Any]:
-    profile = load_profile(args.profile)
+    sample_facts = _load_projection_input(args.profile, args.facts)
     config = load_json_mapping(args.config) if args.config is not None else {}
     for target in args.targets:
         config.setdefault(target, {})
@@ -383,8 +431,9 @@ def run_targets(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("--config or --target is required.")
     attributables = _load_attributables(args.cpu_attributables)
     runtime_rules = _runtime_rules(args)
-    results = analyze_targets(
-        profile,
+    compat_target_csv_layout = _use_compat_target_csv_layout(args)
+    results = analyze_target_facts(
+        sample_facts,
         config,
         TargetAnalysisOptions(
             runtime_rules=runtime_rules,
@@ -392,7 +441,7 @@ def run_targets(args: argparse.Namespace) -> dict[str, Any]:
             fold_runtime_internals=bool(args.fold_runtime_internals),
             track_semantic_callers=bool(args.track_semantic_callers),
             attributables=attributables,
-            legacy_no_enhanced_caller_fallback=bool(args.no_enhanced),
+            caller_fallback_when_uncategorized=bool(args.no_enhanced),
         ),
     )
     if args.semantic_callers_csv:
@@ -401,15 +450,21 @@ def run_targets(args: argparse.Namespace) -> dict[str, Any]:
                 "--semantic-callers-csv requires --track-semantic-callers."
             )
         Path(args.semantic_callers_csv).write_text(
-            render_semantic_callers_csv(results, runtime_rules=runtime_rules) + "\n",
+            render_semantic_callers_csv(
+                results,
+                runtime_rules=runtime_rules,
+                dependency_prefix=("gems" if compat_target_csv_layout else "deps"),
+                legacy_layout=compat_target_csv_layout,
+            )
+            + ("" if compat_target_csv_layout else "\n"),
             encoding="utf-8",
         )
     if args.format == "json":
         return cast(dict[str, Any], render_target_json(results))
-    if args.legacy_target_csv_layout:
+    if compat_target_csv_layout:
         if args.format != "csv" or not args.output:
             raise ValueError(
-                "--legacy-target-csv-layout requires --format csv and --output."
+                "--target-csv-layout=compat requires --format csv and --output."
             )
         return _write_legacy_target_csv_artifacts(
             args.output,
@@ -441,9 +496,8 @@ def run_slices(args: argparse.Namespace) -> dict[str, Any]:
     raw_profile = _merge_single_value(
         args.profile, config.get("profile"), name="profile"
     )
-    if raw_profile is None:
-        raise ValueError("--profile is required.")
-    profile = load_profile(raw_profile)
+    raw_facts = _merge_single_value(args.facts, config.get("facts"), name="facts")
+    sample_facts = _load_projection_input(raw_profile, raw_facts)
     raw_slices = _merge_single_value(args.slices, config.get("slices"), name="slices")
     raw_top = _optional_int(config, "top")
     if args.top is not None and raw_top is not None:
@@ -518,8 +572,8 @@ def run_slices(args: argparse.Namespace) -> dict[str, Any]:
         allow_virtual_attribute_slices=bool(args.allow_virtual_attribute_slices),
     )
     _validate_slice_options(options)
-    result = analyze_slices(
-        profile,
+    result = analyze_slice_facts(
+        sample_facts,
         options,
     )
     payload = cast(dict[str, Any], render_slice_json(result, options))
@@ -547,6 +601,24 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def run_facts(args: argparse.Namespace) -> dict[str, Any]:
+    profile = load_profile(args.profile)
+    payload = sample_facts_to_jsonable(profile.to_sample_facts())
+    if args.output:
+        Path(args.output).write_text(
+            render_json_payload(cast(dict[str, Any], payload)) + "\n",
+            encoding="utf-8",
+        )
+        return {
+            "tool": "clankerprof_facts",
+            "ok": True,
+            "output": args.output,
+            "schema_version": payload["schema_version"],
+            "summary": payload["summary"],
+        }
+    return cast(dict[str, Any], payload)
+
+
 def register_pprof_commands(subparsers: Any) -> None:
     parser = subparsers.add_parser(
         "pprof",
@@ -560,7 +632,11 @@ def register_commands(subparsers: Any) -> None:
         "targets",
         help="Attribute target-function self time to configured categories.",
     )
-    targets.add_argument("--profile", required=True)
+    targets.add_argument("--profile")
+    targets.add_argument(
+        "--facts",
+        help="Read versioned sample-facts JSON instead of a pprof profile.",
+    )
     targets.add_argument(
         "--config",
         help=(
@@ -586,13 +662,23 @@ def register_commands(subparsers: Any) -> None:
         default="json",
     )
     targets.add_argument("--runtime", choices=("generic", "ruby"), default="generic")
-    targets.add_argument("--ruby-core-classes")
+    targets.add_argument(
+        "--runtime-rules",
+        help=(
+            "Load a YAML runtime rule pack from disk. This keeps runtime or "
+            "domain-specific labels outside the package while preserving the "
+            "same categorization and folding machinery."
+        ),
+    )
+    targets.add_argument(
+        "--ruby-core-classes", "--core-classes", dest="ruby_core_classes"
+    )
     targets.add_argument(
         "--no-enhanced",
         action="store_true",
         help=(
-            "Disable runtime semantic categorization and use the legacy "
-            "Ruby native-caller fallback before category matching."
+            "Disable runtime semantic categorization and use configured "
+            "native/delegated caller fallbacks before category matching."
         ),
     )
     targets.add_argument(
@@ -608,8 +694,17 @@ def register_commands(subparsers: Any) -> None:
         dest="verbose_runtime_internals",
     )
     targets.add_argument("--track-semantic-callers", action="store_true")
-    targets.add_argument("--cpu-attributables")
+    targets.add_argument("--cpu-attributables", "--attributables")
     targets.add_argument("--semantic-callers-csv")
+    targets.add_argument(
+        "--target-csv-layout",
+        choices=("standard", "compat"),
+        default=None,
+        help=(
+            "Use standard single-file CSV output or compat two-file output under "
+            "output/ and output/verbose/."
+        ),
+    )
     targets.add_argument(
         "--legacy-target-csv-layout",
         action="store_true",
@@ -626,6 +721,10 @@ def register_commands(subparsers: Any) -> None:
         help="Run slice attribution over a pprof profile.",
     )
     slices.add_argument("--profile")
+    slices.add_argument(
+        "--facts",
+        help="Read versioned sample-facts JSON instead of a pprof profile.",
+    )
     slices.add_argument("--config")
     slices.add_argument("--slices")
     slices.add_argument("--filter", dest="filters", action="append", default=[])
@@ -644,7 +743,16 @@ def register_commands(subparsers: Any) -> None:
         type=int,
     )
     slices.add_argument("--runtime", choices=("generic", "ruby"), default="generic")
-    slices.add_argument("--ruby-core-classes")
+    slices.add_argument(
+        "--runtime-rules",
+        help=(
+            "Load a YAML runtime rule pack from disk for native/core labels, "
+            "library extraction, and folding categories."
+        ),
+    )
+    slices.add_argument(
+        "--ruby-core-classes", "--core-classes", dest="ruby_core_classes"
+    )
     slices.add_argument(
         "--verbose-runtime-internals",
         "--verbose-ruby-internals",
@@ -665,6 +773,14 @@ def register_commands(subparsers: Any) -> None:
     compare.add_argument("--threshold-rel", type=float, default=15.0)
     compare.add_argument("--focus-slices", nargs="*", default=[])
     compare.set_defaults(handler=run_compare)
+
+    facts = subparsers.add_parser(
+        "facts",
+        help="Export decoded pprof sample facts as stable JSON.",
+    )
+    facts.add_argument("--profile", required=True)
+    facts.add_argument("--output")
+    facts.set_defaults(handler=run_facts)
 
 
 def build_parser() -> argparse.ArgumentParser:

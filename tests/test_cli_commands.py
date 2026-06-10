@@ -393,6 +393,35 @@ def test_cli_supports_output_after_subcommand(
     assert root_stdout_payload["belief_count"] == 4
 
 
+@covers("M6-004")
+def test_cli_preserves_subcommand_artifact_output(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    output_path = tmp_path / "portfolio.csv"
+
+    exit_code = main(
+        [
+            "bigbets",
+            "emit",
+            "--input",
+            str(ROOT / "examples/bigbets/basic_portfolio.yaml"),
+            "--format",
+            "csv",
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    assert exit_code == 0
+    stdout_payload = _read_stdout(capsys)
+    assert stdout_payload["tool"] == "bigbets_emit"
+    assert stdout_payload["output"] == str(output_path)
+    artifact = output_path.read_text(encoding="utf-8")
+    assert artifact.startswith("kind,big_bet_priority")
+    assert "bigbets.registry.v1" in artifact
+
+
 @covers("M8-002")
 def test_cli_generates_portable_issue_seed_artifacts(
     tmp_path: Path,

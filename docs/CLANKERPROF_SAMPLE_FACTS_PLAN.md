@@ -1,27 +1,34 @@
-# clankerprof sample-facts unification plan
+# clankerprof sample-facts unification status
 
-`clankerprof` should have one decoded sample-facts core and several projections.
-This plan defines that seam so target attribution, slice attribution, semantic
-caller exports, and compare gates do not each invent their own stack traversal
-or accounting rules.
+`clankerprof` now has one decoded sample-facts core and several projections.
+This document records the implemented seam so target attribution, slice
+attribution, semantic caller exports, and compare gates keep shared stack facts
+without merging their distinct accounting policies.
 
-## Goal
+For the normative artifact shape and projection semantics, see
+[`CLANKERPROF_SPEC.md`](CLANKERPROF_SPEC.md). For tested compatibility status,
+see [`CLANKERPROF_PARITY.md`](CLANKERPROF_PARITY.md).
 
-Make the profile fact model explicit enough that:
+## Implemented
 
-- target-boundary attribution can keep its parent-contained, leaf-self-time
-  semantics;
-- slice/filter/collapse attribution can keep its bottom-frame and ownership
-  semantics;
-- both projections consume the same per-sample stack facts;
-- future optimizations or Rust ports can operate on the same declarative fact
-  shape without redefining output behavior.
+- `Profile.to_sample_facts()` emits a `ProfileFacts` aggregate with stable
+  sample indexes, primary CPU values, raw sample values, leaf-to-root frames,
+  inline frames, pprof IDs, folded-location markers, total primary value, and
+  empty-stack accounting.
+- `clankerprof.facts` exports versioned sample-facts JSON with strict schema
+  version checks, summary validation, import/export helpers, and a
+  projection-neutral `ProfileFactIndex`.
+- `clankerprof facts --profile ...` writes the JSON fact artifact from raw or
+  gzipped pprof input.
+- `clankerprof targets` and `clankerprof slices` accept either `--profile` or
+  `--facts`, so a decoded fact artifact can be replayed by multiple
+  projections.
+- `autoclanker pprof ...` exposes the same fact export and fact replay surface.
+- Target and slice library APIs consume `ProfileFacts` or iterables of
+  `SampleFact` through `analyze_target_facts(...)` and
+  `analyze_slice_facts(...)`.
 
-The first implementation milestone is deliberately conservative: introduce the
-sample-facts API and move existing projections onto it without changing public
-CLI outputs.
-
-## Fact Core Contract
+## Fact Core Boundary
 
 The core sample-facts layer owns decoded pprof facts only:
 
@@ -30,23 +37,22 @@ The core sample-facts layer owns decoded pprof facts only:
 - leaf-to-root frame order;
 - expanded inline frames from each pprof location;
 - profile, location, and function IDs;
-- function name, system name, file path, and line number;
-- location folded marker;
+- function name, file path, line number, and location folded marker;
 - total profile CPU time;
 - empty-stack accounting.
 
-The core must not own:
+The core does not own:
 
-- runtime-specific labels such as Ruby core/native categories;
+- runtime-specific labels;
 - target category matching;
 - slice ownership;
 - collapse/filter semantics;
-- metadata such as owners, docs, contacts, or team concepts;
+- domain metadata such as owners, docs, contacts, or escalation hints;
 - terminal formatting or comparison thresholds.
 
-Those are projections layered over the facts.
+Those remain projection, rule-pack, config, or rendering concerns.
 
-## Projection Contract
+## Projection Boundary
 
 Target attribution owns parent-boundary accounting:
 
@@ -54,16 +60,17 @@ Target attribution owns parent-boundary accounting:
 - attribute sample self-time by the leaf frame or folded caller;
 - preserve `Other` catch-all accounting;
 - preserve runtime-rule folding, semantic callers, folded-from summaries,
-  caller-to-leaf pairs, legacy no-enhanced fallback, proportional attributables,
-  and legacy CSV layout.
+  caller-to-leaf pairs, compatibility fallbacks, proportional attributables,
+  and explicit compatibility CSV layout.
 
 Slice attribution owns bottom-frame accounting:
 
 - choose the first non-native, non-collapsed eligible frame unless
   `no_collapse_native` is set;
 - apply bottom filters conjunctively and descendant filters as OR;
-- support `name:`, `path:`, `library:`, `dependency:`, `gem:`, `package:`,
-  `vendor:`, and `slice:` filter keys where valid;
+- support `name:`, `path:`, `library:`, `dependency:`, `package:`, `vendor:`,
+  rule-pack selector keys, compatibility selector aliases, and `slice:` filter
+  keys where valid;
 - support collapse rules and explicit attribute rules;
 - preserve default-slice unattributed dependency summaries, GC pseudo-slices,
   uncollapsible pseudo-output, by-slice limits, and compare JSON compatibility.
@@ -74,46 +81,45 @@ Runtime rules own language-specific interpretation:
 - simplification maps;
 - foldable runtime categories;
 - stdlib/native path detection;
-- library/dependency path extraction;
+- library/dependency path extraction and selector-specific dependency paths;
 - compatibility aliases such as `gem:`.
 
 ## Why This Seam
 
-The two historical analysis styles answer different questions:
+The projection styles answer different questions:
 
-- target attribution asks: "inside this parent boundary, what leaf work consumed
-  CPU, and which higher-level caller made that leaf work happen?"
+- target attribution asks: "inside this parent boundary, what leaf work
+  consumed CPU, and which higher-level caller made that leaf work happen?"
 - slice attribution asks: "after filtering and collapse rules, which code area
   should own this sample?"
 
 They are complementary, not interchangeable. A shared sample-facts model lets
-both strategies stay correct while eliminating duplicated stack construction and
-making future indexes safe: indexes can accelerate facts, but must not alter
-projection semantics.
+both strategies stay correct while eliminating duplicated stack construction.
+Indexes can accelerate fact lookup, but must not alter projection semantics.
 
-## Compatibility Checklist
+## Covered By Tests
 
-Before this refactor is considered complete, tests must prove:
+- raw and gzipped pprof decoding;
+- inline frames and non-contiguous pprof IDs;
+- folded-location markers;
+- sample-facts JSON export/import and malformed frame rejection;
+- fact-index helpers used by projections;
+- target output stability from profile facts and imported facts;
+- slice output stability from profile facts and imported facts;
+- CLI fact export plus target/slice replay through `clankerprof` and
+  `autoclanker pprof`;
+- runtime folding, semantic callers, attributables, compatibility aliases,
+  external runtime rule packs, slice filters, collapse, attributes,
+  pseudo-slices, and compare gates.
 
-- existing target JSON/CSV/text output semantics are unchanged;
-- existing slice JSON output semantics are unchanged;
-- inline frames and non-contiguous pprof IDs remain supported;
-- Ruby runtime folding and semantic caller behavior remain supported;
-- legacy regex configs and `gem:` selectors remain supported;
-- simplified path, `library:`, and `dependency:` selectors remain supported;
-- default slice `unattributed_libraries` and legacy `unattributed_gems` remain
-  present;
-- compare gate behavior remains unchanged;
-- the new sample-facts API exposes stable, inspectable per-sample facts for
-  library users.
+## Remaining Confidence Boundary
 
-## Future Work
+The self-contained test suite proves the fact contract and projection parity on
+fixture profiles. Before retiring any older profile workflow, run real-profile
+golden comparisons against representative local `.pb` / `.pb.gz` files using
+`scripts/clankerprof/check_real_profile_parity.py`. That helper is intentionally
+opt-in and commits no profile data.
 
-After the conservative API refactor, the next improvements can be layered on
-without changing outputs:
-
-- precomputed frame and library indexes for faster filter/collapse projections;
-- serialized JSON sample-facts export for cross-language golden tests;
-- direct golden comparisons against real profiles from prior workflows;
-- a Rust implementation of the same fact contract for high-throughput
-  integrations.
+Future implementation work can add faster precomputed indexes or a
+cross-language implementation of the same fact contract without changing
+projection outputs.

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import re
+
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from importlib import resources
+from pathlib import Path
 from typing import cast
 
 import yaml
@@ -13,14 +16,17 @@ class RuntimeMatchRule:
     category: str
     name_contains: tuple[str, ...] = ()
     name_prefixes: tuple[str, ...] = ()
+    name_patterns: tuple[str, ...] = ()
     except_paths: frozenset[str] = frozenset()
     native_category: str | None = None
 
     def matches(self, name: str, path: str) -> bool:
         if path in self.except_paths:
             return False
-        return any(token in name for token in self.name_contains) or name.startswith(
-            self.name_prefixes
+        return (
+            any(token in name for token in self.name_contains)
+            or name.startswith(self.name_prefixes)
+            or any(_match_name_pattern(pattern, name) for pattern in self.name_patterns)
         )
 
 
@@ -30,6 +36,16 @@ def _empty_string_map() -> dict[str, str]:
 
 def _empty_string_tuple_map() -> dict[str, tuple[str, ...]]:
     return {}
+
+
+def _match_name_pattern(pattern: str, name: str) -> bool:
+    resolved_pattern = pattern.removeprefix("regex:")
+    try:
+        return bool(re.search(resolved_pattern, name))
+    except re.error as exc:
+        raise ValueError(
+            f"Invalid runtime rule name pattern {pattern!r}: {exc}"
+        ) from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,8 +71,17 @@ class RuntimeRuleSet:
         default_factory=_empty_string_tuple_map
     )
     library_name_suffix_patterns: tuple[str, ...] = ()
+    native_name_category_rules: tuple[RuntimeMatchRule, ...] = ()
+    caller_fallback_name_prefixes: tuple[str, ...] = ()
     legacy_caller_fallback_name_prefixes: tuple[str, ...] = ()
     core_native_categories: Mapping[str, str] = field(default_factory=_empty_string_map)
+    core_semantic_categories: Mapping[str, str] = field(
+        default_factory=_empty_string_map
+    )
+    core_stdlib_categories: Mapping[str, str] = field(default_factory=_empty_string_map)
+    core_internal_categories: Mapping[str, str] = field(
+        default_factory=_empty_string_map
+    )
     core_native_default_category: str = "Runtime Core (Native)"
     stdlib_category: str = "Runtime Stdlib"
     internals_category: str = "Runtime Internals"
@@ -105,6 +130,20 @@ def _string_tuple_map(
     return result
 
 
+def _aliased_string_tuple(
+    payload: Mapping[str, object],
+    key: str,
+    legacy_key: str,
+) -> tuple[str, ...]:
+    value = _string_tuple(payload, key)
+    legacy_value = _string_tuple(payload, legacy_key)
+    if value and legacy_value and value != legacy_value:
+        raise ValueError(
+            f"Runtime rule fields {key} and {legacy_key} are aliases; use only one."
+        )
+    return value or legacy_value
+
+
 def _load_match_rules(
     payload: Mapping[str, object], key: str
 ) -> tuple[RuntimeMatchRule, ...]:
@@ -130,10 +169,78 @@ def _load_match_rules(
                 ),
                 name_contains=_string_tuple(raw_item, "name_contains"),
                 name_prefixes=_string_tuple(raw_item, "name_prefixes"),
+                name_patterns=_string_tuple(raw_item, "name_patterns"),
                 except_paths=frozenset(_string_tuple(raw_item, "except_paths")),
             )
         )
     return tuple(rules)
+
+
+def runtime_rules_from_mapping(
+    payload: Mapping[str, object],
+    *,
+    name: str = "custom",
+    core_classes: Iterable[str] = (),
+    verbose: bool = False,
+) -> RuntimeRuleSet:
+    caller_fallback_name_prefixes = _aliased_string_tuple(
+        payload,
+        "caller_fallback_name_prefixes",
+        "legacy_caller_fallback_name_prefixes",
+    )
+    return RuntimeRuleSet(
+        name=str(payload.get("name", name)),
+        core_classes=frozenset(core_classes),
+        verbose=verbose,
+        enabled=True,
+        semantic_rules=_load_match_rules(payload, "semantic_rules"),
+        native_rules=_load_match_rules(payload, "native_rules"),
+        simplification_map=_string_map(payload, "simplification_map"),
+        main_simplified_categories=frozenset(
+            _string_tuple(payload, "main_simplified_categories")
+        ),
+        always_foldable_categories=frozenset(
+            _string_tuple(payload, "always_foldable_categories")
+        ),
+        verbose_only_foldable_categories=frozenset(
+            _string_tuple(payload, "verbose_only_foldable_categories")
+        ),
+        special_namespace_prefixes=frozenset(
+            _string_tuple(payload, "special_namespace_prefixes")
+        ),
+        stdlib_path_markers=_string_tuple(payload, "stdlib_path_markers"),
+        native_path_markers=_string_tuple(payload, "native_path_markers"),
+        native_path_patterns=_string_tuple(payload, "native_path_patterns"),
+        native_path_exclude_markers=_string_tuple(
+            payload, "native_path_exclude_markers"
+        ),
+        native_path_exclude_patterns=_string_tuple(
+            payload, "native_path_exclude_patterns"
+        ),
+        library_path_patterns=_string_tuple(payload, "library_path_patterns"),
+        library_selector_path_patterns=_string_tuple_map(
+            payload,
+            "library_selector_path_patterns",
+        ),
+        library_name_suffix_patterns=_string_tuple(
+            payload, "library_name_suffix_patterns"
+        ),
+        native_name_category_rules=_load_match_rules(
+            payload,
+            "native_name_category_rules",
+        ),
+        caller_fallback_name_prefixes=caller_fallback_name_prefixes,
+        legacy_caller_fallback_name_prefixes=caller_fallback_name_prefixes,
+        core_native_categories=_string_map(payload, "core_native_categories"),
+        core_semantic_categories=_string_map(payload, "core_semantic_categories"),
+        core_stdlib_categories=_string_map(payload, "core_stdlib_categories"),
+        core_internal_categories=_string_map(payload, "core_internal_categories"),
+        core_native_default_category=str(
+            payload.get("core_native_default_category", "Runtime Core (Native)")
+        ),
+        stdlib_category=str(payload.get("stdlib_category", "Runtime Stdlib")),
+        internals_category=str(payload.get("internals_category", "Runtime Internals")),
+    )
 
 
 def load_runtime_rules(
@@ -146,46 +253,27 @@ def load_runtime_rules(
     payload = yaml.safe_load(resource.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"Runtime rule pack {name} must be a YAML object.")
-    raw = cast(dict[str, object], payload)
-    return RuntimeRuleSet(
-        name=str(raw.get("name", name)),
-        core_classes=frozenset(core_classes),
+    return runtime_rules_from_mapping(
+        cast(Mapping[str, object], payload),
+        name=name,
+        core_classes=core_classes,
         verbose=verbose,
-        enabled=True,
-        semantic_rules=_load_match_rules(raw, "semantic_rules"),
-        native_rules=_load_match_rules(raw, "native_rules"),
-        simplification_map=_string_map(raw, "simplification_map"),
-        main_simplified_categories=frozenset(
-            _string_tuple(raw, "main_simplified_categories")
-        ),
-        always_foldable_categories=frozenset(
-            _string_tuple(raw, "always_foldable_categories")
-        ),
-        verbose_only_foldable_categories=frozenset(
-            _string_tuple(raw, "verbose_only_foldable_categories")
-        ),
-        special_namespace_prefixes=frozenset(
-            _string_tuple(raw, "special_namespace_prefixes")
-        ),
-        stdlib_path_markers=_string_tuple(raw, "stdlib_path_markers"),
-        native_path_markers=_string_tuple(raw, "native_path_markers"),
-        native_path_patterns=_string_tuple(raw, "native_path_patterns"),
-        native_path_exclude_markers=_string_tuple(raw, "native_path_exclude_markers"),
-        native_path_exclude_patterns=_string_tuple(raw, "native_path_exclude_patterns"),
-        library_path_patterns=_string_tuple(raw, "library_path_patterns"),
-        library_selector_path_patterns=_string_tuple_map(
-            raw,
-            "library_selector_path_patterns",
-        ),
-        library_name_suffix_patterns=_string_tuple(raw, "library_name_suffix_patterns"),
-        legacy_caller_fallback_name_prefixes=_string_tuple(
-            raw,
-            "legacy_caller_fallback_name_prefixes",
-        ),
-        core_native_categories=_string_map(raw, "core_native_categories"),
-        core_native_default_category=str(
-            raw.get("core_native_default_category", "Runtime Core (Native)")
-        ),
-        stdlib_category=str(raw.get("stdlib_category", "Runtime Stdlib")),
-        internals_category=str(raw.get("internals_category", "Runtime Internals")),
+    )
+
+
+def load_runtime_rules_file(
+    path: str | Path,
+    *,
+    core_classes: Iterable[str] = (),
+    verbose: bool = False,
+) -> RuntimeRuleSet:
+    rules_path = Path(path)
+    payload = yaml.safe_load(rules_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Runtime rule file {rules_path} must be a YAML object.")
+    return runtime_rules_from_mapping(
+        cast(Mapping[str, object], payload),
+        name=rules_path.stem,
+        core_classes=core_classes,
+        verbose=verbose,
     )

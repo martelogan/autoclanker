@@ -39,6 +39,14 @@ clankerprof targets \
 clankerprof slices \
   --profile profile.pb.gz \
   --output tmp/profile-slices.json
+
+# Export decoded facts once, then replay several projections from that artifact.
+clankerprof facts \
+  --profile profile.pb.gz \
+  --output tmp/profile-facts.json
+clankerprof targets \
+  --facts tmp/profile-facts.json \
+  --target HotelSearch#rank_results
 ```
 
 Add config for stable labels, path categories, filters, collapse rules, runtime
@@ -47,6 +55,7 @@ semantics, or metadata:
 ```bash
 clankerprof targets --profile profile.pb.gz --config target_config.json
 clankerprof slices --profile profile.pb.gz --config clankerprof-slices.yml
+clankerprof slices --facts tmp/profile-facts.json --config clankerprof-slices.yml
 ```
 
 The same commands are also available through the umbrella CLI:
@@ -56,6 +65,7 @@ autoclanker pprof slices --profile profile.pb.gz
 autoclanker pprof targets \
   --profile profile.pb.gz \
   --target HotelSearch#rank_results
+autoclanker pprof facts --profile profile.pb.gz --output tmp/profile-facts.json
 ```
 
 ## How It Thinks
@@ -80,7 +90,8 @@ callers, or compare gates.
 
 | Input | Purpose |
 | --- | --- |
-| `profile.pb` or `profile.pb.gz` | Required pprof CPU profile. |
+| `profile.pb` or `profile.pb.gz` | pprof CPU profile for direct decoding. |
+| sample-facts JSON | Versioned decoded profile surface accepted by `--facts`. |
 | `--target <function>` | Minimal target mode for explaining CPU below a known parent frame. |
 | `target_config.json` | Optional richer target categories for path-based attribution. |
 | `clankerprof-slices.yml` / `slices.yml` | Optional slice ownership, filters, collapse rules, and metadata. |
@@ -90,6 +101,7 @@ callers, or compare gates.
 | --- | --- |
 | target JSON/CSV/text | Parent-boundary cost ledger. |
 | slice JSON | Responsibility view with top frames and metadata. |
+| sample-facts JSON | Stable decoded facts that target and slice projections can replay. |
 | semantic callers CSV | Runtime/native leaves such as `Object#new` mapped back to callers. |
 | compare JSON + exit code | Before/after regression gate for benchmark or CI use. |
 
@@ -122,6 +134,8 @@ strategy. `clankerprof` keeps the pieces separate:
 ```bash
 clankerprof targets --profile profile.pb.gz --target TripPlanner#rank_itineraries
 clankerprof slices --profile profile.pb.gz --config clankerprof-slices.yml
+clankerprof facts --profile profile.pb.gz --output profile-facts.json
+clankerprof slices --facts profile-facts.json --config clankerprof-slices.yml
 clankerprof compare --before before-slices.json --after after-slices.json
 ```
 
@@ -130,6 +144,7 @@ The same commands are exposed through the umbrella CLI:
 ```bash
 autoclanker pprof targets --profile profile.pb.gz --target TripPlanner#rank_itineraries
 autoclanker pprof slices --profile profile.pb.gz --config clankerprof-slices.yml
+autoclanker pprof facts --profile profile.pb.gz --output profile-facts.json
 autoclanker pprof compare --before before-slices.json --after after-slices.json
 ```
 
@@ -349,8 +364,47 @@ clankerprof targets \
 
 The packaged Ruby rule pack can label native/core frames, recognize Ruby
 library paths, and fold runtime-internal cost into meaningful callers.
-Additional runtimes should be added as data files plus tests, not as special
-cases in the decoder.
+Project-local runtimes can use the same machinery without changing the
+package:
+
+```bash
+clankerprof targets \
+  --profile service-profile.pb.gz \
+  --config target_config.json \
+  --runtime-rules runtime-rules.yml \
+  --core-classes core_classes.csv \
+  --fold-runtime-internals
+```
+
+Use `--runtime-rules` for semantic labels, native path markers, dependency path
+extraction, selector-specific dependency paths, caller fallback prefixes,
+simplification maps, and foldable categories that are specific to your
+application or language runtime. Packaged runtimes are conveniences, not the
+extension boundary.
+
+Rule order is intentional. If your runtime reports dynamically created
+constructors as native frames, put the most specific folded-caller labels
+before broad fallbacks:
+
+```yaml
+native_name_category_rules:
+  - category: Presentation Model
+    name_patterns:
+      - '^(?=.*View)[A-Z][A-Za-z0-9_]*(::[A-Z][A-Za-z0-9_]*)*\\.new$'
+  - category: Application
+    name_patterns:
+      - '^[A-Z][A-Za-z0-9_]*(::[A-Z][A-Za-z0-9_]*)*\\.new$'
+library_selector_path_patterns:
+  plugin:
+    - regex:/plugins/([^/]+)/
+caller_fallback_name_prefixes:
+  - Delegator.
+```
+
+Use `--target-csv-layout compat` only when reproducing the two-file
+`output/<name>` and `output/verbose/<name>` artifact layout from older target
+reports. The older `--legacy-target-csv-layout` flag is still accepted as an
+alias for existing scripts.
 
 ## Compare Gates
 
@@ -374,6 +428,7 @@ depending on terminal-only summaries.
 | --- | --- |
 | `proto.py` | Minimal pprof protobuf decoder. |
 | `model.py` | Typed profile, sample, frame, location, function, and mapping models. |
+| `facts.py` | Versioned sample-facts JSON, import/export helpers, and projection-neutral indexes. |
 | `analysis.py` | Call graph construction plus target and slice attribution. |
 | `rules.py` | Runtime rule packs, slice configs, filters, collapse rules, and attribute rules. |
 | `compare.py` | Before/after slice delta checks. |
@@ -383,6 +438,8 @@ depending on terminal-only summaries.
 ## Design Contract
 
 - Decode once; project many times.
+- Let CLI and library callers replay target and slice projections from the same
+  versioned fact artifact.
 - Keep target accounting and slice attribution separate.
 - Preserve raw profile identity while adding semantic labels as projections.
 - Keep runtime and ownership knowledge declarative.

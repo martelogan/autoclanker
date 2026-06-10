@@ -25,9 +25,17 @@ from clankerprof.analysis import (
     match_category_pattern,
     match_path_pattern,
     ruby_rules,
+    runtime_rules_from_file,
 )
 from clankerprof.cli import main as clankerprof_main
 from clankerprof.compare import CompareOptions, compare_slice_json
+from clankerprof.facts import (
+    SAMPLE_FACTS_SCHEMA_VERSION,
+    ProfileFactIndex,
+    dumps_sample_facts,
+    loads_sample_facts,
+    sample_facts_to_jsonable,
+)
 from clankerprof.model import Frame
 from clankerprof.proto import decode_profile_bytes, load_profile
 from clankerprof.render import (
@@ -37,7 +45,11 @@ from clankerprof.render import (
     render_target_json,
     render_target_text,
 )
-from clankerprof.rules import load_runtime_rules
+from clankerprof.rules import (
+    RuntimeRuleSet,
+    load_runtime_rules,
+    load_runtime_rules_file,
+)
 from tests.compliance import covers
 from tests.fixtures.pprof_builder import PprofFixtureBuilder
 
@@ -457,6 +469,102 @@ def test_clankerprof_sample_facts_are_the_shared_projection_surface() -> None:
     assert [frame.location_id for frame in facts[0].stack] == [1, 1]
 
 
+@covers("M9-001", "M9-006")
+def test_clankerprof_sample_facts_export_round_trips_projection_inputs() -> None:
+    profile = decode_profile_bytes(_request_rendering_profile_bytes())
+    config = {
+        "RequestHandler#render_response": {
+            "View Model": "app/view_models/**",
+            "Components": "path:app/components/**",
+            "Cache Client": "library:cache-client",
+        }
+    }
+
+    exported = sample_facts_to_jsonable(profile.to_sample_facts())
+    assert exported["schema_version"] == SAMPLE_FACTS_SCHEMA_VERSION
+    assert exported["summary"] == {
+        "empty_sample_count": 0,
+        "non_empty_sample_count": 6,
+        "sample_count": 6,
+        "total_primary_value": 210_000_000,
+    }
+    imported = loads_sample_facts(json.dumps(exported))
+
+    assert imported == profile.to_sample_facts()
+    assert render_target_json(
+        analyze_target_facts(imported, config)
+    ) == render_target_json(analyze_targets(profile, config))
+    options = SliceAnalysisOptions(
+        slices=(
+            SliceDefinition("components", ("app/components/**",)),
+            SliceDefinition("default", is_default=True),
+        ),
+        collapse=("library:*",),
+        unattributed_libraries=1,
+    )
+    imported_slice_json = render_slice_json(
+        analyze_slice_facts(imported, options), options
+    )
+    profile_slice_json = render_slice_json(analyze_slices(profile, options), options)
+    assert imported_slice_json == profile_slice_json
+
+
+@covers("M9-001", "M9-006")
+def test_clankerprof_sample_facts_import_rejects_malformed_frames() -> None:
+    profile = decode_profile_bytes(_request_rendering_profile_bytes())
+    exported = sample_facts_to_jsonable(profile.to_sample_facts())
+    samples = cast(list[dict[str, object]], exported["samples"])
+    samples[0]["stack"] = ["not-a-frame"]
+
+    with pytest.raises(ValueError, match="Each sample fact frame must be an object"):
+        loads_sample_facts(json.dumps(exported))
+
+    exported = sample_facts_to_jsonable(profile.to_sample_facts())
+    samples = cast(list[dict[str, object]], exported["samples"])
+    samples[0]["primary_value"] = 1
+    with pytest.raises(ValueError, match="primary value does not match"):
+        loads_sample_facts(json.dumps(exported))
+
+
+@covers("M9-001", "M9-006")
+def test_clankerprof_fact_index_exposes_shared_stack_operations() -> None:
+    profile = decode_profile_bytes(_request_rendering_profile_bytes())
+    index = ProfileFactIndex.from_input(profile.to_sample_facts())
+    fact = next(
+        sample
+        for sample in index.samples()
+        if any(frame.name == "RequestHandler#render_response" for frame in sample.stack)
+        and any(frame.name == "ComponentRenderer#render" for frame in sample.stack)
+        and any(frame.name == "CacheClient#get_multi" for frame in sample.stack)
+    )
+
+    assert index.total_primary_value == profile.total_primary_value()
+    assert [
+        frame.name
+        for frame in index.target_frames(fact, {"RequestHandler#render_response"})
+    ] == ["RequestHandler#render_response"]
+    assert index.any_frame_matches(
+        fact,
+        lambda frame: frame.name == "ComponentRenderer#render",
+    )
+    caller = index.first_caller_after_leaf(
+        fact,
+        lambda frame: frame.name == "ComponentRenderer#render",
+    )
+    assert caller is not None
+    assert caller.name == "ComponentRenderer#render"
+
+    selection = index.select_bottom_frame(
+        fact,
+        is_eligible=lambda frame: not frame.filename.startswith("<"),
+        is_collapsed=lambda frame: "cache-client" in frame.filename,
+    )
+
+    assert selection is not None
+    assert selection.bottom.name == "ComponentRenderer#render"
+    assert selection.found_uncollapsed_eligible is True
+
+
 @covers("M9-001")
 def test_clankerprof_sample_facts_preserve_location_folded_markers() -> None:
     profile = decode_profile_bytes(_folded_location_profile_bytes())
@@ -734,6 +842,131 @@ def test_clankerprof_ruby_rules_support_simplification_folding_and_attributables
     assert "request_count" in csv_output
     assert "Application" in csv_output
     assert "4000.0" in csv_output
+
+
+@covers("M9-003")
+def test_clankerprof_loads_external_runtime_rule_packs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("Target#render", "/srv/app/target.py"))
+    app = builder.location(builder.function("App::Page#render", "/srv/app/page.py"))
+    allocation = builder.location(builder.function("Object#new", "<native>"))
+    trace = builder.location(
+        builder.function("TraceLib::Span#finish", "/deps/trace-lib/span.py")
+    )
+    native_constructor = builder.location(
+        builder.function("ReportBuilder::Row.new", "<native>")
+    )
+    view_constructor = builder.location(
+        builder.function("ReceiptView::Line.new", "<native>")
+    )
+    builder.sample((allocation, app, target), 10_000_000)
+    builder.sample((allocation, trace, target), 20_000_000)
+    builder.sample((trace, target), 30_000_000)
+    builder.sample((allocation, native_constructor, target), 5_000_000)
+    builder.sample((allocation, view_constructor, target), 7_000_000)
+
+    profile = decode_profile_bytes(builder.encode())
+    rules_path = tmp_path / "runtime-rules.yml"
+    rules_path.write_text(
+        """
+name: demo-runtime
+core_native_default_category: Runtime Allocation
+native_path_markers:
+  - <native>
+library_path_patterns:
+  - regex:/deps/([^/]+)/
+library_selector_path_patterns:
+  plugin:
+    - regex:/plugins/([^/]+)/
+library_name_suffix_patterns:
+  - -[0-9].*
+semantic_rules:
+  - category: Tracing Library
+    name_contains:
+      - TraceLib
+native_name_category_rules:
+  - category: Presentation Model
+    name_patterns:
+      - '^(?=.*View)[A-Z][A-Za-z0-9_]*(::[A-Z][A-Za-z0-9_]*)*\\.new$'
+  - category: Application
+    name_patterns:
+      - '^[A-Z][A-Za-z0-9_]*(::[A-Z][A-Za-z0-9_]*)*\\.new$'
+always_foldable_categories:
+  - Runtime Allocation
+""",
+        encoding="utf-8",
+    )
+    runtime_rules = load_runtime_rules_file(
+        rules_path,
+        core_classes={"Object"},
+    )
+    assert match_path_pattern(
+        "plugin:maps-extension",
+        "/srv/plugins/maps-extension-2.1.0/lib/extension.py",
+        runtime_rules,
+    )
+
+    result = analyze_targets(
+        profile,
+        {"Target#render": {"Application": "path:/srv/app/**"}},
+        TargetAnalysisOptions(
+            runtime_rules=runtime_rules,
+            fold_runtime_internals=True,
+            track_semantic_callers=True,
+        ),
+    )["Target#render"]
+
+    assert result["Application"].cpu_time == 15_000_000
+    assert result["Application"].folded_from == {"Object#new": 15_000_000}
+    assert result["Presentation Model"].cpu_time == 7_000_000
+    assert result["Presentation Model"].folded_from == {"Object#new": 7_000_000}
+    assert result["Tracing Library"].cpu_time == 50_000_000
+    assert result["Tracing Library"].folded_from == {"Object#new": 20_000_000}
+
+    config_path = tmp_path / "target-config.json"
+    profile_path = tmp_path / "profile.pb"
+    attributables_path = tmp_path / "attributables.json"
+    profile_path.write_bytes(builder.encode())
+    config_path.write_text(
+        json.dumps({"Target#render": {"Application": "path:/srv/app/**"}}),
+        encoding="utf-8",
+    )
+    attributables_path.write_text(
+        json.dumps({"p90_ms": {"Target#render": 120.0}}),
+        encoding="utf-8",
+    )
+    assert (
+        clankerprof_main(
+            [
+                "targets",
+                "--profile",
+                str(profile_path),
+                "--config",
+                str(config_path),
+                "--runtime-rules",
+                str(rules_path),
+                "--core-classes",
+                str(_write_core_csv(tmp_path)),
+                "--fold-runtime-internals",
+                "--format",
+                "simple-csv",
+                "--attributables",
+                str(attributables_path),
+            ]
+        )
+        == 0
+    )
+    rendered = capsys.readouterr().out
+    assert "Tracing Library" in rendered
+    assert "Presentation Model" in rendered
+    assert "p90_ms" in rendered
+    assert "83.3" in rendered
+
+    assert runtime_rules_from_file(rules_path, core_classes={"Object"}).name == (
+        "demo-runtime"
+    )
 
 
 @covers("M9-003")
@@ -1195,6 +1428,54 @@ def test_clankerprof_supports_legacy_no_enhanced_native_caller_fallback(
 
 
 @covers("M9-003")
+def test_clankerprof_caller_fallback_prefixes_are_generic_rule_config(
+    tmp_path: Path,
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("Target#render", "/srv/app/target.py"))
+    app_caller = builder.location(
+        builder.function("App::Renderer#render", "/srv/app/renderer.py")
+    )
+    delegated_leaf = builder.location(
+        builder.function("Delegator.forward", "/opt/runtime/stdlib/delegator.py")
+    )
+    builder.sample((delegated_leaf, app_caller, target), 9_000_000)
+    profile = decode_profile_bytes(builder.encode())
+    config = {"Target#render": {"Application": "path:/srv/app/**"}}
+
+    def load_rules(field_name: str) -> RuntimeRuleSet:
+        path = tmp_path / f"{field_name}.yml"
+        path.write_text(
+            f"""
+name: demo-runtime
+stdlib_path_markers:
+  - /opt/runtime/stdlib/
+{field_name}:
+  - Delegator.
+""",
+            encoding="utf-8",
+        )
+        return load_runtime_rules_file(path)
+
+    generic_rules = load_rules("caller_fallback_name_prefixes")
+    alias_rules = load_rules("legacy_caller_fallback_name_prefixes")
+    assert generic_rules.caller_fallback_name_prefixes == ("Delegator.",)
+    assert alias_rules.caller_fallback_name_prefixes == ("Delegator.",)
+
+    for rules in (generic_rules, alias_rules):
+        categories = analyze_targets(
+            profile,
+            config,
+            TargetAnalysisOptions(
+                runtime_rules=rules,
+                enhanced_runtime_categorization=False,
+                caller_fallback_when_uncategorized=True,
+            ),
+        )["Target#render"]
+        assert categories["Application"].cpu_time == 9_000_000
+
+
+@covers("M9-003")
 def test_clankerprof_can_emit_legacy_target_csv_artifact_pair(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1224,6 +1505,9 @@ def test_clankerprof_can_emit_legacy_target_csv_artifact_pair(
                 "--runtime",
                 "ruby",
                 "--fold-ruby-internals",
+                "--track-semantic-callers",
+                "--semantic-callers-csv",
+                "semantic-callers.csv",
                 "--format",
                 "csv",
                 "--cpu-attributables",
@@ -1245,7 +1529,32 @@ def test_clankerprof_can_emit_legacy_target_csv_artifact_pair(
     assert simplified.startswith("Parent Function,Category,CPU %,request_count")
     assert "Top 3 Callsites,Top Leaf Functions" in simplified.splitlines()[0]
     assert verbose.startswith("Parent Function,Category,CPU Time (ns),CPU Time,%")
-    assert "Top Caller->Leaf Pair" in verbose.splitlines()[0]
+    assert "Top Caller\u2192Leaf Pair" in verbose.splitlines()[0]
+    assert " \u2192 " in verbose
+    semantic = (tmp_path / "semantic-callers.csv").read_text(encoding="utf-8")
+    assert "gems/statsd-instrument/lib/statsd/instrument/aggregator.rb" in semantic
+
+    assert (
+        clankerprof_main(
+            [
+                "targets",
+                "--profile",
+                str(profile_path),
+                "--config",
+                str(config_path),
+                "--runtime",
+                "ruby",
+                "--format",
+                "csv",
+                "--output",
+                "generic-layout.csv",
+                "--target-csv-layout",
+                "compat",
+            ]
+        )
+        == 0
+    )
+    assert (tmp_path / "output" / "generic-layout.csv").exists()
 
 
 @covers("M9-004")
@@ -1864,14 +2173,20 @@ unattributed_libraries = 1
     assert libraries[0]["name"] == "cache-client"
 
 
-@covers("M9-005")
+@covers("M9-005", "M9-006")
 def test_clankerprof_cli_and_autoclanker_alias_generate_outputs(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     profile_path = tmp_path / "profile.pb.gz"
+    facts_path = tmp_path / "profile-facts.json"
+    alias_facts_path = tmp_path / "alias-profile-facts.json"
     config_path = tmp_path / "target_config.json"
     output_path = tmp_path / "targets.csv"
     profile_path.write_bytes(_target_profile_bytes(gzipped=True))
+    facts_path.write_text(
+        dumps_sample_facts(load_profile(str(profile_path)).to_sample_facts()),
+        encoding="utf-8",
+    )
     config_path.write_text(
         json.dumps(
             {"Target#render": {"App Templates": r"[/\\]app[/\\]templates[/\\]"}}
@@ -1917,6 +2232,139 @@ def test_clankerprof_cli_and_autoclanker_alias_generate_outputs(
     alias_payload = json.loads(capsys.readouterr().out)
     assert alias_payload["tool"] == "clankerprof_targets"
     assert "Target#render" in alias_payload["parents"]
+
+    assert (
+        clankerprof_main(
+            [
+                "targets",
+                "--facts",
+                str(facts_path),
+                "--config",
+                str(config_path),
+                "--format",
+                "json",
+            ]
+        )
+        == 0
+    )
+    facts_target_payload = json.loads(capsys.readouterr().out)
+    assert facts_target_payload == alias_payload
+
+    assert (
+        clankerprof_main(
+            [
+                "facts",
+                "--profile",
+                str(profile_path),
+            ]
+        )
+        == 0
+    )
+    facts_payload = json.loads(capsys.readouterr().out)
+    assert facts_payload["tool"] == "clankerprof_facts"
+    assert facts_payload["schema_version"] == SAMPLE_FACTS_SCHEMA_VERSION
+    assert facts_payload["summary"]["sample_count"] == 3
+
+    assert (
+        autoclanker_main(
+            [
+                "pprof",
+                "facts",
+                "--profile",
+                str(profile_path),
+                "--output",
+                str(alias_facts_path),
+            ]
+        )
+        == 0
+    )
+    alias_facts_payload = json.loads(capsys.readouterr().out)
+    assert alias_facts_payload["tool"] == "clankerprof_facts"
+    alias_facts_file = json.loads(alias_facts_path.read_text(encoding="utf-8"))
+    assert alias_facts_file["tool"] == "clankerprof_facts"
+    assert alias_facts_file["schema_version"] == SAMPLE_FACTS_SCHEMA_VERSION
+    assert "samples" in alias_facts_file
+
+
+@covers("M9-004", "M9-005", "M9-006")
+def test_clankerprof_cli_uses_sample_facts_for_slice_projection(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    facts_path = tmp_path / "profile-facts.json"
+    slices_path = tmp_path / "slices.yml"
+    config_path = tmp_path / "clankerprof-slices.yml"
+    profile_path.write_bytes(_slice_semantics_profile_bytes())
+    facts_path.write_text(
+        dumps_sample_facts(load_profile(str(profile_path)).to_sample_facts()),
+        encoding="utf-8",
+    )
+    slices_path.write_text(
+        """
+slices:
+  - name: components
+    paths:
+      - app/components/**
+  - name: default
+    default: true
+""".strip(),
+        encoding="utf-8",
+    )
+
+    profile_args = [
+        "slices",
+        "--profile",
+        str(profile_path),
+        "--slices",
+        str(slices_path),
+        "--collapse",
+        "library:*",
+        "--unattributed-libraries",
+        "1",
+        "--runtime",
+        "ruby",
+    ]
+    assert clankerprof_main(profile_args) == 0
+    profile_payload = json.loads(capsys.readouterr().out)
+
+    assert (
+        autoclanker_main(
+            [
+                "pprof",
+                "slices",
+                "--facts",
+                str(facts_path),
+                "--slices",
+                str(slices_path),
+                "--collapse",
+                "library:*",
+                "--unattributed-libraries",
+                "1",
+                "--runtime",
+                "ruby",
+            ]
+        )
+        == 0
+    )
+    facts_payload = json.loads(capsys.readouterr().out)
+    assert facts_payload == profile_payload
+
+    config_path.write_text(
+        f"""
+facts: {facts_path}
+slices: {slices_path}
+collapse:
+  - library:*
+unattributed_libraries: 1
+""".strip(),
+        encoding="utf-8",
+    )
+    assert (
+        clankerprof_main(["slices", "--config", str(config_path), "--runtime", "ruby"])
+        == 0
+    )
+    config_payload = json.loads(capsys.readouterr().out)
+    assert config_payload == profile_payload
 
 
 @covers("M9-005")
@@ -1964,3 +2412,111 @@ def test_clankerprof_loads_real_profile_file_from_disk(tmp_path: Path) -> None:
     profile_path.write_bytes(_target_profile_bytes())
     profile = load_profile(str(profile_path))
     assert len(profile.functions) == 5
+
+
+@covers("M9-006")
+def test_clankerprof_real_profile_parity_helper_requires_opt_in(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from clankerprof.parity import main as parity_main
+
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(_target_profile_bytes())
+    monkeypatch.delenv("CLANKERPROF_REAL_PROFILE_PARITY", raising=False)
+
+    assert parity_main(["--profile", str(profile_path)]) == 2
+    error_payload = json.loads(capsys.readouterr().err)
+    assert "CLANKERPROF_REAL_PROFILE_PARITY" in error_payload["error"]
+
+
+@covers("M9-006")
+def test_clankerprof_real_profile_parity_helper_covers_legacy_target_artifacts(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from clankerprof.parity import main as parity_main
+
+    profile_path = tmp_path / "profile.pb"
+    config_path = tmp_path / "target-config.json"
+    attributables_path = tmp_path / "attributables.json"
+    expected_simple_path = tmp_path / "expected-simple.csv"
+    expected_verbose_path = tmp_path / "expected-verbose.csv"
+    expected_semantic_path = tmp_path / "expected-semantic.csv"
+    profile_path.write_bytes(_ruby_profile_bytes())
+    config_path.write_text(
+        json.dumps({"Target#render": {"Application": r"[/\\]app[/\\]"}}),
+        encoding="utf-8",
+    )
+    attributables_path.write_text(
+        json.dumps({"request_count": {"Target#render": 10_000}}),
+        encoding="utf-8",
+    )
+    runtime_rules = ruby_rules(_ruby_core_classes())
+    results = analyze_targets(
+        decode_profile_bytes(_ruby_profile_bytes()),
+        {"Target#render": {"Application": r"[/\\]app[/\\]"}},
+        TargetAnalysisOptions(
+            runtime_rules=runtime_rules,
+            fold_runtime_internals=True,
+            track_semantic_callers=True,
+            attributables={"request_count": {"Target#render": 10_000}},
+        ),
+    )
+    expected_simple_path.write_text(
+        render_target_csv(
+            results,
+            attributables={"request_count": {"Target#render": 10_000}},
+            simplified=True,
+            legacy_layout=True,
+        ),
+        encoding="utf-8",
+    )
+    expected_verbose_path.write_text(
+        render_target_csv(
+            results,
+            attributables={"request_count": {"Target#render": 10_000}},
+            legacy_layout=True,
+        ),
+        encoding="utf-8",
+    )
+    expected_semantic_path.write_text(
+        render_semantic_callers_csv(
+            results,
+            runtime_rules=runtime_rules,
+            dependency_prefix="gems",
+            legacy_layout=True,
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        parity_main(
+            [
+                "--allow-local-inputs",
+                "--profile",
+                str(profile_path),
+                "--target-config",
+                str(config_path),
+                "--runtime",
+                "ruby",
+                "--core-classes",
+                str(_write_core_csv(tmp_path)),
+                "--fold-runtime-internals",
+                "--track-semantic-callers",
+                "--attributables",
+                str(attributables_path),
+                "--legacy-target-csv-layout",
+                "--expected-target-csv",
+                str(expected_simple_path),
+                "--expected-verbose-target-csv",
+                str(expected_verbose_path),
+                "--expected-semantic-callers-csv",
+                str(expected_semantic_path),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {"checked": ["targets"], "ok": True}

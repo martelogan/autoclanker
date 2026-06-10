@@ -86,7 +86,16 @@ def render_semantic_callers_csv(
     results: Mapping[str, Mapping[str, CategoryStats]],
     *,
     runtime_rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES,
+    dependency_prefix: str = "deps",
+    legacy_layout: bool = False,
 ) -> str:
+    if legacy_layout:
+        return _render_legacy_semantic_callers_csv(
+            results,
+            runtime_rules=runtime_rules,
+            dependency_prefix=dependency_prefix,
+        )
+
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(
@@ -125,19 +134,64 @@ def render_semantic_callers_csv(
                         metrics.count,
                         top_caller,
                         caller_samples,
-                        _shorten_semantic_caller_file(caller_file, runtime_rules),
+                        _shorten_semantic_caller_file(
+                            caller_file,
+                            runtime_rules,
+                            dependency_prefix=dependency_prefix,
+                        ),
                     ]
                 )
     return output.getvalue().rstrip("\r\n")
 
 
+def _render_legacy_semantic_callers_csv(
+    results: Mapping[str, Mapping[str, CategoryStats]],
+    *,
+    runtime_rules: RuntimeRuleSet,
+    dependency_prefix: str,
+) -> str:
+    lines = [
+        "Parent Function,Category,Leaf Function,Leaf Samples,Top Caller,"
+        "Caller Samples,Caller File"
+    ]
+    for parent, categories in results.items():
+        for category, stats in categories.items():
+            for leaf, metrics in stats.semantic_callers.items():
+                if metrics.count == 0:
+                    continue
+                top_caller, caller_samples = max(
+                    metrics.caller_names.items(),
+                    key=lambda item: item[1],
+                    default=("", 0),
+                )
+                caller_file, _ = max(
+                    metrics.caller_files.items(),
+                    key=lambda item: item[1],
+                    default=("", 0),
+                )
+                shortened_file = _shorten_semantic_caller_file(
+                    caller_file,
+                    runtime_rules,
+                    dependency_prefix=dependency_prefix,
+                )
+                lines.append(
+                    f"{_quote_legacy_csv(parent)},{_quote_legacy_csv(category)},"
+                    f"{_quote_legacy_csv(leaf)},{metrics.count},"
+                    f"{_quote_legacy_csv(top_caller)},{caller_samples},"
+                    f"{_quote_legacy_csv(shortened_file)}"
+                )
+    return "\n".join(lines)
+
+
 def _shorten_semantic_caller_file(
     file_path: str,
     runtime_rules: RuntimeRuleSet,
+    *,
+    dependency_prefix: str,
 ) -> str:
     library_path = extract_library_path(file_path, runtime_rules)
     if library_path is not None:
-        return f"deps/{library_path.relative_path}"
+        return f"{dependency_prefix}/{library_path.relative_path}"
     return file_path
 
 
@@ -146,7 +200,15 @@ def render_target_csv(
     *,
     attributables: Mapping[str, Mapping[str, float]] | None = None,
     simplified: bool = False,
+    legacy_layout: bool = False,
 ) -> str:
+    if legacy_layout:
+        return _render_legacy_target_csv(
+            results,
+            attributables=attributables,
+            simplified=simplified,
+        )
+
     output = io.StringIO()
     attributable_columns = sorted(attributables.keys()) if attributables else []
     if simplified:
@@ -254,6 +316,133 @@ def render_target_csv(
                 ]
             )
     return output.getvalue().rstrip("\r\n")
+
+
+def _quote_legacy_csv(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
+
+
+def _render_legacy_target_csv(
+    results: Mapping[str, Mapping[str, CategoryStats]],
+    *,
+    attributables: Mapping[str, Mapping[str, float]] | None = None,
+    simplified: bool = False,
+) -> str:
+    attributable_columns = sorted(attributables.keys()) if attributables else []
+    if simplified:
+        header = "Parent Function,Category,CPU %"
+        if attributable_columns:
+            header += "," + ",".join(attributable_columns)
+        header += ",Top 3 Callsites,Top Leaf Functions"
+    else:
+        header = "Parent Function,Category,CPU Time (ns),CPU Time,%"
+        if attributable_columns:
+            header += "," + ",".join(attributable_columns)
+        header += (
+            ",Samples,Leaf Functions,Files,Top 3 Callsites,Top Leaf Functions,"
+            "Top Caller\u2192Leaf Pair,Rank-2 Caller\u2192Leaf Pair,"
+            "Rank-3 Caller\u2192Leaf Pair"
+        )
+
+    lines = [header]
+    for parent, categories in results.items():
+        total = sum(stats.cpu_time for stats in categories.values())
+        for category, stats in sorted(
+            categories.items(), key=lambda item: item[1].cpu_time, reverse=True
+        ):
+            pct = (stats.cpu_time / total * 100) if total else 0
+            if simplified and pct < 0.1 and category != "Other":
+                continue
+
+            top_functions = sorted(
+                stats.functions.items(),
+                key=lambda item: item[1].cpu_time,
+                reverse=True,
+            )[: 3 if simplified else 5]
+            if simplified:
+                function_summary = "; ".join(
+                    f"{name} ({metrics.cpu_time / total * 100:.1f}%)"
+                    for name, metrics in top_functions
+                )
+            else:
+                function_summary = "; ".join(
+                    f"{name} ({metrics.count} samples, {metrics.cpu_time / total * 100:.1f}%)"
+                    for name, metrics in top_functions
+                )
+
+            caller_totals: dict[str, int] = {}
+            for pair, metrics in stats.caller_leaf_pairs.items():
+                caller = pair.split(" -> ", 1)[0]
+                caller_totals[caller] = caller_totals.get(caller, 0) + metrics.cpu_time
+            top_callers = sorted(
+                caller_totals.items(), key=lambda item: item[1], reverse=True
+            )[:3]
+            callsite_separator = "; " if simplified else ", "
+            callsites_summary = callsite_separator.join(
+                f"{caller} ({time_ns / total * 100:.1f}%)"
+                for caller, time_ns in top_callers
+            )
+
+            attributable_values = [
+                (
+                    f"{(pct / 100.0) * attributables[column][parent]:.1f}"
+                    if attributables
+                    and column in attributables
+                    and parent in attributables[column]
+                    else "N/A"
+                )
+                for column in attributable_columns
+            ]
+
+            if simplified:
+                row = (
+                    f"{_quote_legacy_csv(parent)},{_quote_legacy_csv(category)},"
+                    f"{pct:.1f}"
+                )
+                if attributable_values:
+                    row += "," + ",".join(attributable_values)
+                row += (
+                    f",{_quote_legacy_csv(callsites_summary)},"
+                    f"{_quote_legacy_csv(function_summary)}"
+                )
+                lines.append(row)
+                continue
+
+            top_pairs = sorted(
+                stats.caller_leaf_pairs.items(),
+                key=lambda item: item[1].cpu_time,
+                reverse=True,
+            )[:3]
+            pair_columns = [
+                _quote_legacy_csv(
+                    f"{_legacy_pair_arrow(pair)} "
+                    f"({metrics.count} samples, {metrics.cpu_time / total * 100:.1f}%)"
+                )
+                for pair, metrics in top_pairs
+            ]
+            while len(pair_columns) < 3:
+                pair_columns.append('""')
+
+            row = (
+                f"{_quote_legacy_csv(parent)},{_quote_legacy_csv(category)},"
+                f"{stats.cpu_time},{_quote_legacy_csv(format_time(stats.cpu_time))},"
+                f"{pct:.2f}"
+            )
+            if attributable_values:
+                row += "," + ",".join(attributable_values)
+            row += (
+                f",{stats.sample_count},{len(stats.functions)},{len(stats.files)},"
+                f"{_quote_legacy_csv(callsites_summary)},"
+                f"{_quote_legacy_csv(function_summary)},"
+                f"{','.join(pair_columns)}"
+            )
+            lines.append(row)
+
+    return "\n".join(lines)
+
+
+def _legacy_pair_arrow(pair: str) -> str:
+    return pair.replace(" -> ", " \u2192 ")
 
 
 def render_target_text(

@@ -358,5 +358,11 @@
     "gate": "required",
     "description": "clankerprof is usable both as a standalone CLI and through the autoclanker pprof alias, with machine-readable JSON results and file output for report formats.",
     "status": "active"
+  },
+  {
+    "requirement_id": "M9-006",
+    "gate": "required",
+    "description": "clankerprof exposes a stable versioned sample-facts JSON contract and projection-neutral fact index so target, slice, semantic-caller, and compare projections can share one decoded profile surface.",
+    "status": "active"
   }
 ]

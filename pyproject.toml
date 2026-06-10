@@ -114,7 +114,7 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 ignore = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["autoclanker", "bigbets"]
+known-first-party = ["autoclanker", "bigbets", "clankerprof"]
 combine-as-imports = true
 force-single-line = false
 lines-between-types = 1

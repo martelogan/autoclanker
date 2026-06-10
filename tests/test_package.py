@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
+import sys
 
+from pathlib import Path
 from typing import cast
 
 from autoclanker import __version__
 from autoclanker.cli import build_parser
 from bigbets import BIGBETS_VERSION, __version__ as bigbets_version
 from tests.compliance import covers
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _subparser_choices(
@@ -71,6 +76,25 @@ def test_cli_parser_exposes_required_command_tree() -> None:
     assert {"validate", "emit", "render", "site"} <= set(
         _subparser_choices(root_commands["bigbets"])
     )
-    assert {"targets", "slices", "compare"} <= set(
+    assert {"targets", "slices", "compare", "facts"} <= set(
         _subparser_choices(root_commands["pprof"])
+    )
+
+
+@covers("M9-005")
+def test_clankerprof_parity_script_is_directly_runnable() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "clankerprof" / "check_real_profile_parity.py"),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "Compare clankerprof output against local real-profile reference" in (
+        result.stdout
     )

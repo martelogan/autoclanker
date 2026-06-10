@@ -47,6 +47,7 @@ gates.
 | `clankerprof targets` | Explain CPU under one or more configured parent functions, request handlers, renderers, jobs, or RPC boundaries. | JSON, CSV, simple CSV, or text target reports. |
 | `clankerprof slices` | Attribute selected CPU to path-based responsibility slices with filters, collapse rules, and metadata. | JSON slice reports for humans, agents, and compare gates. |
 | `clankerprof compare` | Compare two slice JSON outputs with absolute and relative regression thresholds. | JSON delta report plus exit code `2` on regression. |
+| `clankerprof facts` | Export the decoded pprof sample-facts model for golden tests, agents, or cross-language parity work. | Versioned sample-facts JSON. |
 | `autoclanker pprof ...` | Run the same subcommands through the main `autoclanker` CLI. | Same payloads as `clankerprof`. |
 
 ## MVP contract
@@ -55,14 +56,15 @@ The current MVP is already useful as a standalone library and CLI. It is not yet
 a claim that every historical profile report can be deleted without real-profile
 golden verification.
 
-The tested compatibility contract is tracked in
-[`CLANKERPROF_PARITY.md`](CLANKERPROF_PARITY.md). Treat that file as the source
-of truth for what compatibility is claimed versus intentionally not claimed.
+The normative sample-facts contract is tracked in
+[`CLANKERPROF_SPEC.md`](CLANKERPROF_SPEC.md). The tested compatibility matrix is
+tracked in [`CLANKERPROF_PARITY.md`](CLANKERPROF_PARITY.md). Treat those files
+as the source of truth for what compatibility is claimed versus intentionally
+not claimed.
 
-The next phase should deepen the sample-facts engine: make the fact graph more
-explicit as a reusable library API, add richer projection composition, and bring
-additional runtime rule packs online without making any one runtime or ownership
-system part of the core model.
+The current sample-facts engine exposes a versioned JSON contract and a
+projection-neutral fact index. Real-profile golden verification is still
+required before retiring any older profile workflow.
 
 ## Quickstart
 
@@ -83,10 +85,24 @@ clankerprof slices \
   --profile profile.pb.gz \
   --config examples/clankerprof/clankerprof-slices.yml \
   --output tmp/profile-slices.json
+
+clankerprof facts \
+  --profile profile.pb.gz \
+  --output tmp/profile-facts.json
+
+clankerprof targets \
+  --facts tmp/profile-facts.json \
+  --config examples/clankerprof/target_config.json \
+  --format json
 ```
 
 See [`../examples/clankerprof`](../examples/clankerprof) for copyable target and
 slice configs.
+
+`targets` and `slices` accept either `--profile` or `--facts`. Use `--profile`
+when the command should decode pprof directly. Use `--facts` when one decoded
+sample-facts artifact should be replayed by several projections, stored as a
+golden fixture, or compared by another implementation.
 
 ## Target Attribution
 
@@ -192,16 +208,16 @@ Ruby support is opt-in and data-driven. Pass the runtime and the core-class CSV
 instead of relying on hardcoded application or framework assumptions. The Ruby
 rule pack declares stdlib paths, native path patterns, and library extraction
 patterns such as versioned `gems/<name>-<version>` directories. If
-`--ruby-core-classes` is omitted, `clankerprof` uses the packaged Ruby core
-class list:
+`--core-classes` is omitted with `--runtime ruby`, `clankerprof` uses the
+packaged Ruby core class list:
 
 ```bash
 clankerprof targets \
   --profile ruby-profile.pb.gz \
   --config target_config.json \
   --runtime ruby \
-  --ruby-core-classes ruby_core_classes.csv \
-  --fold-ruby-internals \
+  --core-classes ruby_core_classes.csv \
+  --fold-runtime-internals \
   --format simple-csv \
   --output ruby-slices.csv
 ```
@@ -209,12 +225,15 @@ clankerprof targets \
 The Ruby rules classify common native/core frames such as `String#gsub`,
 `Marshal.load`, `JSON.parse`, OpenTelemetry, StatsD, I/O clients, and
 serialization/compression helpers. Non-verbose mode rolls these into broad
-overhead families; `--verbose-ruby-internals` keeps raw categories and folds the
-verbose-only native categories when folding is enabled.
+overhead families; `--verbose-runtime-internals` keeps raw categories and folds
+the verbose-only native categories when folding is enabled.
 
 For compatibility with older target-attribution runs, pass `--no-enhanced`.
-That disables semantic runtime labels and uses the legacy native/delegated
-caller fallback before category matching.
+That disables semantic runtime labels and uses the configured
+`caller_fallback_name_prefixes` before category matching. The packaged Ruby
+rule pack includes the caller fallbacks needed for older Ruby-oriented reports;
+custom runtime packs can declare their own fallback prefixes without changing
+the analyzer.
 
 To reproduce the old two-file CSV artifact layout from
 `--format csv --output slices.csv`, add:
@@ -226,12 +245,56 @@ clankerprof targets \
   --runtime ruby \
   --format csv \
   --output slices.csv \
-  --legacy-target-csv-layout
+  --target-csv-layout compat
 ```
 
 That writes `output/slices.csv` and `output/verbose/slices.csv`, matching older
 two-file target report artifact locations while keeping ordinary `csv` and
-`simple-csv` as explicit single-output formats.
+`simple-csv` as explicit single-output formats. `--legacy-target-csv-layout`
+is still accepted as a compatibility alias for existing scripts.
+
+## Custom Runtime Rule Packs
+
+Use `--runtime-rules` when the packaged runtime rules are not enough. The file
+is YAML and can define semantic labels, native path markers, stdlib markers,
+library extraction patterns, selector-specific dependency paths, caller
+fallback prefixes, simplified categories, and foldable categories:
+
+```bash
+clankerprof targets \
+  --profile service-profile.pb.gz \
+  --config target_config.json \
+  --runtime-rules runtime-rules.yml \
+  --core-classes core_classes.csv \
+  --fold-runtime-internals
+```
+
+This is the preferred place for project- or language-specific vocabulary. The
+core package stays generic, while callers can still reproduce specialized
+category reports by carrying their own rule pack beside their benchmark or
+analysis config.
+
+Rule order is significant. For example, a runtime that reports dynamically
+created constructors as native frames can classify specific folded constructor
+callers before a broad application fallback:
+
+```yaml
+native_name_category_rules:
+  - category: Presentation Model
+    name_patterns:
+      - '^(?=.*View)[A-Z][A-Za-z0-9_]*(::[A-Z][A-Za-z0-9_]*)*\\.new$'
+  - category: Application
+    name_patterns:
+      - '^[A-Z][A-Za-z0-9_]*(::[A-Z][A-Za-z0-9_]*)*\\.new$'
+library_selector_path_patterns:
+  plugin:
+    - regex:/plugins/([^/]+)/
+caller_fallback_name_prefixes:
+  - Delegator.
+```
+
+This keeps domain-specific categories in data while preserving the same
+folding and target-attribution engine.
 
 ## Slice Attribution
 
@@ -298,6 +361,8 @@ Run it with:
 
 ```bash
 clankerprof slices --profile profile.pb.gz --config clankerprof-slices.yml
+clankerprof facts --profile profile.pb.gz --output profile-facts.json
+clankerprof slices --facts profile-facts.json --config clankerprof-slices.yml
 ```
 
 CLI array flags such as `--filter`, `--collapse`, and `--attribute` append to
@@ -409,8 +474,10 @@ value, and empty-stack accounting. Each `SampleFact` keeps the sample index,
 primary value, original sample, and expanded leaf-to-root frames. Target and
 slice projections can consume those facts directly through
 `analyze_target_facts(...)` and `analyze_slice_facts(...)`, which is the
-intended path for reusable libraries, future indexes, and cross-language golden
-tests.
+intended path for reusable libraries, projection indexes, and cross-language
+golden tests. The same seam is available from the CLI with `clankerprof facts`
+followed by `clankerprof targets --facts ...` or
+`clankerprof slices --facts ...`.
 
 ## Integration Guidance
 

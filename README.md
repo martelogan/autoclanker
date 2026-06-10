@@ -238,7 +238,7 @@ clankerprof targets \
   --profile profile.pb.gz \
   --config target_config.json \
   --runtime ruby \
-  --fold-ruby-internals \
+  --fold-runtime-internals \
   --format simple-csv \
   --output target-slices.csv
 
@@ -250,6 +250,15 @@ clankerprof slices \
   --collapse "library:telemetry-client" \
   --attribute "name:TemplateEngine::Native,to:rendering-native" \
   --output profile-slices.json
+
+clankerprof facts \
+  --profile profile.pb.gz \
+  --output profile-facts.json
+
+clankerprof targets \
+  --facts profile-facts.json \
+  --config target_config.json \
+  --format json
 
 autoclanker pprof compare --before before.json --after after.json
 ```
@@ -265,8 +274,8 @@ for a parent such as `TripPlanner#rank_itineraries`, the compact output can show
 app callsites and leaf functions that explain that bucket.
 
 The standalone guide includes the sample-facts architecture visual, copyable
-target/slice configs, a generic request-rendering example, direct Python library
-usage, and migration guardrails:
+target/slice configs, a generic request-rendering example, fact export/replay,
+direct Python library usage, and migration guardrails:
 [`docs/CLANKERPROF.md`](docs/CLANKERPROF.md). Example configs live in
 [`examples/clankerprof`](examples/clankerprof). The tested compatibility matrix
 is in [`docs/CLANKERPROF_PARITY.md`](docs/CLANKERPROF_PARITY.md), and the

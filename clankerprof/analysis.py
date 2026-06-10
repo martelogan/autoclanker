@@ -12,26 +12,29 @@ from importlib import resources
 from pathlib import Path
 from typing import Literal, TypeAlias, cast
 
+from clankerprof.facts import ProfileFactIndex, SampleFactsInput
 from clankerprof.model import (
     CategoryStats,
     Frame,
     Profile,
-    ProfileFacts,
-    SampleFact,
     TimeNs,
 )
-from clankerprof.rules import RuntimeRuleSet, load_runtime_rules
+from clankerprof.rules import (
+    RuntimeRuleSet,
+    load_runtime_rules,
+    load_runtime_rules_file,
+)
 
 OutputMode = Literal["text", "csv", "json", "simple-csv"]
 JsonValue: TypeAlias = (
     str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
 )
 PatternMode: TypeAlias = Literal["auto", "library", "path", "regex"]
-LibrarySelector: TypeAlias = Literal[
-    "dependency", "gem", "library", "package", "vendor"
-]
+LibrarySelector: TypeAlias = str
+DEFAULT_LIBRARY_SELECTORS = frozenset(
+    {"dependency", "gem", "library", "package", "vendor"}
+)
 DEFAULT_RUNTIME_RULES = load_runtime_rules("generic")
-SampleFactsInput: TypeAlias = Iterable[SampleFact] | ProfileFacts
 
 
 def _json_metadata() -> dict[str, JsonValue]:
@@ -45,6 +48,7 @@ class TargetAnalysisOptions:
     fold_runtime_internals: bool = False
     track_semantic_callers: bool = False
     attributables: Mapping[str, Mapping[str, float]] | None = None
+    caller_fallback_when_uncategorized: bool = False
     legacy_no_enhanced_caller_fallback: bool = False
 
 
@@ -184,6 +188,15 @@ def ruby_rules(core_classes: Iterable[str], *, verbose: bool = False) -> Runtime
     return load_runtime_rules("ruby", core_classes=core_classes, verbose=verbose)
 
 
+def runtime_rules_from_file(
+    path: str | Path,
+    *,
+    core_classes: Iterable[str] = (),
+    verbose: bool = False,
+) -> RuntimeRuleSet:
+    return load_runtime_rules_file(path, core_classes=core_classes, verbose=verbose)
+
+
 def format_time(nanoseconds: TimeNs) -> str:
     milliseconds = nanoseconds / 1_000_000
     if milliseconds >= 60_000:
@@ -193,14 +206,22 @@ def format_time(nanoseconds: TimeNs) -> str:
     return f"{milliseconds:.2f} ms"
 
 
-def _pattern_mode(pattern: str) -> tuple[PatternMode, str, LibrarySelector | None]:
+def _pattern_mode(
+    pattern: str,
+    rules: RuntimeRuleSet | None = None,
+) -> tuple[PatternMode, str, LibrarySelector | None]:
     mode, separator, rest = pattern.partition(":")
-    if separator and mode in {"dependency", "gem", "library", "package", "vendor"}:
-        return "library", rest, cast(LibrarySelector, mode)
     if separator and mode in {"path", "glob"}:
         return "path", rest, None
     if separator and mode == "regex":
         return "regex", rest, None
+    selector_names = DEFAULT_LIBRARY_SELECTORS
+    if rules is not None:
+        selector_names = selector_names | frozenset(
+            rules.library_selector_path_patterns
+        )
+    if separator and mode in selector_names:
+        return "library", rest, mode
     return "auto", pattern, None
 
 
@@ -221,7 +242,7 @@ def match_path_pattern(
     path: str,
     rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES,
 ) -> bool:
-    mode, resolved_pattern, selector = _pattern_mode(pattern)
+    mode, resolved_pattern, selector = _pattern_mode(pattern, rules)
     if mode == "library":
         library_name = extract_library_name(path, rules, selector=selector)
         return (
@@ -266,7 +287,7 @@ def match_category_pattern(
     path: str,
     rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES,
 ) -> bool:
-    mode, resolved_pattern, selector = _pattern_mode(pattern)
+    mode, resolved_pattern, selector = _pattern_mode(pattern, rules)
     if mode == "path":
         return match_path_pattern(resolved_pattern, path, rules)
     if mode == "regex":
@@ -350,18 +371,25 @@ def categorize_runtime_frame(frame: Frame, rules: RuntimeRuleSet) -> str | None:
 
     core_class = _direct_core_class(name, rules)
     if core_class is not None:
-        if path == "<cfunc>":
+        explicit_native_path = path == "<cfunc>" or (
+            not path.startswith("<internal:")
+            and (
+                path.startswith("<")
+                or any(marker in path for marker in rules.native_path_markers)
+            )
+        )
+        if explicit_native_path:
             return rules.core_native_categories.get(
                 core_class, rules.core_native_default_category
             )
         if is_runtime_stdlib_path(path, rules):
-            return rules.core_native_categories.get(core_class, rules.stdlib_category)
+            return rules.core_stdlib_categories.get(core_class, rules.stdlib_category)
         if path.startswith("<internal:"):
-            return rules.core_native_categories.get(
+            return rules.core_internal_categories.get(
                 core_class, rules.internals_category
             )
-        if core_class in rules.core_native_categories:
-            return rules.core_native_categories[core_class]
+        if core_class in rules.core_semantic_categories:
+            return rules.core_semantic_categories[core_class]
         return None
 
     if path == "<cfunc>":
@@ -424,19 +452,6 @@ def _is_internal_category_for_rules(
     return rules.verbose and category in rules.verbose_only_foldable_categories
 
 
-def _first_meaningful_caller(
-    stack: Sequence[Frame],
-    rules: RuntimeRuleSet,
-) -> Frame | None:
-    for caller in stack[1:10]:
-        if not caller.filename.startswith("<") and not is_runtime_stdlib_path(
-            caller.filename,
-            rules,
-        ):
-            return caller
-    return stack[1] if len(stack) > 1 else None
-
-
 def _first_non_runtime_file_caller(
     stack: Sequence[Frame],
     rules: RuntimeRuleSet,
@@ -484,18 +499,27 @@ def _target_category(
             category = caller_category
             break
 
-    if category is None and options.legacy_no_enhanced_caller_fallback:
+    if category is None and (
+        options.caller_fallback_when_uncategorized
+        or options.legacy_no_enhanced_caller_fallback
+    ):
         should_walk_up = leaf.filename.startswith("<") or (
             is_runtime_stdlib_path(leaf.filename, options.runtime_rules)
             and any(
                 leaf.name.startswith(prefix)
-                for prefix in options.runtime_rules.legacy_caller_fallback_name_prefixes
+                for prefix in options.runtime_rules.caller_fallback_name_prefixes
             )
         )
         if should_walk_up:
             caller = _first_non_runtime_file_caller(stack, options.runtime_rules)
             if caller is not None:
                 frame_to_categorize = caller
+
+    if category is None and folded and frame_to_categorize.filename.startswith("<"):
+        for rule in options.runtime_rules.native_name_category_rules:
+            if rule.matches(frame_to_categorize.name, frame_to_categorize.filename):
+                category = rule.category
+                break
 
     if category is None:
         for configured_category, pattern in parent_config.items():
@@ -538,14 +562,14 @@ def analyze_target_facts(
 ) -> dict[str, dict[str, CategoryStats]]:
     resolved_options = options or TargetAnalysisOptions()
     results: dict[str, dict[str, CategoryStats]] = {}
+    index = ProfileFactIndex.from_input(sample_facts)
+    target_names = frozenset(target_config)
 
-    for fact in _iter_sample_facts(sample_facts):
+    for fact in index.non_empty_samples():
         value = fact.primary_value
         stack = fact.stack
-        if not stack:
-            continue
         leaf = stack[0]
-        target_frames = [frame for frame in stack if frame.name in target_config]
+        target_frames = index.target_frames(fact, target_names)
         if not target_frames:
             continue
         for target_frame in target_frames:
@@ -560,7 +584,19 @@ def analyze_target_facts(
             stats.sample_count += 1
             stats.add_function(leaf.name, value)
             stats.files.add(frame_to_categorize.filename)
-            caller = _first_meaningful_caller(stack, resolved_options.runtime_rules)
+            caller = index.first_caller_after_leaf(
+                fact,
+                lambda frame: (
+                    not frame.filename.startswith("<")
+                    and not is_runtime_stdlib_path(
+                        frame.filename,
+                        resolved_options.runtime_rules,
+                    )
+                ),
+                limit=9,
+            )
+            if caller is None and len(stack) > 1:
+                caller = stack[1]
             if caller is not None:
                 stats.add_caller_leaf_pair(caller.name, leaf.name, value)
             if folded and folded_category:
@@ -631,7 +667,7 @@ def extract_library_path(
     )
     patterns = selector_patterns or rules.library_path_patterns
     for pattern in patterns:
-        mode, resolved_pattern, _selector = _pattern_mode(pattern)
+        mode, resolved_pattern, _selector = _pattern_mode(pattern, rules)
         if mode == "regex":
             try:
                 match = re.search(resolved_pattern, normalized)
@@ -689,7 +725,7 @@ def _matches_frame_filter(
         return value in frame.name
     if key == "path":
         return value in frame.filename
-    if key in {"dependency", "gem", "library", "package", "vendor"}:
+    if key in DEFAULT_LIBRARY_SELECTORS or key in rules.library_selector_path_patterns:
         library_name = extract_library_name(frame.filename, rules, selector=key)
         return library_name is not None if value == "*" else library_name == value
     raise ValueError(f"Unsupported filter key: {key}")
@@ -865,18 +901,6 @@ def _sample_has_descendant_attribute_for_slice(
     return False
 
 
-def _root_eligible_frame(
-    stack: Sequence[Frame],
-    *,
-    no_collapse_native: bool,
-    rules: RuntimeRuleSet,
-) -> Frame | None:
-    for frame in reversed(stack):
-        if no_collapse_native or not _is_native_path(frame.filename, rules):
-            return frame
-    return None
-
-
 def analyze_slices(
     profile: Profile,
     options: SliceAnalysisOptions,
@@ -896,46 +920,34 @@ def analyze_slice_facts(
     default_slice = next(
         (item.name for item in options.slices if item.is_default), "(all)"
     )
+    index = ProfileFactIndex.from_input(sample_facts)
 
-    for fact in _iter_sample_facts(sample_facts):
+    for fact in index.samples():
         value = fact.primary_value
         total_time += value
         stack = fact.stack
         if not stack:
             continue
         leaf = stack[0]
-        bottom = stack[0]
-        first_eligible: Frame | None = None
-        uncollapsible_frame: Frame | None = None
-        bottom_is_collapsed = False
-        found_uncollapsed_eligible = False
-        for frame in stack:
-            eligible = options.no_collapse_native or not _is_native_path(
-                frame.filename,
-                options.runtime_rules,
-            )
-            if not eligible:
-                continue
-            first_eligible = first_eligible or frame
-            if _is_collapsed_frame(frame, stack, options):
-                continue
-            bottom = frame
-            found_uncollapsed_eligible = True
-            break
-        if (
-            first_eligible is not None
-            and _is_native_path(bottom.filename, options.runtime_rules)
-            and not options.no_collapse_native
-        ):
-            bottom = first_eligible
-        if first_eligible is not None and not found_uncollapsed_eligible:
-            bottom = first_eligible
-            bottom_is_collapsed = _is_collapsed_frame(bottom, stack, options)
-            uncollapsible_frame = _root_eligible_frame(
-                stack,
-                no_collapse_native=options.no_collapse_native,
-                rules=options.runtime_rules,
-            )
+
+        def is_collapsed_for_sample(
+            frame: Frame, sample_stack: Sequence[Frame] = stack
+        ) -> bool:
+            return _is_collapsed_frame(frame, sample_stack, options)
+
+        selection = index.select_bottom_frame(
+            fact,
+            is_eligible=lambda frame: (
+                options.no_collapse_native
+                or not _is_native_path(frame.filename, options.runtime_rules)
+            ),
+            is_collapsed=is_collapsed_for_sample,
+        )
+        if selection is None:
+            continue
+        bottom = selection.bottom
+        bottom_is_collapsed = selection.bottom_is_collapsed
+        uncollapsible_frame = selection.root_eligible
         if options.filters and not _filters_match_sample(
             options.filters,
             stack,
@@ -1019,9 +1031,3 @@ def analyze_slice_facts(
         gc_time_ns=gc_time,
         uncollapsible=uncollapsible_stats if uncollapsible_stats.time_ns > 0 else None,
     )
-
-
-def _iter_sample_facts(sample_facts: SampleFactsInput) -> Iterable[SampleFact]:
-    if isinstance(sample_facts, ProfileFacts):
-        return sample_facts.samples
-    return sample_facts
