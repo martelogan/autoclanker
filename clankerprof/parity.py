@@ -6,16 +6,22 @@ import csv
 import io
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
+import tomllib
 
 from collections.abc import Generator, Sequence
 from pathlib import Path
 from typing import Any, cast
 
+import yaml
+
 from clankerprof.cli import main as clankerprof_main
 
 OPT_IN_ENV = "CLANKERPROF_REAL_PROFILE_PARITY"
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @contextlib.contextmanager
@@ -59,6 +65,46 @@ def _run_to_json(argv: list[str], output_path: Path) -> dict[str, Any]:
     if status != 0:
         raise ValueError(f"clankerprof command failed with status {status}: {argv}")
     return _json(output_path)
+
+
+def _run_rust_to_json(argv: list[str], output_path: Path) -> dict[str, Any]:
+    if shutil.which("cargo") is None:
+        raise ValueError("cargo is required for --check-rust-core.")
+    completed = subprocess.run(
+        [
+            "cargo",
+            "run",
+            "--quiet",
+            "-p",
+            "clankerprof-core",
+            "--bin",
+            "clankerprof-rs",
+            "--",
+            *argv,
+            "--output",
+            str(output_path),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise ValueError(
+            "clankerprof-rs command failed with status "
+            f"{completed.returncode}: {argv}\n{completed.stderr}"
+        )
+    return _json(output_path)
+
+
+def _assert_payload_equal(
+    actual: dict[str, Any],
+    expected: dict[str, Any],
+    *,
+    label: str,
+) -> None:
+    if actual != expected:
+        raise ValueError(f"{label} parity mismatch.")
 
 
 def _append_runtime_args(args: argparse.Namespace, argv: list[str]) -> None:
@@ -195,6 +241,121 @@ def _run_facts(args: argparse.Namespace, tmpdir: Path) -> dict[str, Any] | None:
     return facts_json
 
 
+def _run_rust_core(args: argparse.Namespace, tmpdir: Path) -> list[str]:
+    if not args.check_rust_core:
+        return []
+    checked: list[str] = []
+    python_facts = _run_to_json(
+        ["facts", "--profile", args.profile],
+        tmpdir / "python-facts.json",
+    )
+    rust_facts = _run_rust_to_json(
+        ["facts", "--profile", args.profile],
+        tmpdir / "rust-facts.json",
+    )
+    _assert_payload_equal(rust_facts, python_facts, label="Rust facts")
+    checked.append("rust_facts")
+
+    if args.target_config is not None:
+        python_targets = _run_to_json(
+            [*_target_base_argv(args), "--format", "json"],
+            tmpdir / "python-targets.json",
+        )
+        rust_targets = _run_rust_to_json(
+            [
+                "targets",
+                "--profile",
+                args.profile,
+                "--config",
+                args.target_config,
+            ],
+            tmpdir / "rust-targets.json",
+        )
+        _assert_payload_equal(rust_targets, python_targets, label="Rust targets")
+        checked.append("rust_targets")
+    if args.slice_config is not None:
+        rust_slice_argv = _rust_slice_argv(args, args.slice_config)
+        if rust_slice_argv is not None:
+            python_slices = _run_to_json(
+                [
+                    "slices",
+                    "--profile",
+                    args.profile,
+                    "--config",
+                    args.slice_config,
+                ],
+                tmpdir / "python-slices.json",
+            )
+            rust_slices = _run_rust_to_json(
+                rust_slice_argv,
+                tmpdir / "rust-slices.json",
+            )
+            _assert_payload_equal(rust_slices, python_slices, label="Rust slices")
+            checked.append("rust_slices")
+    return checked
+
+
+def _load_config_mapping(path: str | Path) -> dict[str, object]:
+    config_path = Path(path)
+    if config_path.suffix == ".toml":
+        payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    else:
+        payload = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"{path} must contain a config object.")
+    return cast(dict[str, object], payload)
+
+
+def _string_values(payload: dict[str, object], *keys: str) -> list[str]:
+    result: list[str] = []
+    for key in keys:
+        value = payload.get(key, [])
+        if value is None:
+            continue
+        if not isinstance(value, list):
+            raise ValueError(f"{key} in slice config must be an array.")
+        result.extend(str(item) for item in cast(list[object], value))
+    return result
+
+
+def _rust_slice_argv(
+    args: argparse.Namespace,
+    config_path: str,
+) -> list[str] | None:
+    config = _load_config_mapping(config_path)
+    if config.get("attribute"):
+        return None
+    argv = ["slices", "--profile", args.profile]
+    raw_slices = config.get("slices")
+    if raw_slices is not None:
+        argv.extend(["--slices", str(raw_slices)])
+    for raw_filter in _string_values(config, "filters", "filter"):
+        argv.extend(["--filter", raw_filter])
+    for raw_collapse in _string_values(config, "collapse"):
+        argv.extend(["--collapse", raw_collapse])
+    if config.get("top") is not None:
+        argv.extend(["--top", str(config["top"])])
+    raw_by_slice = config.get("by_slice")
+    if raw_by_slice is not None:
+        if isinstance(raw_by_slice, bool):
+            if raw_by_slice:
+                argv.extend(["--by-slice", "0.1%"])
+        else:
+            argv.extend(["--by-slice", str(raw_by_slice)])
+    if config.get("show_paths"):
+        argv.append("--show-paths")
+    if config.get("no_collapse_native"):
+        argv.append("--no-collapse-native")
+    raw_unattributed = config.get("unattributed_libraries")
+    if raw_unattributed is None:
+        raw_unattributed = config.get("unattributed_gems")
+    if raw_unattributed not in (None, False, True):
+        return None
+    if raw_unattributed is True:
+        argv.append("--unattributed-libraries")
+    return argv
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -221,6 +382,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-enhanced", action="store_true")
     parser.add_argument("--target-csv-layout", choices=("standard", "compat"))
     parser.add_argument("--legacy-target-csv-layout", action="store_true")
+    parser.add_argument(
+        "--check-rust-core",
+        action="store_true",
+        help=(
+            "Also compare clankerprof-rs facts and generic target JSON against "
+            "Python output for this local profile. This reads only caller-provided "
+            "local inputs and writes temporary outputs."
+        ),
+    )
     parser.add_argument(
         "--allow-local-inputs",
         action="store_true",
@@ -260,12 +430,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "targets": _run_targets(args, tmpdir),
                 "slices": _run_slices(args, tmpdir),
             }
+            rust_outputs = _run_rust_core(args, tmpdir)
         print(
             json.dumps(
                 {
                     "ok": True,
                     "checked": sorted(
-                        key for key, value in outputs.items() if value is not None
+                        [
+                            *(
+                                key
+                                for key, value in outputs.items()
+                                if value is not None
+                            ),
+                            *rust_outputs,
+                        ]
                     ),
                 },
                 indent=2,

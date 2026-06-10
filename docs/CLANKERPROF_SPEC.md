@@ -211,4 +211,24 @@ Public tests must cover:
 
 Real-profile parity must be optional and local-only. The helper under
 `scripts/clankerprof` compares caller-provided local reference artifacts against
-current `clankerprof` output and intentionally commits no profile data.
+current `clankerprof` output and intentionally commits no profile data. Its
+`--check-rust-core` mode additionally compares Rust facts and generic target
+projection output against Python for the same caller-provided local inputs.
+
+## Rust core parity
+
+`crates/clankerprof-core` is the Rust compatibility implementation for this
+spec. The crate must treat Python `clankerprof` as the reference until the Rust
+core has equivalent coverage for every public projection. Its stable surfaces
+currently include `clankerprof-rs facts`, generic `targets`, generic `slices`,
+and `compare`. The facts command emits the same `clankerprof.sample_facts.v1`
+payload as Python for raw profiles, gzipped profiles, inline frames, folded
+locations, and sparse pprof IDs.
+
+Projection work must build on the same Rust fact model rather than introducing
+separate tree or opportunity accounting. Any future Rust target, slice, compare,
+tree, or opportunity command must prove parity against Python fixtures before
+being used as an integration boundary by downstream tools. Runtime-specific
+rule-pack parity remains the expansion point after the generic projection
+surface; downstream integrations should keep calling this out explicitly when
+they depend on runtime-specific folding or semantic categorization.

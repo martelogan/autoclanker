@@ -73,11 +73,35 @@ python scripts/clankerprof/check_real_profile_parity.py \
   --expected-target-json reference-targets.json
 ```
 
-6. Validate changes.
+6. Use the Rust core when checking cross-language parity.
+
+`crates/clankerprof-core` is the Rust compatibility implementation for the
+sample-facts engine and generic projections. It should match the Python output
+before downstream tools treat it as an integration boundary.
+
+```bash
+cargo run -p clankerprof-core --bin clankerprof-rs -- \
+  facts --profile profile.pb.gz --output profile-facts.json
+
+cargo run -p clankerprof-core --bin clankerprof-rs -- \
+  slices --profile profile.pb.gz --slices slices.yml --output slices.json
+
+CLANKERPROF_REAL_PROFILE_PARITY=1 \
+python scripts/clankerprof/check_real_profile_parity.py \
+  --profile profile.pb.gz \
+  --target-config target_config.json \
+  --slice-config clankerprof-slices.yml \
+  --check-rust-core
+```
+
+7. Validate changes.
 
 ```bash
 ./bin/dev format
 ./bin/dev exec -- pytest tests/test_clankerprof.py tests/test_package.py tests/test_cli_commands.py -q
+./bin/dev exec -- pytest tests/test_clankerprof_rust_parity.py -q
+cargo fmt --check
+cargo test -p clankerprof-core
 ./bin/dev check
 ```
 

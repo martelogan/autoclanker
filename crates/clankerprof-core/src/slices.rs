@@ -1,0 +1,575 @@
+use crate::model::{Frame, ProfileFacts, TimeNs};
+use crate::targets::{extract_library_name, match_path_pattern, RuntimeRuleSet};
+use serde_json::{json, Value};
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
+
+pub const GC_PSEUDO_SLICE: &str = "(gc)";
+pub const UNCOLLAPSIBLE_PSEUDO_SLICE: &str = "(uncollapsible)";
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SliceDefinition {
+    pub name: String,
+    pub path_patterns: Vec<String>,
+    pub is_default: bool,
+    pub metadata: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttributionRule {
+    pub key: String,
+    pub value: String,
+    pub target_slice: String,
+    pub descendant: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SliceAnalysisOptions {
+    pub slices: Vec<SliceDefinition>,
+    pub filters: Vec<String>,
+    pub collapse: Vec<String>,
+    pub attributes: Vec<AttributionRule>,
+    pub top: Option<usize>,
+    pub by_slice: Option<String>,
+    pub show_paths: bool,
+    pub no_collapse_native: bool,
+    pub unattributed_libraries: Option<usize>,
+    pub runtime_rules: RuntimeRuleSet,
+}
+
+impl Default for SliceAnalysisOptions {
+    fn default() -> Self {
+        Self {
+            slices: Vec::new(),
+            filters: Vec::new(),
+            collapse: Vec::new(),
+            attributes: Vec::new(),
+            top: None,
+            by_slice: None,
+            show_paths: false,
+            no_collapse_native: false,
+            unattributed_libraries: None,
+            runtime_rules: RuntimeRuleSet::generic(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SliceFrameStats {
+    pub function: String,
+    pub filename: String,
+    pub line: Option<i64>,
+    pub time_ns: TimeNs,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SliceStats {
+    pub name: String,
+    pub time_ns: TimeNs,
+    pub frames: BTreeMap<String, SliceFrameStats>,
+    pub unattributed_libraries: BTreeMap<String, TimeNs>,
+    pub is_default: bool,
+}
+
+impl SliceStats {
+    fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            time_ns: 0,
+            frames: BTreeMap::new(),
+            unattributed_libraries: BTreeMap::new(),
+            is_default: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SliceAnalysisResult {
+    pub matching_time_ns: TimeNs,
+    pub total_time_ns: TimeNs,
+    pub slices: Vec<SliceStats>,
+    pub gc_time_ns: TimeNs,
+    pub uncollapsible: Option<SliceStats>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BottomFrameSelection<'a> {
+    bottom: &'a Frame,
+    root_eligible: Option<&'a Frame>,
+    bottom_is_collapsed: bool,
+}
+
+pub fn load_slices_file(path: impl AsRef<Path>) -> Result<Vec<SliceDefinition>, String> {
+    let payload = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let value: serde_yaml::Value =
+        serde_yaml::from_str(&payload).map_err(|error| error.to_string())?;
+    let Some(raw_slices) = value.get("slices").and_then(serde_yaml::Value::as_sequence) else {
+        return Err("Slices file must contain a slices array.".to_string());
+    };
+    let mut slices = Vec::new();
+    for item in raw_slices {
+        let Some(mapping) = item.as_mapping() else {
+            return Err("Each slice entry must be an object.".to_string());
+        };
+        let Some(name) = mapping
+            .get(serde_yaml::Value::String("name".to_string()))
+            .and_then(serde_yaml::Value::as_str)
+        else {
+            return Err("Each slice entry must include a name.".to_string());
+        };
+        let paths = mapping
+            .get(serde_yaml::Value::String("paths".to_string()))
+            .and_then(serde_yaml::Value::as_sequence)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(serde_yaml::Value::as_str)
+                    .map(ToString::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let is_default = mapping
+            .get(serde_yaml::Value::String("default".to_string()))
+            .and_then(serde_yaml::Value::as_bool)
+            .unwrap_or(false);
+        slices.push(SliceDefinition {
+            name: name.to_string(),
+            path_patterns: paths,
+            is_default,
+            metadata: BTreeMap::new(),
+        });
+    }
+    Ok(slices)
+}
+
+pub fn analyze_slice_facts(
+    facts: &ProfileFacts,
+    options: &SliceAnalysisOptions,
+) -> SliceAnalysisResult {
+    let mut total_time = 0;
+    let mut matching_time = 0;
+    let mut gc_time = 0;
+    let mut stats_by_slice: BTreeMap<String, SliceStats> = BTreeMap::new();
+    let mut uncollapsible_stats = SliceStats::new(UNCOLLAPSIBLE_PSEUDO_SLICE);
+    let default_slice = options
+        .slices
+        .iter()
+        .find(|slice| slice.is_default)
+        .map(|slice| slice.name.clone())
+        .unwrap_or_else(|| "(all)".to_string());
+
+    for fact in &facts.samples {
+        let value = fact.primary_value();
+        total_time += value;
+        let stack = fact.stack.as_slice();
+        let Some(leaf) = stack.first() else {
+            continue;
+        };
+        let Some(selection) = select_bottom_frame(stack, options) else {
+            continue;
+        };
+        let bottom = selection.bottom;
+        if !filters_match_sample(&options.filters, stack, options, bottom) {
+            continue;
+        }
+        matching_time += value;
+
+        if is_gc_function(&leaf.name) {
+            gc_time += value;
+            let gc_stats = stats_by_slice
+                .entry(GC_PSEUDO_SLICE.to_string())
+                .or_insert_with(|| SliceStats::new(GC_PSEUDO_SLICE));
+            add_frame_stats(gc_stats, leaf, value);
+            gc_stats.time_ns += value;
+            continue;
+        }
+
+        let slice_name = slice_for_frame(bottom, stack, options, true);
+        let slice_stats = stats_by_slice
+            .entry(slice_name.clone())
+            .or_insert_with(|| SliceStats {
+                is_default: slice_name == default_slice,
+                ..SliceStats::new(slice_name.clone())
+            });
+        slice_stats.time_ns += value;
+        add_frame_stats(slice_stats, bottom, value);
+        if slice_name == default_slice {
+            if let Some(library_name) =
+                extract_library_name(&bottom.filename, &options.runtime_rules, None)
+            {
+                *slice_stats
+                    .unattributed_libraries
+                    .entry(library_name)
+                    .or_default() += value;
+            }
+        }
+        if selection.bottom_is_collapsed {
+            uncollapsible_stats.time_ns += value;
+            add_frame_stats(
+                &mut uncollapsible_stats,
+                selection.root_eligible.unwrap_or(bottom),
+                value,
+            );
+        }
+    }
+
+    let mut slices: Vec<_> = stats_by_slice.into_values().collect();
+    slices.sort_by(|left, right| right.time_ns.cmp(&left.time_ns));
+    SliceAnalysisResult {
+        matching_time_ns: matching_time,
+        total_time_ns: total_time,
+        slices,
+        gc_time_ns: gc_time,
+        uncollapsible: (uncollapsible_stats.time_ns > 0).then_some(uncollapsible_stats),
+    }
+}
+
+pub fn render_slice_json(result: &SliceAnalysisResult, options: &SliceAnalysisOptions) -> Value {
+    let total = if result.matching_time_ns != 0 {
+        result.matching_time_ns
+    } else {
+        result.total_time_ns
+    };
+    let mut selected_slices: Vec<_> = result
+        .slices
+        .iter()
+        .filter(|slice| slice.name != GC_PSEUDO_SLICE && slice.name != UNCOLLAPSIBLE_PSEUDO_SLICE)
+        .collect();
+    if let Some(by_slice) = &options.by_slice {
+        if let Some(raw_threshold) = by_slice.strip_suffix('%') {
+            let threshold = raw_threshold.parse::<f64>().unwrap_or(0.0);
+            selected_slices.retain(|slice| {
+                total != 0 && slice.time_ns as f64 / total as f64 * 100.0 >= threshold
+            });
+        } else if let Ok(limit) = by_slice.parse::<usize>() {
+            selected_slices.truncate(limit);
+        }
+    }
+    let payload = json!({
+        "slices": selected_slices.into_iter().map(|slice| slice_payload(slice, total, options)).collect::<Vec<_>>(),
+        "summary": {
+            "matching_pct": if result.total_time_ns == 0 { 0.0 } else { result.matching_time_ns as f64 / result.total_time_ns as f64 * 100.0 },
+            "matching_time_ns": result.matching_time_ns,
+            "total_time_ns": result.total_time_ns,
+        },
+        "tool": "clankerprof_slices",
+    });
+    add_optional_slice_payloads(payload, result, total, options)
+}
+
+fn add_optional_slice_payloads(
+    mut payload: Value,
+    result: &SliceAnalysisResult,
+    total: TimeNs,
+    options: &SliceAnalysisOptions,
+) -> Value {
+    let Some(object) = payload.as_object_mut() else {
+        return payload;
+    };
+    if result.gc_time_ns > 0 {
+        object.insert(
+            "gc".to_string(),
+            json!({
+                "pct": if total == 0 { 0.0 } else { result.gc_time_ns as f64 / total as f64 * 100.0 },
+                "time_ns": result.gc_time_ns,
+            }),
+        );
+    }
+    if let Some(uncollapsible) = &result.uncollapsible {
+        object.insert(
+            "uncollapsible".to_string(),
+            json!({
+                "frames": rendered_frames(uncollapsible, total, options.top),
+                "name": uncollapsible.name,
+                "pct": if total == 0 { 0.0 } else { uncollapsible.time_ns as f64 / total as f64 * 100.0 },
+                "time_ns": uncollapsible.time_ns,
+                "unattributed_gems": [],
+                "unattributed_libraries": [],
+            }),
+        );
+    }
+    payload
+}
+
+fn slice_payload(slice: &SliceStats, total: TimeNs, options: &SliceAnalysisOptions) -> Value {
+    let library_limit = options.unattributed_libraries;
+    json!({
+        "frames": rendered_frames(slice, total, options.top),
+        "is_default": slice.is_default,
+        "name": slice.name,
+        "pct": if total == 0 { 0.0 } else { slice.time_ns as f64 / total as f64 * 100.0 },
+        "time_ns": slice.time_ns,
+        "unattributed_gems": rendered_libraries(slice, total, library_limit),
+        "unattributed_libraries": rendered_libraries(slice, total, library_limit),
+    })
+}
+
+fn rendered_frames(slice: &SliceStats, total: TimeNs, top: Option<usize>) -> Vec<Value> {
+    let mut frames: Vec<_> = slice.frames.values().collect();
+    frames.sort_by(|left, right| right.time_ns.cmp(&left.time_ns));
+    if let Some(limit) = top {
+        frames.truncate(limit);
+    }
+    frames
+        .into_iter()
+        .map(|frame| {
+            json!({
+                "filename": frame.filename,
+                "function": frame.function,
+                "line": frame.line,
+                "pct": if total == 0 { 0.0 } else { frame.time_ns as f64 / total as f64 * 100.0 },
+                "time_ns": frame.time_ns,
+            })
+        })
+        .collect()
+}
+
+fn rendered_libraries(slice: &SliceStats, total: TimeNs, limit: Option<usize>) -> Vec<Value> {
+    let mut libraries: Vec<_> = slice.unattributed_libraries.iter().collect();
+    libraries.sort_by(|left, right| right.1.cmp(left.1));
+    if let Some(limit) = limit {
+        libraries.truncate(limit);
+    }
+    libraries
+        .into_iter()
+        .map(|(name, time_ns)| {
+            json!({
+                "name": name,
+                "pct": if total == 0 { 0.0 } else { *time_ns as f64 / total as f64 * 100.0 },
+                "time_ns": time_ns,
+            })
+        })
+        .collect()
+}
+
+fn select_bottom_frame<'a>(
+    stack: &'a [Frame],
+    options: &SliceAnalysisOptions,
+) -> Option<BottomFrameSelection<'a>> {
+    let mut bottom = stack.first()?;
+    let mut first_eligible = None;
+    let mut found_uncollapsed = false;
+    for frame in stack {
+        if !is_eligible(frame, options) {
+            continue;
+        }
+        if first_eligible.is_none() {
+            first_eligible = Some(frame);
+        }
+        if is_collapsed_frame(frame, stack, options) {
+            continue;
+        }
+        bottom = frame;
+        found_uncollapsed = true;
+        break;
+    }
+    if let Some(first_eligible) = first_eligible {
+        if !is_eligible(bottom, options) {
+            bottom = first_eligible;
+        }
+    }
+    if first_eligible.is_none() || found_uncollapsed {
+        return Some(BottomFrameSelection {
+            bottom,
+            root_eligible: None,
+            bottom_is_collapsed: false,
+        });
+    }
+    let root_eligible = stack.iter().rev().find(|frame| is_eligible(frame, options));
+    Some(BottomFrameSelection {
+        bottom: first_eligible?,
+        root_eligible,
+        bottom_is_collapsed: is_collapsed_frame(first_eligible?, stack, options),
+    })
+}
+
+fn add_frame_stats(slice: &mut SliceStats, frame: &Frame, value: TimeNs) {
+    let frame_key = format!("{}\0{}", frame.name, frame.filename);
+    let frame_stats = slice
+        .frames
+        .entry(frame_key)
+        .or_insert_with(|| SliceFrameStats {
+            function: frame.name.clone(),
+            filename: frame.filename.clone(),
+            line: (frame.line != 0).then_some(frame.line),
+            time_ns: 0,
+        });
+    frame_stats.time_ns += value;
+}
+
+fn is_eligible(frame: &Frame, options: &SliceAnalysisOptions) -> bool {
+    options.no_collapse_native || !is_native_path(&frame.filename, &options.runtime_rules)
+}
+
+fn is_collapsed_frame(frame: &Frame, stack: &[Frame], options: &SliceAnalysisOptions) -> bool {
+    options
+        .collapse
+        .iter()
+        .any(|collapse_filter| collapse_matches_frame(collapse_filter, frame, stack, options))
+}
+
+fn collapse_matches_frame(
+    raw_filter: &str,
+    frame: &Frame,
+    stack: &[Frame],
+    options: &SliceAnalysisOptions,
+) -> bool {
+    let (key, value) = raw_filter.split_once(':').unwrap_or(("", ""));
+    if key == "slice" {
+        return slice_for_frame(frame, stack, options, false) == value;
+    }
+    matches_frame_filter(frame, raw_filter, &options.runtime_rules)
+}
+
+fn filters_match_sample(
+    filters: &[String],
+    stack: &[Frame],
+    options: &SliceAnalysisOptions,
+    bottom: &Frame,
+) -> bool {
+    let mut bottom_filters = Vec::new();
+    let mut descendant_filters = Vec::new();
+    for raw_filter in filters {
+        let (_, descendant, _) = parse_filter_prefixes(raw_filter);
+        if descendant {
+            descendant_filters.push(raw_filter);
+        } else {
+            bottom_filters.push(raw_filter);
+        }
+    }
+    bottom_filters
+        .iter()
+        .all(|raw_filter| filter_matches_stack(raw_filter, stack, options, bottom))
+        && (descendant_filters.is_empty()
+            || descendant_filters
+                .iter()
+                .any(|raw_filter| filter_matches_stack(raw_filter, stack, options, bottom)))
+}
+
+fn filter_matches_stack(
+    raw_filter: &str,
+    stack: &[Frame],
+    options: &SliceAnalysisOptions,
+    bottom: &Frame,
+) -> bool {
+    let (inverted, descendant, body) = parse_filter_prefixes(raw_filter);
+    let (key, value) = body.split_once(':').unwrap_or(("", ""));
+    let frames: Vec<&Frame> = if descendant {
+        stack.iter().collect()
+    } else {
+        vec![bottom]
+    };
+    let matches = frames.into_iter().map(|frame| {
+        if key == "slice" {
+            slice_for_frame(frame, stack, options, false) == value
+        } else {
+            matches_frame_filter(frame, &body, &options.runtime_rules)
+        }
+    });
+    if inverted {
+        matches.into_iter().any(|matched| !matched)
+    } else {
+        matches.into_iter().any(|matched| matched)
+    }
+}
+
+fn parse_filter_prefixes(raw_filter: &str) -> (bool, bool, String) {
+    let mut inverted = false;
+    let mut descendant = false;
+    let mut body = raw_filter;
+    loop {
+        if let Some(rest) = body.strip_prefix('!') {
+            inverted = true;
+            body = rest;
+            continue;
+        }
+        if let Some(rest) = body.strip_prefix('<') {
+            descendant = true;
+            body = rest;
+            continue;
+        }
+        break;
+    }
+    (inverted, descendant, body.to_string())
+}
+
+fn matches_frame_filter(frame: &Frame, raw_filter: &str, rules: &RuntimeRuleSet) -> bool {
+    let (key, value) = raw_filter.split_once(':').unwrap_or(("", ""));
+    match key {
+        "name" => frame.name.contains(value),
+        "path" => frame.filename.contains(value),
+        "dependency" | "gem" | "library" | "package" | "vendor" => {
+            let library_name = extract_library_name(&frame.filename, rules, Some(key));
+            if value == "*" {
+                library_name.is_some()
+            } else {
+                library_name.as_deref() == Some(value)
+            }
+        }
+        _ if rules.library_selector_path_patterns.contains_key(key) => {
+            let library_name = extract_library_name(&frame.filename, rules, Some(key));
+            if value == "*" {
+                library_name.is_some()
+            } else {
+                library_name.as_deref() == Some(value)
+            }
+        }
+        _ => false,
+    }
+}
+
+fn slice_for_frame(
+    frame: &Frame,
+    stack: &[Frame],
+    options: &SliceAnalysisOptions,
+    include_descendant_attributes: bool,
+) -> String {
+    for rule in &options.attributes {
+        if rule.descendant && !include_descendant_attributes {
+            continue;
+        }
+        let frames: Vec<&Frame> = if rule.descendant {
+            stack.iter().collect()
+        } else {
+            vec![frame]
+        };
+        if frames.into_iter().any(|candidate| {
+            matches_frame_filter(
+                candidate,
+                &format!("{}:{}", rule.key, rule.value),
+                &options.runtime_rules,
+            )
+        }) {
+            return rule.target_slice.clone();
+        }
+    }
+    let mut default = "(all)";
+    for slice in &options.slices {
+        if slice.is_default {
+            default = &slice.name;
+            continue;
+        }
+        if slice
+            .path_patterns
+            .iter()
+            .any(|pattern| match_path_pattern(pattern, &frame.filename, &options.runtime_rules))
+        {
+            return slice.name.clone();
+        }
+    }
+    default.to_string()
+}
+
+fn is_native_path(path: &str, rules: &RuntimeRuleSet) -> bool {
+    path.is_empty()
+        || path.starts_with('<')
+        || rules
+            .stdlib_path_markers
+            .iter()
+            .any(|marker| path.contains(marker))
+}
+
+fn is_gc_function(name: &str) -> bool {
+    name == "(marking)" || name == "(sweeping)"
+}
