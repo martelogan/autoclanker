@@ -1475,6 +1475,39 @@ stdlib_path_markers:
         assert categories["Application"].cpu_time == 9_000_000
 
 
+@covers("M9-006")
+def test_clankerprof_operator_skill_documents_portable_workflow() -> None:
+    root = Path(__file__).resolve().parents[1]
+    skill_dir = root / "skills" / "clankerprof-operator"
+    skill = skill_dir / "SKILL.md"
+    agent = skill_dir / "agents" / "openai.yaml"
+
+    assert skill.exists()
+    assert agent.exists()
+    rendered = skill.read_text(encoding="utf-8")
+    for phrase in [
+        "docs/CLANKERPROF_SPEC.md",
+        "clankerprof.sample_facts.v1",
+        "runtime-rules.yml",
+        "caller_fallback_name_prefixes",
+        "check_real_profile_parity.py",
+        "Cross-Language Port Checklist",
+    ]:
+        assert phrase in rendered
+
+    def term(*codes: int) -> str:
+        return "".join(chr(code) for code in codes)
+
+    for forbidden in [
+        term(112, 112, 114, 111, 102, 45, 114, 101, 97, 100, 101, 114),
+        term(80, 104, 97, 115, 101, 114),
+        term(83, 104, 111, 112, 105, 102, 121),
+        term(83, 116, 111, 114, 101, 102, 114, 111, 110, 116),
+        term(76, 105, 113, 117, 105, 100),
+    ]:
+        assert forbidden not in rendered
+
+
 @covers("M9-003")
 def test_clankerprof_can_emit_legacy_target_csv_artifact_pair(
     tmp_path: Path,

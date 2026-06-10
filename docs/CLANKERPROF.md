@@ -490,3 +490,8 @@ Prefer this order when adopting `clankerprof` in another harness:
 4. Keep runtime-specific behavior in rule packs and config files.
 5. Keep old profile tools available until real-profile golden outputs match the
    compatibility contract you need.
+
+For repeated agent work, use
+[`skills/clankerprof-operator/SKILL.md`](../skills/clankerprof-operator/SKILL.md).
+It summarizes the profile-analysis workflow, runtime-rule authoring rules,
+sample-facts parity checks, and the cross-language port checklist.

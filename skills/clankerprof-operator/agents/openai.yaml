@@ -1,0 +1,3 @@
+display_name: Clankerprof Operator
+short_description: Analyze pprof profiles and maintain clankerprof configs, facts, and parity.
+default_prompt: Analyze this pprof profile or clankerprof config using the sample-facts spec, then produce validated target or slice evidence.
