@@ -7,12 +7,22 @@ from typing import Any, cast
 
 import pytest
 
+import clankerprof.analysis as clankerprof_analysis
+
 from autoclanker.cli import main as autoclanker_main
 from clankerprof.analysis import (
+    DEFAULT_RUNTIME_RULES,
     AttributionRule,
+    BoundaryAnalysisOptions,
+    BoundaryCategoryDefinition,
+    BoundaryDefinition,
+    BoundaryDomainDefinition,
+    FramePredicateExpr,
     SliceAnalysisOptions,
     SliceDefinition,
     TargetAnalysisOptions,
+    analyze_boundaries,
+    analyze_boundary_facts,
     analyze_slice_facts,
     analyze_slices,
     analyze_target_facts,
@@ -20,15 +30,21 @@ from clankerprof.analysis import (
     categorize_ruby_frame,
     extract_gem_name,
     extract_library_name,
+    frame_predicate_expr,
     is_runtime_stdlib_path,
     load_default_ruby_core_classes,
     match_category_pattern,
     match_path_pattern,
+    parse_frame_predicates,
     ruby_rules,
     runtime_rules_from_file,
 )
 from clankerprof.cli import main as clankerprof_main
-from clankerprof.compare import CompareOptions, compare_slice_json
+from clankerprof.compare import (
+    CompareOptions,
+    compare_boundary_json,
+    compare_slice_json,
+)
 from clankerprof.facts import (
     SAMPLE_FACTS_SCHEMA_VERSION,
     ProfileFactIndex,
@@ -39,6 +55,7 @@ from clankerprof.facts import (
 from clankerprof.model import Frame
 from clankerprof.proto import decode_profile_bytes, load_profile
 from clankerprof.render import (
+    render_boundary_json,
     render_semantic_callers_csv,
     render_slice_json,
     render_target_csv,
@@ -141,7 +158,7 @@ def _legacy_flag_matrix_profile_bytes() -> bytes:
     builder = PprofFixtureBuilder.create()
     target = builder.location(
         builder.function(
-            "Responders::BaseHtmlResponder#render_template",
+            "Example::HtmlResponder#render_template",
             "/app/controllers/responders/base_html_responder.rb",
         )
     )
@@ -201,7 +218,7 @@ def _main_category_profile_bytes() -> bytes:
     builder = PprofFixtureBuilder.create()
     target = builder.location(
         builder.function(
-            "Responders::BaseHtmlResponder#render_template",
+            "Example::HtmlResponder#render_template",
             "/app/responders/base_html_responder.rb",
         )
     )
@@ -267,6 +284,47 @@ def _request_rendering_profile_bytes() -> bytes:
     builder.sample((template_engine, component, request), 40_000_000)
     builder.sample((router,), 50_000_000)
     builder.sample((background_job,), 60_000_000)
+    return builder.encode()
+
+
+def _boundary_decomposition_profile_bytes(sample_repetitions: int = 1) -> bytes:
+    builder = PprofFixtureBuilder.create()
+    request = builder.location(
+        builder.function("RequestHandler#render_response", "/app/http/request.rb")
+    )
+    middleware = builder.location(
+        builder.function("MiddlewareStack#call", "/app/http/middleware.rb")
+    )
+    template = builder.location(
+        builder.function("TemplateRenderer#render", "/app/rendering/template.rb")
+    )
+    component = builder.location(
+        builder.function("ComponentRenderer#render", "/app/components/card.rb")
+    )
+    view_model = builder.location(
+        builder.function("ReportView#build", "/app/view_models/report_view.rb")
+    )
+    cache = builder.location(
+        builder.function(
+            "CacheClient#get_multi",
+            "/srv/vendor/cache-client-1.2.3/lib/client.rb",
+        )
+    )
+    json_generate = builder.location(
+        builder.function("JSON.generate", "/runtime/json/encoder.rb")
+    )
+    worker = builder.location(
+        builder.function("BackgroundJob#perform", "/app/jobs/background_job.rb")
+    )
+    for _ in range(sample_repetitions):
+        builder.sample((view_model, template, request, middleware), 10_000_000)
+        builder.sample((component, template, request, middleware), 20_000_000)
+        builder.sample((cache, component, template, request, middleware), 30_000_000)
+        builder.sample(
+            (json_generate, view_model, template, request, middleware),
+            40_000_000,
+        )
+        builder.sample((worker,), 50_000_000)
     return builder.encode()
 
 
@@ -682,6 +740,686 @@ def test_clankerprof_target_categories_support_simplified_path_patterns() -> Non
     assert results["Components"].cpu_time == 20_000_000
     assert results["Cache Client"].cpu_time == 30_000_000
     assert results["Other"].cpu_time == 40_000_000
+
+
+def _generic_boundary_options() -> BoundaryAnalysisOptions:
+    return BoundaryAnalysisOptions(
+        categories=(
+            BoundaryCategoryDefinition(
+                "View Models",
+                parse_frame_predicates(("path:app/view_models/**",)),
+            ),
+            BoundaryCategoryDefinition(
+                "Components",
+                parse_frame_predicates(("path:app/components/**",)),
+            ),
+            BoundaryCategoryDefinition(
+                "Cache Client",
+                parse_frame_predicates(("library:cache-client",)),
+            ),
+            BoundaryCategoryDefinition(
+                "Serialization",
+                parse_frame_predicates(("name:JSON.generate",)),
+            ),
+        ),
+        domains=(
+            BoundaryDomainDefinition(
+                "Component rendering",
+                parse_frame_predicates(("path:app/components/**",)),
+            ),
+            BoundaryDomainDefinition(
+                "View models",
+                parse_frame_predicates(("path:app/view_models/**",)),
+            ),
+            BoundaryDomainDefinition(
+                "Rendering fallback",
+                parse_frame_predicates(("path:app/rendering/**",)),
+                fallback=True,
+            ),
+        ),
+        boundaries=(
+            BoundaryDefinition(
+                name="Request render",
+                predicates=parse_frame_predicates(
+                    ("name_eq:RequestHandler#render_response",),
+                    default_key="name_eq",
+                ),
+                buckets={
+                    "Application code": ("View Models", "Components"),
+                    "Mechanics": ("Cache Client", "Serialization"),
+                },
+                attributables={"p90_ms": 200.0},
+            ),
+        ),
+    )
+
+
+@covers("M9-007")
+def test_clankerprof_boundary_decomposition_tracks_domain_cost_kinds() -> None:
+    profile = decode_profile_bytes(_boundary_decomposition_profile_bytes())
+    result = analyze_boundaries(profile, _generic_boundary_options())
+    rendered = render_boundary_json(result)
+
+    boundary = cast(list[dict[str, object]], rendered["boundaries"])[0]
+    assert boundary["name"] == "Request render"
+    assert boundary["total_time_ns"] == 100_000_000
+
+    buckets = {
+        item["name"]: item
+        for item in cast(list[dict[str, object]], boundary["buckets"])
+    }
+    assert buckets["Application code"]["time_ns"] == 30_000_000
+    assert buckets["Mechanics"]["time_ns"] == 70_000_000
+    assert cast(dict[str, float], buckets["Mechanics"]["attributable_estimates"]) == {
+        "p90_ms": 140.0
+    }
+
+    domains = {
+        item["name"]: item
+        for item in cast(list[dict[str, object]], boundary["domains"])
+    }
+    component = domains["Component rendering"]
+    assert component["time_ns"] == 50_000_000
+    component_costs = {
+        item["name"]: item
+        for item in cast(list[dict[str, object]], component["cost_kinds"])
+    }
+    assert component_costs["Cache Client"]["time_ns"] == 30_000_000
+    assert component_costs["Components"]["time_ns"] == 20_000_000
+
+    view_models = domains["View models"]
+    assert view_models["time_ns"] == 50_000_000
+    view_costs = {
+        item["name"]: item
+        for item in cast(list[dict[str, object]], view_models["cost_kinds"])
+    }
+    assert view_costs["Serialization"]["time_ns"] == 40_000_000
+    files = cast(list[dict[str, object]], view_models["files"])
+    assert files[0]["filename"] == "/app/view_models/report_view.rb"
+    pairs = cast(list[dict[str, object]], files[0]["caller_leaf_pairs"])
+    assert pairs[0]["caller"] == "ReportView#build"
+    assert pairs[0]["leaf"] == "JSON.generate"
+
+
+@covers("M9-007")
+def test_clankerprof_boundary_config_cli_replays_sample_facts(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    facts_path = tmp_path / "facts.json"
+    config_path = tmp_path / "boundaries.toml"
+    output_path = tmp_path / "boundaries.json"
+    profile_path.write_bytes(_boundary_decomposition_profile_bytes())
+    facts_path.write_text(
+        dumps_sample_facts(load_profile(str(profile_path)).to_sample_facts()),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        """
+[category]
+"View Models" = "path:app/view_models/**"
+"Components" = "path:app/components/**"
+"Cache Client" = "library:cache-client"
+"Serialization" = "name:JSON.generate"
+
+[domain]
+"Component rendering" = "path:app/components/**"
+"View models" = "path:app/view_models/**"
+"Rendering fallback" = { patterns = ["path:app/rendering/**"], fallback = true }
+
+[[boundary]]
+label = "Request render"
+function = "RequestHandler#render_response"
+
+[boundary.attributables]
+p90_ms = 200.0
+
+[boundary.bucket]
+"Application code" = ["View Models", "Components"]
+"Mechanics" = ["Cache Client", "Serialization"]
+""".strip(),
+        encoding="utf-8",
+    )
+
+    assert (
+        clankerprof_main(
+            [
+                "boundaries",
+                "--profile",
+                str(profile_path),
+                "--config",
+                str(config_path),
+            ]
+        )
+        == 0
+    )
+    profile_payload = json.loads(capsys.readouterr().out)
+    boundary = cast(list[dict[str, object]], profile_payload["boundaries"])[0]
+    assert boundary["total_time_ns"] == 100_000_000
+    assert boundary["domains"]
+
+    assert (
+        autoclanker_main(
+            [
+                "pprof",
+                "boundaries",
+                "--facts",
+                str(facts_path),
+                "--config",
+                str(config_path),
+                "--output",
+                str(output_path),
+            ]
+        )
+        == 0
+    )
+    alias_payload = json.loads(capsys.readouterr().out)
+    assert alias_payload == {
+        "tool": "clankerprof_boundaries",
+        "ok": True,
+        "output": str(output_path),
+    }
+    assert json.loads(output_path.read_text(encoding="utf-8")) == profile_payload
+
+
+@covers("M9-007")
+def test_clankerprof_boundary_function_shorthand_handles_colon_names(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    boundary = builder.location(
+        builder.function(
+            "Example::BaseResponder#render",
+            "/app/responders/base_responder.rb",
+        )
+    )
+    leaf = builder.location(builder.function("Presenter#call", "/app/presenter.rb"))
+    builder.sample((leaf, boundary), 7_000_000)
+
+    profile_path = tmp_path / "profile.pb"
+    config_path = tmp_path / "boundaries.toml"
+    profile_path.write_bytes(builder.encode())
+    config_path.write_text(
+        """
+[category]
+"Application" = "path:app/**"
+
+[[boundary]]
+label = "Request render"
+function = "Example::BaseResponder#render"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    assert (
+        clankerprof_main(
+            [
+                "boundaries",
+                "--profile",
+                str(profile_path),
+                "--config",
+                str(config_path),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    boundary_payload = cast(list[dict[str, object]], payload["boundaries"])[0]
+    assert boundary_payload["total_time_ns"] == 7_000_000
+
+
+@covers("M9-007")
+def test_clankerprof_boundary_config_supports_predicate_expressions_and_category_refs(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    rules_path = tmp_path / "runtime.yml"
+    config_path = tmp_path / "boundaries.toml"
+    profile_path.write_bytes(_boundary_decomposition_profile_bytes())
+    rules_path.write_text(
+        """
+name: test-runtime
+semantic_rules:
+  - category: Runtime Serialization
+    name_prefixes:
+      - JSON.
+""".strip(),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        """
+[category]
+"View Models" = { all = ["path:app/**"], not = "path:app/components/**" }
+"Components" = "path:app/components/**"
+"Serialization grouped" = "runtime_category:Runtime Serialization"
+
+[domain]
+"Non-component application" = { all = ["path:app/**"], not = "path:app/components/**" }
+"Component rendering" = "category:Components"
+
+[[boundary]]
+label = "Request render"
+match = { all = ["name_eq:RequestHandler#render_response"], not = "path:app/jobs/**" }
+
+[boundary.bucket]
+"Application code" = ["View Models", "Components"]
+"Runtime work" = ["Serialization grouped"]
+""".strip(),
+        encoding="utf-8",
+    )
+
+    assert (
+        clankerprof_main(
+            [
+                "boundaries",
+                "--profile",
+                str(profile_path),
+                "--config",
+                str(config_path),
+                "--runtime-rules",
+                str(rules_path),
+                "--no-enhanced",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    boundary = cast(list[dict[str, object]], payload["boundaries"])[0]
+    buckets = {
+        item["name"]: item
+        for item in cast(list[dict[str, object]], boundary["buckets"])
+    }
+    assert buckets["Application code"]["time_ns"] == 30_000_000
+    assert buckets["Runtime work"]["time_ns"] == 40_000_000
+
+    domains = {
+        item["name"]: item
+        for item in cast(list[dict[str, object]], boundary["domains"])
+    }
+    assert domains["Non-component application"]["time_ns"] == 50_000_000
+    assert domains["Component rendering"]["time_ns"] == 50_000_000
+    domain_costs = {
+        item["name"]: item
+        for item in cast(
+            list[dict[str, object]],
+            domains["Non-component application"]["cost_kinds"],
+        )
+    }
+    assert domain_costs["Serialization grouped"]["time_ns"] == 40_000_000
+
+
+@covers("M9-007")
+def test_clankerprof_scope_config_aliases_preserve_boundary_output(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    rules_path = tmp_path / "runtime.yml"
+    legacy_config_path = tmp_path / "boundaries.toml"
+    scope_config_path = tmp_path / "scopes.toml"
+    profile_path.write_bytes(_boundary_decomposition_profile_bytes())
+    rules_path.write_text(
+        """
+name: test-runtime
+semantic_rules:
+  - category: Runtime Serialization
+    name_prefixes:
+      - JSON.
+""".strip(),
+        encoding="utf-8",
+    )
+    legacy_config_path.write_text(
+        """
+[category]
+"View Models" = { all = ["path:app/**"], not = "path:app/components/**" }
+"Components" = "path:app/components/**"
+"Serialization grouped" = "runtime_category:Runtime Serialization"
+
+[domain]
+"Non-component application" = { all = ["path:app/**"], not = "path:app/components/**" }
+"Component rendering" = "category:Components"
+
+[[boundary]]
+label = "Request render"
+match = { all = ["name_eq:RequestHandler#render_response"], not = "path:app/jobs/**" }
+
+[boundary.bucket]
+"Application code" = ["View Models", "Components"]
+"Runtime work" = ["Serialization grouped"]
+""".strip(),
+        encoding="utf-8",
+    )
+    scope_config_path.write_text(
+        """
+[cost_kind]
+"View Models" = { all = ["path:app/**"], not = "path:app/components/**" }
+"Components" = "path:app/components/**"
+"Serialization grouped" = "runtime_label:Runtime Serialization"
+
+[owner]
+"Non-component application" = { all = ["path:app/**"], not = "path:app/components/**" }
+"Component rendering" = "cost_kind:Components"
+
+[[scope]]
+label = "Request render"
+selector = { all = ["name_eq:RequestHandler#render_response"], not = "path:app/jobs/**" }
+
+[scope.rollup]
+"Application code" = ["View Models", "Components"]
+"Runtime work" = ["Serialization grouped"]
+""".strip(),
+        encoding="utf-8",
+    )
+
+    legacy_args = [
+        "boundaries",
+        "--profile",
+        str(profile_path),
+        "--config",
+        str(legacy_config_path),
+        "--runtime-rules",
+        str(rules_path),
+        "--no-enhanced",
+    ]
+    scope_args = [
+        "scopes",
+        "--profile",
+        str(profile_path),
+        "--config",
+        str(scope_config_path),
+        "--runtime-rules",
+        str(rules_path),
+        "--no-enhanced",
+    ]
+
+    assert clankerprof_main(legacy_args) == 0
+    legacy_payload = json.loads(capsys.readouterr().out)
+    assert clankerprof_main(scope_args) == 0
+    scope_payload = json.loads(capsys.readouterr().out)
+
+    assert scope_payload == legacy_payload
+    assert scope_payload["tool"] == "clankerprof_boundaries"
+    assert "boundaries" in scope_payload
+
+
+@covers("M9-007")
+def test_clankerprof_scope_config_rejects_mixed_preferred_and_legacy_sections(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    config_path = tmp_path / "scopes.toml"
+    profile_path.write_bytes(_boundary_decomposition_profile_bytes())
+    config_path.write_text(
+        """
+[cost_kind]
+"Application" = "path:app/**"
+
+[category]
+"Runtime" = "name:JSON.generate"
+
+[[scope]]
+label = "Request render"
+function = "RequestHandler#render_response"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    assert (
+        clankerprof_main(
+            [
+                "scopes",
+                "--profile",
+                str(profile_path),
+                "--config",
+                str(config_path),
+            ]
+        )
+        == 2
+    )
+    payload = json.loads(capsys.readouterr().err)
+    assert "Use only one of [cost_kind] or [category]" in payload["error"]
+
+
+@covers("M9-007")
+def test_clankerprof_boundary_config_rejects_recursive_category_predicates(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    config_path = tmp_path / "boundaries.toml"
+    profile_path.write_bytes(_boundary_decomposition_profile_bytes())
+    config_path.write_text(
+        """
+[category]
+"Outer" = "category:Inner"
+"Inner" = "path:app/**"
+
+[[boundary]]
+label = "Request render"
+function = "RequestHandler#render_response"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    assert (
+        clankerprof_main(
+            [
+                "boundaries",
+                "--profile",
+                str(profile_path),
+                "--config",
+                str(config_path),
+            ]
+        )
+        == 2
+    )
+    payload = json.loads(capsys.readouterr().err)
+    assert "cannot reference category:" in payload["error"]
+
+
+@covers("M9-007")
+def test_clankerprof_boundary_exclusions_build_residual_scopes() -> None:
+    options = BoundaryAnalysisOptions(
+        categories=(
+            BoundaryCategoryDefinition(
+                "Application",
+                parse_frame_predicates(("path:app/**",)),
+            ),
+        ),
+        boundaries=(
+            BoundaryDefinition(
+                name="Request total",
+                predicates=parse_frame_predicates(
+                    ("name_eq:MiddlewareStack#call",),
+                    default_key="name_eq",
+                ),
+                buckets={"Application": ("Application",)},
+            ),
+            BoundaryDefinition(
+                name="Request outside render",
+                predicates=parse_frame_predicates(
+                    ("name_eq:MiddlewareStack#call",),
+                    default_key="name_eq",
+                ),
+                buckets={"Application": ("Application",)},
+                exclude_descendants=parse_frame_predicates(
+                    ("name_eq:RequestHandler#render_response",),
+                    default_key="name_eq",
+                ),
+            ),
+        ),
+    )
+
+    rendered = render_boundary_json(
+        analyze_boundaries(
+            decode_profile_bytes(_boundary_decomposition_profile_bytes()),
+            options,
+        )
+    )
+    boundaries = {
+        item["name"]: item
+        for item in cast(list[dict[str, object]], rendered["boundaries"])
+    }
+    assert boundaries["Request total"]["total_time_ns"] == 100_000_000
+    assert boundaries["Request outside render"]["total_time_ns"] == 0
+
+
+@covers("M9-007")
+def test_clankerprof_boundary_predicate_matching_is_cached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile = decode_profile_bytes(
+        _boundary_decomposition_profile_bytes(sample_repetitions=100)
+    )
+    options = _generic_boundary_options()
+    original = clankerprof_analysis.match_path_pattern
+    call_count = 0
+
+    def counted_match_path_pattern(
+        pattern: str,
+        path: str,
+        rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES,
+    ) -> bool:
+        nonlocal call_count
+        call_count += 1
+        return original(pattern, path, rules)
+
+    monkeypatch.setattr(
+        clankerprof_analysis,
+        "match_path_pattern",
+        counted_match_path_pattern,
+    )
+
+    result = analyze_boundary_facts(profile.to_sample_facts(), options)
+
+    assert result.boundaries[0].total_time == 10_000_000_000
+    assert call_count < 40
+
+
+@covers("M9-007")
+def test_clankerprof_boundary_expression_matching_stays_frame_cached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile = decode_profile_bytes(
+        _boundary_decomposition_profile_bytes(sample_repetitions=100)
+    )
+    options = BoundaryAnalysisOptions(
+        categories=(
+            BoundaryCategoryDefinition(
+                "Non-job application",
+                FramePredicateExpr(
+                    all=(frame_predicate_expr(("path:app/**",)),),
+                    not_=(frame_predicate_expr(("path:app/jobs/**",)),),
+                ),
+            ),
+        ),
+        boundaries=(
+            BoundaryDefinition(
+                name="Request render",
+                predicates=FramePredicateExpr(
+                    all=(
+                        frame_predicate_expr(
+                            ("name_eq:RequestHandler#render_response",),
+                            default_key="name_eq",
+                        ),
+                    ),
+                    not_=(frame_predicate_expr(("path:app/jobs/**",)),),
+                ),
+            ),
+        ),
+    )
+    original = clankerprof_analysis.match_path_pattern
+    call_count = 0
+
+    def counted_match_path_pattern(
+        pattern: str,
+        path: str,
+        rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES,
+    ) -> bool:
+        nonlocal call_count
+        call_count += 1
+        return original(pattern, path, rules)
+
+    monkeypatch.setattr(
+        clankerprof_analysis,
+        "match_path_pattern",
+        counted_match_path_pattern,
+    )
+
+    result = analyze_boundary_facts(profile.to_sample_facts(), options)
+
+    assert result.boundaries[0].total_time == 10_000_000_000
+    assert call_count < 50
+
+
+@covers("M9-007")
+def test_clankerprof_boundary_category_predicates_stay_frame_cached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile = decode_profile_bytes(
+        _boundary_decomposition_profile_bytes(sample_repetitions=100)
+    )
+    options = BoundaryAnalysisOptions(
+        categories=(
+            BoundaryCategoryDefinition(
+                "View Models",
+                parse_frame_predicates(("path:app/view_models/**",)),
+            ),
+            BoundaryCategoryDefinition(
+                "Components",
+                parse_frame_predicates(("path:app/components/**",)),
+            ),
+            BoundaryCategoryDefinition(
+                "Serialization",
+                parse_frame_predicates(("name:JSON.generate",)),
+            ),
+        ),
+        domains=(
+            BoundaryDomainDefinition(
+                "Component rendering",
+                parse_frame_predicates(("category:Components",)),
+            ),
+            BoundaryDomainDefinition(
+                "View models",
+                parse_frame_predicates(("category:View Models",)),
+            ),
+        ),
+        boundaries=(
+            BoundaryDefinition(
+                name="Request render",
+                predicates=parse_frame_predicates(
+                    ("name_eq:RequestHandler#render_response",),
+                    default_key="name_eq",
+                ),
+            ),
+        ),
+    )
+    original = clankerprof_analysis.match_path_pattern
+    call_count = 0
+
+    def counted_match_path_pattern(
+        pattern: str,
+        path: str,
+        rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES,
+    ) -> bool:
+        nonlocal call_count
+        call_count += 1
+        return original(pattern, path, rules)
+
+    monkeypatch.setattr(
+        clankerprof_analysis,
+        "match_path_pattern",
+        counted_match_path_pattern,
+    )
+
+    result = analyze_boundary_facts(profile.to_sample_facts(), options)
+
+    assert result.boundaries[0].total_time == 10_000_000_000
+    assert call_count < 50
 
 
 @covers("M9-002")
@@ -1238,12 +1976,12 @@ def test_clankerprof_preserves_legacy_ruby_flag_combinations(
     profile = decode_profile_bytes(_legacy_flag_matrix_profile_bytes())
     categories = analyze_targets(
         profile,
-        {"Responders::BaseHtmlResponder#render_template": {}},
+        {"Example::HtmlResponder#render_template": {}},
         TargetAnalysisOptions(
             runtime_rules=ruby_rules(_ruby_core_classes(), verbose=verbose),
             fold_runtime_internals=fold,
         ),
-    )["Responders::BaseHtmlResponder#render_template"]
+    )["Example::HtmlResponder#render_template"]
 
     assert sum(item.cpu_time for item in categories.values()) == 9_400_000_000
     assert present <= set(categories)
@@ -1256,7 +1994,7 @@ def test_clankerprof_preserves_main_simplified_category_totals_and_never_folds()
 ):
     profile = decode_profile_bytes(_main_category_profile_bytes())
     config = {
-        "Responders::BaseHtmlResponder#render_template": {
+        "Example::HtmlResponder#render_template": {
             "Application": r"[/\\]app[/\\]",
             "OpenTelemetry Gems": r"[/\\]gems[/\\]opentelemetry",
             "StatsD Gem": r"[/\\]gems[/\\]statsd",
@@ -1273,7 +2011,7 @@ def test_clankerprof_preserves_main_simplified_category_totals_and_never_folds()
                 runtime_rules=ruby_rules(_ruby_core_classes()),
                 fold_runtime_internals=fold,
             ),
-        )["Responders::BaseHtmlResponder#render_template"]
+        )["Example::HtmlResponder#render_template"]
         assert categories["Serialization Overhead"].cpu_time == 3_000_000_000
         assert categories["I/O Overhead"].cpu_time == 2_500_000_000
         assert categories["Instrumentation Overhead"].cpu_time == 1_500_000_000
@@ -1656,6 +2394,33 @@ def test_clankerprof_slice_analysis_supports_filters_collapse_attributes_and_com
     )
     assert compared["has_regression"] is True
     assert cast(list[dict[str, object]], compared["slices"])[0]["name"] == "app"
+
+
+@covers("M9-005", "M9-007")
+def test_clankerprof_compare_supports_boundary_outputs() -> None:
+    before = render_boundary_json(
+        analyze_boundaries(
+            decode_profile_bytes(_boundary_decomposition_profile_bytes()),
+            _generic_boundary_options(),
+        )
+    )
+    after = json.loads(json.dumps(before))
+    after_boundary = cast(list[dict[str, object]], after["boundaries"])[0]
+    after_buckets = cast(list[dict[str, object]], after_boundary["buckets"])
+    for bucket in after_buckets:
+        if bucket["name"] == "Mechanics":
+            bucket["pct"] = 90.0
+
+    compared = compare_boundary_json(
+        cast(dict[str, Any], before),
+        cast(dict[str, Any], after),
+        CompareOptions(threshold_abs=2.0, threshold_rel=15.0),
+    )
+    assert compared["has_regression"] is True
+    rows = cast(list[dict[str, object]], compared["rows"])
+    assert rows[0]["kind"] == "bucket"
+    assert rows[0]["boundary"] == "Request render"
+    assert rows[0]["name"] == "Mechanics"
 
 
 def _write_core_csv(tmp_path: Path) -> Path:
@@ -2553,3 +3318,134 @@ def test_clankerprof_real_profile_parity_helper_covers_legacy_target_artifacts(
     )
     payload = json.loads(capsys.readouterr().out)
     assert payload == {"checked": ["targets"], "ok": True}
+
+
+@covers("M9-006", "M9-007")
+def test_clankerprof_real_profile_parity_helper_covers_boundary_outputs(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from clankerprof.parity import main as parity_main
+
+    profile_path = tmp_path / "profile.pb"
+    config_path = tmp_path / "boundaries.toml"
+    expected_path = tmp_path / "expected-boundaries.json"
+    profile_path.write_bytes(_boundary_decomposition_profile_bytes())
+    config_path.write_text(
+        """
+[category]
+"View Models" = "path:app/view_models/**"
+"Components" = "path:app/components/**"
+"Cache Client" = "library:cache-client"
+"Serialization" = "name:JSON.generate"
+
+[domain]
+"Component rendering" = "category:Components"
+"View models" = "category:View Models"
+"Rendering fallback" = { patterns = ["path:app/rendering/**"], fallback = true }
+
+[[boundary]]
+label = "Request render"
+function = "RequestHandler#render_response"
+
+[boundary.attributables]
+p90_ms = 200.0
+
+[boundary.bucket]
+"Application code" = ["View Models", "Components"]
+"Mechanics" = ["Cache Client", "Serialization"]
+""".strip(),
+        encoding="utf-8",
+    )
+    expected = render_boundary_json(
+        analyze_boundaries(
+            decode_profile_bytes(_boundary_decomposition_profile_bytes()),
+            BoundaryAnalysisOptions(
+                categories=(
+                    BoundaryCategoryDefinition(
+                        "View Models",
+                        parse_frame_predicates(("path:app/view_models/**",)),
+                    ),
+                    BoundaryCategoryDefinition(
+                        "Components",
+                        parse_frame_predicates(("path:app/components/**",)),
+                    ),
+                    BoundaryCategoryDefinition(
+                        "Cache Client",
+                        parse_frame_predicates(("library:cache-client",)),
+                    ),
+                    BoundaryCategoryDefinition(
+                        "Serialization",
+                        parse_frame_predicates(("name:JSON.generate",)),
+                    ),
+                ),
+                domains=(
+                    BoundaryDomainDefinition(
+                        "Component rendering",
+                        parse_frame_predicates(("category:Components",)),
+                    ),
+                    BoundaryDomainDefinition(
+                        "View models",
+                        parse_frame_predicates(("category:View Models",)),
+                    ),
+                    BoundaryDomainDefinition(
+                        "Rendering fallback",
+                        parse_frame_predicates(("path:app/rendering/**",)),
+                        fallback=True,
+                    ),
+                ),
+                boundaries=(
+                    BoundaryDefinition(
+                        name="Request render",
+                        predicates=parse_frame_predicates(
+                            ("name_eq:RequestHandler#render_response",),
+                            default_key="name_eq",
+                        ),
+                        buckets={
+                            "Application code": ("View Models", "Components"),
+                            "Mechanics": ("Cache Client", "Serialization"),
+                        },
+                        attributables={"p90_ms": 200.0},
+                    ),
+                ),
+            ),
+        )
+    )
+    expected_path.write_text(
+        json.dumps(expected, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    assert (
+        parity_main(
+            [
+                "--allow-local-inputs",
+                "--profile",
+                str(profile_path),
+                "--boundary-config",
+                str(config_path),
+                "--expected-boundary-json",
+                str(expected_path),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {"checked": ["boundaries"], "ok": True}
+
+    assert (
+        parity_main(
+            [
+                "--allow-local-inputs",
+                "--profile",
+                str(profile_path),
+                "--scope-config",
+                str(config_path),
+                "--expected-boundary-json",
+                str(expected_path),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {"checked": ["boundaries"], "ok": True}

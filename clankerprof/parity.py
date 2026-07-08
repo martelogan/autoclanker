@@ -230,6 +230,40 @@ def _run_slices(args: argparse.Namespace, tmpdir: Path) -> dict[str, Any] | None
     return slice_json
 
 
+def _boundary_base_argv(args: argparse.Namespace) -> list[str]:
+    if args.boundary_config is None:
+        raise ValueError(
+            "--scope-config or --boundary-config is required for scope parity checks."
+        )
+    argv = [
+        "boundaries",
+        "--profile",
+        args.profile,
+        "--config",
+        args.boundary_config,
+    ]
+    _append_runtime_args(args, argv)
+    if args.fold_runtime_internals:
+        argv.append("--fold-runtime-internals")
+    if args.no_enhanced:
+        argv.append("--no-enhanced")
+    if args.boundary_top is not None:
+        argv.extend(["--top", str(args.boundary_top)])
+    return argv
+
+
+def _run_boundaries(args: argparse.Namespace, tmpdir: Path) -> dict[str, Any] | None:
+    if args.boundary_config is None:
+        return None
+    boundary_json = _run_to_json(
+        _boundary_base_argv(args),
+        tmpdir / "boundaries.json",
+    )
+    if args.expected_boundary_json:
+        _assert_json_equal(boundary_json, args.expected_boundary_json)
+    return boundary_json
+
+
 def _run_facts(args: argparse.Namespace, tmpdir: Path) -> dict[str, Any] | None:
     if args.expected_facts_json is None:
         return None
@@ -369,6 +403,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--core-classes", "--ruby-core-classes", dest="core_classes")
     parser.add_argument("--target-config")
     parser.add_argument("--slice-config")
+    parser.add_argument("--scope-config", "--boundary-config", dest="boundary_config")
     parser.add_argument("--attributables", "--cpu-attributables", dest="attributables")
     parser.add_argument("--expected-facts-json")
     parser.add_argument("--expected-target-json")
@@ -376,6 +411,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-verbose-target-csv")
     parser.add_argument("--expected-semantic-callers-csv")
     parser.add_argument("--expected-slice-json")
+    parser.add_argument("--expected-boundary-json")
+    parser.add_argument("--boundary-top", type=int)
     parser.add_argument("--fold-runtime-internals", action="store_true")
     parser.add_argument("--track-semantic-callers", action="store_true")
     parser.add_argument("--verbose-runtime-internals", action="store_true")
@@ -429,6 +466,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "facts": _run_facts(args, tmpdir),
                 "targets": _run_targets(args, tmpdir),
                 "slices": _run_slices(args, tmpdir),
+                "boundaries": _run_boundaries(args, tmpdir),
             }
             rust_outputs = _run_rust_core(args, tmpdir)
         print(

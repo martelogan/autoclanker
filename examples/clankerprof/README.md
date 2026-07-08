@@ -20,6 +20,26 @@ clankerprof targets \
   --output tmp/profile-targets.json
 ```
 
+## Scope decomposition
+
+Use `scopes` when you want one parent denominator split into display rollups,
+atomic cost kinds, owner frames, and top caller -> hot leaf evidence.
+
+```bash
+clankerprof scopes \
+  --profile profile.pb.gz \
+  --config examples/clankerprof/scopes.toml \
+  --output tmp/profile-scopes.json
+```
+
+The config is intentionally generic. Replace the cost-kind and owner selectors
+with project-local paths, dependency selectors, expression tables such as
+`{ all = [...], not = ... }`, `cost_kind:<label>` selectors for configured
+cost-kind labels, `runtime_label:<label>` selectors for runtime-rule labels,
+or `slice:<name>` predicates when you want to reuse a slice file as an owner
+taxonomy. The older `boundaries` command and `boundaries.toml` vocabulary remain
+accepted compatibility aliases.
+
 ## Slice attribution
 
 Use `slices` when you want ownership-style views, collapse rules, and JSON that
@@ -42,11 +62,11 @@ other domain-specific labels without changing `clankerprof`.
 
 ```bash
 clankerprof compare \
-  --before tmp/before-slices.json \
-  --after tmp/after-slices.json \
+  --before tmp/before.json \
+  --after tmp/after.json \
   --threshold-abs 2.0 \
   --threshold-rel 15.0
 ```
 
-The compare command exits `2` when a focused slice regresses beyond both
-thresholds.
+The compare command accepts slice or boundary/scope JSON. It exits `2` when a focused
+row regresses beyond both thresholds.

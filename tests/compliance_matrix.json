@@ -356,13 +356,19 @@
   {
     "requirement_id": "M9-005",
     "gate": "required",
-    "description": "clankerprof is usable both as a standalone CLI and through the autoclanker pprof alias, with machine-readable JSON results and file output for report formats.",
+    "description": "clankerprof is usable both as a standalone CLI and through the autoclanker pprof alias, with machine-readable JSON results, file output for report formats, and regression comparison for slice or boundary reports.",
     "status": "active"
   },
   {
     "requirement_id": "M9-006",
     "gate": "required",
-    "description": "clankerprof exposes a stable versioned sample-facts JSON contract and projection-neutral fact index so target, slice, semantic-caller, and compare projections can share one decoded profile surface.",
+    "description": "clankerprof exposes a stable versioned sample-facts JSON contract and projection-neutral fact index so target, boundary, slice, semantic-caller, and compare projections can share one decoded profile surface.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M9-007",
+    "gate": "required",
+    "description": "clankerprof supports declarative scope decomposition with cost kinds, scope rollups, owner breakdowns, residual exclusions, calibrated attributables, expression selectors, configured cost-kind selectors, runtime-label selectors, legacy boundary/category/domain aliases, and cached frame-selector matching.",
     "status": "active"
   }
 ]

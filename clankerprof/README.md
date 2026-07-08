@@ -1,8 +1,9 @@
 # clankerprof
 
 `clankerprof` turns pprof CPU profiles into a typed call graph and a small set
-of durable reports: target-boundary cost ledgers, responsibility slices,
-semantic caller exports, and before/after regression gates.
+of durable reports: target-boundary cost ledgers, scope decomposition,
+responsibility slices, semantic caller exports, and before/after regression
+gates.
 
 <p align="center">
   <img src="./sample-facts-hero.png" width="840" alt="clankerprof call graph to sample facts visual">
@@ -18,8 +19,11 @@ the stack: `HotelSearch#rank_results`, `CalendarExport#to_json`, or
 `MapView#load_tiles`.
 
 The tool keeps those views connected. It can show the low-level CPU mechanics,
-then fold or attribute that cost back to the caller, boundary, semantic bucket,
-or responsibility slice that made the work happen.
+then fold or attribute that cost back to the caller, measured scope, semantic
+rollup, owner frame, or responsibility slice that made the work happen. New
+configs should prefer `scope`, `cost_kind`, `rollup`, `owner`, `runtime_label`,
+and `selector`; older `boundary`, `category`, `bucket`, `domain`,
+`runtime_category`, and `match` names remain accepted compatibility aliases.
 
 ## Start With Defaults
 
@@ -34,6 +38,11 @@ clankerprof slices --profile profile.pb.gz
 clankerprof targets \
   --profile profile.pb.gz \
   --target HotelSearch#rank_results
+
+# Explain one parent denominator with rollups, cost kinds, and owners.
+clankerprof scopes \
+  --profile profile.pb.gz \
+  --config examples/clankerprof/scopes.toml
 
 # Write stable JSON once the query is useful.
 clankerprof slices \
@@ -54,6 +63,7 @@ semantics, or metadata:
 
 ```bash
 clankerprof targets --profile profile.pb.gz --config target_config.json
+clankerprof scopes --profile profile.pb.gz --config scopes.toml
 clankerprof slices --profile profile.pb.gz --config clankerprof-slices.yml
 clankerprof slices --facts tmp/profile-facts.json --config clankerprof-slices.yml
 ```
@@ -79,6 +89,7 @@ callers, or compare gates.
 - Which parent boundary accumulated this CPU?
 - Is the cost allocation, string processing, serialization, I/O,
   instrumentation, template execution, or application logic?
+- Within one parent denominator, which owner domain drove each cost kind?
 - Which responsibility slice carries the cost after filters, collapse rules,
   and attribution rules?
 - Did a before/after run regress a focused slice enough to fail a benchmark or
@@ -94,12 +105,15 @@ callers, or compare gates.
 | sample-facts JSON | Versioned decoded profile surface accepted by `--facts`. |
 | `--target <function>` | Minimal target mode for explaining CPU below a known parent frame. |
 | `target_config.json` | Optional richer target categories for path-based attribution. |
+| `scopes.toml` | Scope decomposition config with cost kinds, rollups, owners, and same-scope attributables. |
+| `boundaries.toml` | Compatibility name for older scope decomposition configs. |
 | `clankerprof-slices.yml` / `slices.yml` | Optional slice ownership, filters, collapse rules, and metadata. |
 | runtime rule pack | Optional semantic labels and runtime-internal folding. |
 
 | Output | Purpose |
 | --- | --- |
 | target JSON/CSV/text | Parent-boundary cost ledger. |
+| boundary JSON | Compatible payload for parent scopes split into rollups, atomic cost kinds, owners, and evidence. |
 | slice JSON | Responsibility view with top frames and metadata. |
 | sample-facts JSON | Stable decoded facts that target and slice projections can replay. |
 | semantic callers CSV | Runtime/native leaves such as `Object#new` mapped back to callers. |
@@ -133,6 +147,7 @@ strategy. `clankerprof` keeps the pieces separate:
 
 ```bash
 clankerprof targets --profile profile.pb.gz --target TripPlanner#rank_itineraries
+clankerprof scopes --profile profile.pb.gz --config scopes.toml
 clankerprof slices --profile profile.pb.gz --config clankerprof-slices.yml
 clankerprof facts --profile profile.pb.gz --output profile-facts.json
 clankerprof slices --facts profile-facts.json --config clankerprof-slices.yml
@@ -234,6 +249,72 @@ shape. It is not a direct per-category latency measurement.
 Use full `csv` or `text` output when you need deeper callsite evidence. Full
 CSV includes sample counts, file counts, top caller-to-leaf pairs, and both raw
 nanoseconds and human-readable time.
+
+## Scope Decomposition
+
+Use `scopes` when the investigation needs more structure than a flat target
+category table: one parent denominator, scope-specific display rollups, atomic
+cost kinds, optional owner rows, and proportional attributable estimates.
+
+```bash
+clankerprof scopes \
+  --profile profile.pb.gz \
+  --config examples/clankerprof/scopes.toml \
+  --output tmp/scopes.json
+```
+
+Minimal TOML shape:
+
+```toml
+[cost_kind]
+"Components" = "path:app/components/**"
+"Cache Client" = "library:cache-client"
+"Serialization" = ["name:JSON", "name:MessagePack"]
+"Application outside components" = { all = ["path:app/**"], not = "path:app/components/**" }
+
+[owner]
+"Rendering" = ["path:app/components/**", "path:app/view_models/**"]
+"Application fallback" = { patterns = ["path:app/**"], fallback = true }
+
+[[scope]]
+label = "Request render"
+function = "RequestHandler#render_response"
+
+[scope.attributables]
+p90_ms = 142.0
+
+[scope.rollup]
+"Application code" = ["Components"]
+"Mechanics" = ["Cache Client", "Serialization"]
+```
+
+Terminology:
+
+| Concept | Meaning |
+| --- | --- |
+| Scope | The stack frame that defines the denominator. |
+| Cost kind | The atomic kind of work sampled at the leaf or folded caller. |
+| Rollup | Scope-specific display grouping of cost kinds. |
+| Owner | Observed frame below the scope; owner rows preserve cost-kind sub-buckets. |
+| Slice | Optional path ownership source that `owner` predicates can reference with `slice:<name>`. |
+
+Predicate values can be a string, an array of strings with OR semantics, or a
+table with `any`, `all`, and `not`. Predicate keys include `name:`,
+`name_eq:`, `path:`, `regex:`, `native`, dependency selectors such as
+`library:`, `slice:<name>` when a slice file is loaded, `cost_kind:<label>` for
+configured cost-kind labels, and `runtime_label:<label>` for labels produced by
+the selected runtime rule pack. Compatibility aliases remain accepted:
+`category:<label>` for `cost_kind:<label>`, `runtime_category:<label>` for
+`runtime_label:<label>`, `[category]` for `[cost_kind]`, `[domain]` for
+`[owner]`, `[[boundary]]` for `[[scope]]`, and `[boundary.bucket]` for
+`[scope.rollup]`. Cost-kind definitions cannot use `cost_kind:` or `category:`
+recursively; use rollups for display groupings.
+
+The hot loop caches predicate matches per unique frame and streams each sample
+stack leaf-to-root once. That keeps the common shape close to
+`O(samples x frames + unique_frames x configured_predicates)`, while still
+emitting owner files and caller -> hot leaf evidence for the rows that were
+actually observed.
 
 ## Slice Attribution
 
@@ -408,13 +489,13 @@ alias for existing scripts.
 
 ## Compare Gates
 
-`compare` consumes two slice JSON reports and fails with exit code `2` when a
-slice crosses both absolute and relative thresholds:
+`compare` consumes two slice or boundary JSON reports and fails with exit code
+`2` when a focused row crosses both absolute and relative thresholds:
 
 ```bash
 clankerprof compare \
-  --before tmp/before-slices.json \
-  --after tmp/after-slices.json \
+  --before tmp/before.json \
+  --after tmp/after.json \
   --threshold-abs 2.0 \
   --threshold-rel 15.0
 ```
@@ -429,17 +510,17 @@ depending on terminal-only summaries.
 | `proto.py` | Minimal pprof protobuf decoder. |
 | `model.py` | Typed profile, sample, frame, location, function, and mapping models. |
 | `facts.py` | Versioned sample-facts JSON, import/export helpers, and projection-neutral indexes. |
-| `analysis.py` | Call graph construction plus target and slice attribution. |
+| `analysis.py` | Call graph construction plus target, boundary, and slice attribution. |
 | `rules.py` | Runtime rule packs, slice configs, filters, collapse rules, and attribute rules. |
-| `compare.py` | Before/after slice delta checks. |
+| `compare.py` | Before/after slice and boundary delta checks. |
 | `render.py` | JSON, CSV, simple CSV, and text renderers. |
 | `cli.py` | `clankerprof` command surface. |
 
 ## Design Contract
 
 - Decode once; project many times.
-- Let CLI and library callers replay target and slice projections from the same
-  versioned fact artifact.
+- Let CLI and library callers replay target, boundary, and slice projections
+  from the same versioned fact artifact.
 - Keep target accounting and slice attribution separate.
 - Preserve raw profile identity while adding semantic labels as projections.
 - Keep runtime and ownership knowledge declarative.

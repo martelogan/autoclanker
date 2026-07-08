@@ -40,6 +40,27 @@ behavior must not define or override target-attribution semantics.
 | Compatibility two-file CSV artifact pair, `output/<name>` and `output/verbose/<name>`, via `--target-csv-layout compat` or the older alias flag | covered with explicit opt-in | `test_clankerprof_can_emit_legacy_target_csv_artifact_pair` |
 | Legacy text report phrasing byte-for-byte | not claimed | Prefer structured JSON/CSV compatibility over exact prose output. |
 
+## Scope decomposition
+
+This section is scoped to `clankerprof scopes` and its compatibility alias
+`clankerprof boundaries`. It absorbs the richer scope/cost-kind/rollup/owner
+analysis surface without changing legacy `targets` JSON config semantics,
+existing boundary JSON payloads, or slice ownership semantics.
+
+| Capability | Status | Test coverage |
+| --- | --- | --- |
+| Declarative TOML/YAML scope config with `[cost_kind]`, optional `[owner]`, `[[scope]]`, `[scope.rollup]`, and `[scope.attributables]`; legacy `[category]`, `[domain]`, `[[boundary]]`, `[boundary.bucket]`, and `[boundary.attributables]` remain accepted | covered | `test_clankerprof_boundary_config_cli_replays_sample_facts`, `test_clankerprof_scope_config_aliases_preserve_boundary_output`, `test_clankerprof_scope_config_rejects_mixed_preferred_and_legacy_sections` |
+| Cost-kind rows and scope rollups under one parent denominator | covered | `test_clankerprof_boundary_decomposition_tracks_domain_cost_kinds` |
+| Owner rows preserve cost-kind sub-buckets under the same scope denominator | covered | `test_clankerprof_boundary_decomposition_tracks_domain_cost_kinds` |
+| Top owner files and representative owner function -> hot leaf evidence | covered | `test_clankerprof_boundary_decomposition_tracks_domain_cost_kinds` |
+| Scope reports can replay versioned sample facts through the standalone and umbrella CLI surfaces | covered | `test_clankerprof_boundary_config_cli_replays_sample_facts` |
+| Residual parent scopes via `exclude_descendants` | covered | `test_clankerprof_boundary_exclusions_build_residual_scopes` |
+| Frame-predicate matching is cached by unique frame identity rather than repeated per sample occurrence | covered | `test_clankerprof_boundary_predicate_matching_is_cached` |
+| Predicate expressions with `any`, `all`, and `not`, configured `cost_kind:<label>`/`category:<label>` selectors, runtime `runtime_label:<label>`/`runtime_category:<label>` selectors, and recursive cost-kind guardrails | covered | `test_clankerprof_boundary_config_supports_predicate_expressions_and_category_refs`, `test_clankerprof_scope_config_aliases_preserve_boundary_output`, `test_clankerprof_boundary_config_rejects_recursive_category_predicates` |
+| Nested predicate expressions remain cached by unique frame identity across repeated samples | covered | `test_clankerprof_boundary_expression_matching_stays_frame_cached` |
+| Configured category selectors remain cached by unique frame identity when used as owner-domain predicates | covered | `test_clankerprof_boundary_category_predicates_stay_frame_cached` |
+| Rust parity for scope decomposition | not claimed | Python is the reference implementation until `clankerprof-core` adds equivalent coverage. |
+
 ## Runtime rules
 
 | Capability | Status | Test coverage |
@@ -82,13 +103,14 @@ semantics.
 | Unattributed library summaries for default slice views, with legacy gem output retained | covered | `test_clankerprof_slice_outputs_gc_uncollapsible_and_unattributed_libraries` |
 | Slice frame output includes decoded pprof line numbers when present | covered | `test_clankerprof_slice_outputs_gc_uncollapsible_and_unattributed_libraries` |
 | Terminal text formatting, coloring, width wrapping, and timing output from older slice tools | not claimed | `clankerprof` prioritizes machine-readable JSON plus CSV/text target reports. |
-| Domain-specific responsibility fields as first-class concepts | not claimed | Slice metadata is preserved generically instead of hardcoding any one responsibility system. |
+| Domain-specific responsibility fields as first-class slice concepts | not claimed | Slice metadata is preserved generically; owner decomposition is covered separately by `clankerprof scopes`. |
 
 ## Compare
 
 | Capability | Status | Test coverage |
 | --- | --- | --- |
 | Structured slice comparison with absolute/relative thresholds | covered | `test_clankerprof_slice_analysis_supports_filters_collapse_attributes_and_compare` |
+| Structured boundary comparison over boundary, bucket, category, and domain rows | covered | `test_clankerprof_compare_supports_boundary_outputs` |
 | Non-zero regression gate exit code | covered | `test_clankerprof_compare_exits_nonzero_for_regression_gate` |
 | Top per-function regressions and improvements in JSON | covered | `test_clankerprof_compare_exits_nonzero_for_regression_gate` |
 | Text compare report wording from older slice tools | not claimed | JSON gate compatibility is the stable contract. |
@@ -96,7 +118,8 @@ semantics.
 ## Remaining confidence boundary
 
 The self-contained tests now cover the mined target-attribution surface plus
-the separate slice/report surface listed above. They do not prove byte-for-byte
-replacement of every historical profile report. Before deleting older tools,
-run golden replays against real Ruby `.pb` profiles and compare category/caller
-CSV totals first, then compare slice totals as a separate migration check.
+the separate boundary and slice/report surfaces listed above. They do not prove
+byte-for-byte replacement of every historical profile report. Before deleting
+older tools, run golden replays against real `.pb` / `.pb.gz` profiles and
+compare target category/caller CSV totals, boundary JSON totals, and slice JSON
+totals as separate migration checks.

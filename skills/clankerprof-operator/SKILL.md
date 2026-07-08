@@ -1,12 +1,13 @@
 ---
 name: clankerprof-operator
-description: Use when analyzing pprof CPU profiles with clankerprof, authoring runtime rule packs or slice configs, checking sample-facts parity, or preparing a cross-language port of the clankerprof sample-facts engine.
+description: Use when analyzing pprof CPU profiles with clankerprof, authoring runtime rule packs, scope configs, or slice configs, checking sample-facts parity, or preparing a cross-language port of the clankerprof sample-facts engine.
 ---
 
 # Clankerprof Operator
 
 Use this skill when a task involves `clankerprof` profiles, target attribution,
-slice attribution, runtime rule packs, sample-facts artifacts, or parity checks.
+scope decomposition, slice attribution, runtime rule packs, sample-facts
+artifacts, or parity checks.
 
 ## Workflow
 
@@ -24,6 +25,7 @@ slice attribution, runtime rule packs, sample-facts artifacts, or parity checks.
 
 ```bash
 clankerprof targets --profile profile.pb.gz --target Boundary#call
+clankerprof scopes --profile profile.pb.gz --config scopes.toml
 clankerprof slices --profile profile.pb.gz
 clankerprof facts --profile profile.pb.gz --output profile-facts.json
 ```
@@ -36,11 +38,22 @@ cross-language ports.
 
 - Put language/runtime details in `--runtime-rules runtime-rules.yml`.
 - Put core/native class lists in `--core-classes core_classes.csv`.
+- Put parent-denominator decomposition in `scopes.toml`: `[cost_kind]` for
+  atomic work kinds, `[owner]` for owner frames, and `[[scope]]` for denominators.
+- Use predicate expression tables only when needed: strings and arrays cover
+  simple OR matching; `{ all = [...], not = ... }` covers crisp exclusions
+  without custom code.
+- Use `cost_kind:<label>` for configured cost-kind labels outside `[cost_kind]`
+  definitions.
+- Use `runtime_label:<label>` for labels produced by the runtime rule pack.
+- Do not reference `cost_kind:` or `category:` recursively from cost-kind
+  definitions; use rollups for display grouping.
 - Put ownership, contacts, docs, or other domain labels in slice metadata.
 - Prefer `library:`, `dependency:`, `package:`, `vendor:`, or selectors declared
   by `library_selector_path_patterns`.
-- Keep compatibility aliases such as `gem:` and older flag names only for
-  existing configs or parity checks.
+- Keep compatibility aliases such as `boundaries`, `[category]`, `[domain]`,
+  `[[boundary]]`, `[boundary.bucket]`, `category:`, `runtime_category:`, `gem:`,
+  and older flag names only for existing configs or parity checks.
 
 4. Make folding explicit and reviewable.
 
@@ -58,8 +71,11 @@ cross-language ports.
 clankerprof facts --profile profile.pb.gz --output profile-facts.json
 clankerprof targets --profile profile.pb.gz --config target_config.json --output targets-from-profile.json
 clankerprof targets --facts profile-facts.json --config target_config.json --output targets-from-facts.json
+clankerprof scopes --profile profile.pb.gz --config scopes.toml --output scopes-from-profile.json
+clankerprof scopes --facts profile-facts.json --config scopes.toml --output scopes-from-facts.json
 clankerprof slices --profile profile.pb.gz --config clankerprof-slices.yml --output slices-from-profile.json
 clankerprof slices --facts profile-facts.json --config clankerprof-slices.yml --output slices-from-facts.json
+clankerprof compare --before before-scopes.json --after after-scopes.json --focus-scopes "Request render"
 ```
 
 When real-profile reference artifacts are available locally, use the parity
@@ -111,8 +127,8 @@ cargo test -p clankerprof-core
   internals.
 - Preserve sparse pprof IDs, inline frames, folded-location markers, sample
   order, all sample values, and leaf-to-root stack order.
-- Implement target and slice projections over sample facts, not over a separate
-  decoder-specific call graph.
+- Implement target, scope/boundary, and slice projections over sample facts, not over
+  a separate decoder-specific call graph.
 - Match JSON/CSV outputs through golden tests before optimizing internals.
 - Keep runtime rules and slice metadata data-driven; do not bake one language,
   framework, owner model, or dependency layout into the core.

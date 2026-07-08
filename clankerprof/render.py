@@ -4,11 +4,14 @@ import csv
 import io
 import json
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict
+from typing import cast
 
 from clankerprof.analysis import (
     DEFAULT_RUNTIME_RULES,
+    BoundaryAnalysisResult,
+    BoundaryStats,
     RuntimeRuleSet,
     SliceAnalysisOptions,
     SliceAnalysisResult,
@@ -16,7 +19,7 @@ from clankerprof.analysis import (
     extract_library_path,
     format_time,
 )
-from clankerprof.model import CategoryStats
+from clankerprof.model import CategoryStats, TimeNs
 
 
 def render_target_json(
@@ -80,6 +83,273 @@ def render_target_json(
             ],
         }
     return {"tool": "clankerprof_targets", "parents": parents}
+
+
+def render_boundary_json(
+    result: BoundaryAnalysisResult,
+    *,
+    top: int | None = None,
+) -> dict[str, object]:
+    return {
+        "tool": "clankerprof_boundaries",
+        "summary": {
+            "total_time_ns": result.total_time_ns,
+            "unique_frame_count": result.unique_frame_count,
+        },
+        "boundaries": [
+            _render_boundary(
+                boundary,
+                profile_total=result.total_time_ns,
+                top=top,
+            )
+            for boundary in result.boundaries
+        ],
+    }
+
+
+def _scale_attributables(
+    attributables: Mapping[str, float],
+    total: TimeNs,
+    value: TimeNs,
+) -> dict[str, float]:
+    if not attributables or total <= 0:
+        return {}
+    return {
+        name: metric_value * (value / total)
+        for name, metric_value in sorted(attributables.items())
+    }
+
+
+def _render_boundary(
+    boundary: BoundaryStats,
+    *,
+    profile_total: TimeNs,
+    top: int | None,
+) -> dict[str, object]:
+    total = boundary.total_time
+    bucketed_categories = {
+        category for categories in boundary.buckets.values() for category in categories
+    }
+    buckets = [
+        _render_boundary_bucket(boundary, label, categories)
+        for label, categories in boundary.buckets.items()
+    ]
+    leftover = tuple(
+        category
+        for category, stats in sorted(
+            boundary.categories.items(),
+            key=lambda item: item[1].cpu_time,
+            reverse=True,
+        )
+        if category not in bucketed_categories and stats.cpu_time > 0
+    )
+    if leftover:
+        buckets.append(_render_boundary_bucket(boundary, "Other", leftover))
+    buckets = [bucket for bucket in buckets if cast(int, bucket["time_ns"]) > 0]
+    buckets.sort(key=lambda bucket: cast(int, bucket["time_ns"]), reverse=True)
+    return {
+        "name": boundary.name,
+        "total_time_ns": total,
+        "pct_of_profile": (total / profile_total * 100 if profile_total else 0),
+        "samples": boundary.sample_count,
+        "attributable_estimates": dict(sorted(boundary.attributables.items())),
+        "buckets": buckets,
+        "domains": [
+            _render_domain(boundary, name, top=top)
+            for name, stats in sorted(
+                boundary.domains.items(),
+                key=lambda item: item[1].cpu_time,
+                reverse=True,
+            )
+            if stats.cpu_time > 0
+        ][:top],
+    }
+
+
+def _render_boundary_bucket(
+    boundary: BoundaryStats,
+    label: str,
+    categories: Sequence[str],
+) -> dict[str, object]:
+    total = boundary.total_time
+    category_rows = [
+        _render_boundary_category(boundary, category, stats)
+        for category in categories
+        if (stats := boundary.categories.get(category)) is not None
+        and stats.cpu_time > 0
+    ]
+    cpu_time = sum(cast(int, row["time_ns"]) for row in category_rows)
+    return {
+        "name": label,
+        "time_ns": cpu_time,
+        "pct": (cpu_time / total * 100) if total else 0,
+        "attributable_estimates": _scale_attributables(
+            boundary.attributables,
+            total,
+            cpu_time,
+        ),
+        "samples": sum(cast(int, row["samples"]) for row in category_rows),
+        "categories": category_rows,
+    }
+
+
+def _render_boundary_category(
+    boundary: BoundaryStats,
+    category: str,
+    stats: CategoryStats,
+) -> dict[str, object]:
+    total = boundary.total_time
+    return {
+        "name": category,
+        "time_ns": stats.cpu_time,
+        "pct": (stats.cpu_time / total * 100) if total else 0,
+        "attributable_estimates": _scale_attributables(
+            boundary.attributables,
+            total,
+            stats.cpu_time,
+        ),
+        "samples": stats.sample_count,
+        "leaf_functions": {
+            name: asdict(metrics)
+            for name, metrics in sorted(
+                stats.functions.items(),
+                key=lambda item: item[1].cpu_time,
+                reverse=True,
+            )
+        },
+        "files": sorted(stats.files),
+        "folded_from": dict(
+            sorted(
+                stats.folded_from.items(),
+                key=lambda item: item[1],
+                reverse=True,
+            )
+        ),
+        "caller_leaf_pairs": [
+            {
+                "pair": pair,
+                "time_ns": metrics.cpu_time,
+                "samples": metrics.count,
+                "pct": (metrics.cpu_time / total * 100) if total else 0,
+                "attributable_estimates": _scale_attributables(
+                    boundary.attributables,
+                    total,
+                    metrics.cpu_time,
+                ),
+            }
+            for pair, metrics in sorted(
+                stats.caller_leaf_pairs.items(),
+                key=lambda item: item[1].cpu_time,
+                reverse=True,
+            )
+        ],
+    }
+
+
+def _render_domain(
+    boundary: BoundaryStats,
+    name: str,
+    *,
+    top: int | None,
+) -> dict[str, object]:
+    stats = boundary.domains[name]
+    total = boundary.total_time
+    return {
+        "name": name,
+        "time_ns": stats.cpu_time,
+        "pct": (stats.cpu_time / total * 100) if total else 0,
+        "attributable_estimates": _scale_attributables(
+            boundary.attributables,
+            total,
+            stats.cpu_time,
+        ),
+        "samples": stats.sample_count,
+        "cost_kinds": [
+            {
+                "name": cost_kind,
+                "time_ns": metrics.cpu_time,
+                "samples": metrics.count,
+                "pct_of_domain": (
+                    metrics.cpu_time / stats.cpu_time * 100 if stats.cpu_time else 0
+                ),
+                "pct_of_boundary": (metrics.cpu_time / total * 100 if total else 0),
+                "attributable_estimates": _scale_attributables(
+                    boundary.attributables,
+                    total,
+                    metrics.cpu_time,
+                ),
+            }
+            for cost_kind, metrics in sorted(
+                stats.cost_kinds.items(),
+                key=lambda item: item[1].cpu_time,
+                reverse=True,
+            )
+        ][:top],
+        "files": [
+            {
+                "filename": file_stats.filename,
+                "time_ns": file_stats.cpu_time,
+                "samples": file_stats.sample_count,
+                "pct_of_domain": (
+                    file_stats.cpu_time / stats.cpu_time * 100 if stats.cpu_time else 0
+                ),
+                "pct_of_boundary": (file_stats.cpu_time / total * 100 if total else 0),
+                "attributable_estimates": _scale_attributables(
+                    boundary.attributables,
+                    total,
+                    file_stats.cpu_time,
+                ),
+                "functions": {
+                    function: asdict(metrics)
+                    for function, metrics in sorted(
+                        file_stats.functions.items(),
+                        key=lambda item: item[1].cpu_time,
+                        reverse=True,
+                    )[:top]
+                },
+                "cost_kinds": [
+                    {
+                        "name": cost_kind,
+                        "time_ns": metrics.cpu_time,
+                        "samples": metrics.count,
+                        "pct_of_file": (
+                            metrics.cpu_time / file_stats.cpu_time * 100
+                            if file_stats.cpu_time
+                            else 0
+                        ),
+                    }
+                    for cost_kind, metrics in sorted(
+                        file_stats.cost_kinds.items(),
+                        key=lambda item: item[1].cpu_time,
+                        reverse=True,
+                    )
+                ][:top],
+                "caller_leaf_pairs": [
+                    {
+                        "caller": caller,
+                        "leaf": leaf,
+                        "time_ns": metrics.cpu_time,
+                        "samples": metrics.count,
+                        "pct_of_file": (
+                            metrics.cpu_time / file_stats.cpu_time * 100
+                            if file_stats.cpu_time
+                            else 0
+                        ),
+                    }
+                    for (caller, leaf), metrics in sorted(
+                        file_stats.caller_leaf_pairs.items(),
+                        key=lambda item: item[1].cpu_time,
+                        reverse=True,
+                    )
+                ][:top],
+            }
+            for file_stats in sorted(
+                stats.files.values(),
+                key=lambda item: item.cpu_time,
+                reverse=True,
+            )
+        ][:top],
+    }
 
 
 def render_semantic_callers_csv(

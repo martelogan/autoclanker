@@ -1,0 +1,35 @@
+[category]
+"View Models" = "path:app/view_models/**"
+"Components" = "path:app/components/**"
+"Data Loading" = ["path:app/data/**", "path:app/loaders/**"]
+"Application Outside Components" = { all = ["path:app/**"], not = "path:app/components/**" }
+"Cache Client" = "library:cache-client"
+"Serialization" = ["name:JSON", "name:MessagePack"]
+"Template Engine" = "path:lib/template_engine/**"
+
+[domain]
+"Rendering" = ["path:app/components/**", "path:app/view_models/**"]
+"Data access" = ["path:app/data/**", "path:app/loaders/**"]
+"Application fallback" = { patterns = ["path:app/**"], fallback = true }
+
+[[boundary]]
+label = "Request render"
+function = "RequestHandler#render_response"
+count = "once_per_sample"
+
+[boundary.attributables]
+p90_ms = 96.0
+
+[boundary.bucket]
+"Application code" = ["View Models", "Components", "Data Loading"]
+"Mechanics" = ["Cache Client", "Serialization", "Template Engine"]
+
+[[boundary]]
+label = "Request render outside template"
+match = { all = ["name_eq:RequestHandler#render_response"], not = "name_eq:BackgroundJob#perform" }
+exclude_descendants = ["name_eq:TemplateRenderer#render"]
+count = "once_per_sample"
+
+[boundary.bucket]
+"Application code" = ["View Models", "Components", "Data Loading"]
+"Mechanics" = ["Cache Client", "Serialization", "Template Engine"]

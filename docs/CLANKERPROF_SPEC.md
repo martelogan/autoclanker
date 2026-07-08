@@ -8,10 +8,11 @@ compatibility target.
 ## Design goals
 
 - Decode one pprof profile into one durable sample-facts model.
-- Keep target-boundary attribution and slice attribution as projections over
-  the same facts, not as separate decoders with separate accounting.
+- Keep target-boundary attribution, scope decomposition, and slice
+  attribution as projections over the same facts, not as separate decoders with
+  separate accounting.
 - Keep runtime and dependency knowledge declarative through rule packs.
-- Keep domain ownership metadata declarative through slice config.
+- Keep ownership metadata declarative through slice config.
 - Emit machine-readable artifacts that can be compared by tests, CI, agents, or
   another implementation in a different language.
 
@@ -156,6 +157,60 @@ For each sample:
 Target projection must preserve complete target accounting. Category totals for
 one parent must sum to the total CPU time under that parent.
 
+## Scope decomposition contract
+
+`scopes` answers: “inside this parent denominator, which rollups and cost
+kinds consumed CPU, and which owner frame below the scope drove each cost
+kind?”
+
+Scope decomposition is a richer parent-scope projection, not a slice
+replacement. The JSON payload keeps historical boundary field names for
+compatibility, but the preferred authoring terminology is:
+
+| Concept | Meaning |
+| --- | --- |
+| Scope | The parent frame that defines the denominator. |
+| Cost kind | Atomic taxonomy used for sampled or folded work. |
+| Rollup | Scope-specific display grouping of cost-kind rows. |
+| Owner | Observed owner taxonomy below the scope; each owner preserves cost-kind sub-buckets. |
+| Slice | Optional ownership source that `owner` predicates can reference via `slice:<name>`. |
+
+Scope, cost-kind, owner, and exclusion selectors accept a plain selector,
+an OR list of selectors, or an expression table with `any`, `all`, and `not`.
+Supported selector keys are intentionally generic: function name contains,
+function name equality, path/glob, regex, native frame, dependency selectors,
+optional slice label, configured cost-kind label, and runtime-rule label. A
+`cost_kind:<label>` selector matches the configured `[cost_kind]` label for a
+frame and is valid for owners, scopes, and exclusions. A
+`runtime_label:<label>` selector matches labels produced by the selected
+runtime rule pack. Compatibility aliases remain accepted: `boundaries`,
+`[category]`, `[domain]`, `[[boundary]]`, `[boundary.bucket]`, `category:`, and
+`runtime_category:`. Cost-kind definitions cannot reference `cost_kind:` or
+`category:` recursively; use rollups for display groupings.
+
+For each sample:
+
+- compute the cost kind once from the leaf or folded caller;
+- walk the stack leaf-to-root once;
+- maintain the current owner below the current frame;
+- attribute the full primary sample value to every matching scope occurrence;
+- skip a scope occurrence when a configured `exclude_descendants` predicate
+  has already matched lower in the stack;
+- count repeated/recursive scope frames by occurrence by default, or once
+  per sample when configured;
+- collect cost-kind totals, rollup totals, owner totals, owner cost-kind
+  totals, top owner files, and representative caller-to-leaf pairs.
+
+Predicate matching should be cached by unique frame identity so the hot path is
+approximately `O(samples x frames + unique_frames x configured_predicates)`.
+Implementations must avoid rescanning each sample prefix for every boundary,
+cost-kind, and owner pairing.
+
+Scope totals for one scope must remain internally additive: rollup cost-kind
+rows sum to the scope total, and owner cost-kind rows sum to their owner totals.
+Calibrated attributables are caller-supplied same-scope metrics; the analyzer
+only scales them proportionally by scope CPU share.
+
 ## Slice projection contract
 
 `slices` answers: “after filters and collapse rules, which responsibility area
@@ -180,7 +235,8 @@ Slice projection must not redefine target-boundary semantics.
 
 ## Compare contract
 
-`compare` consumes two slice JSON payloads. It reports:
+`compare` consumes two slice JSON payloads or two boundary JSON payloads. It
+does not compare mixed projection types. For slice payloads, it reports:
 
 - total before/after primary time from summaries;
 - per-slice before percent, after percent, absolute delta, relative delta, and
@@ -189,6 +245,10 @@ Slice projection must not redefine target-boundary semantics.
 - top regressions and improvements;
 - `has_regression`;
 - exit code `2` for regression through the CLI.
+
+For boundary payloads, it reports the same threshold semantics over stable
+boundary, bucket, category, and domain rows. Boundary compare is intentionally
+JSON-first; exact terminal prose is not part of the compatibility contract.
 
 A slice is a regression only when it exceeds both the configured absolute and
 relative thresholds and is within the focus set when one is provided.
@@ -204,16 +264,19 @@ Public tests must cover:
 - sample-facts JSON round-trip;
 - fact-index helpers used by projections;
 - target output stability from profile facts and imported facts;
+- scope/boundary output stability from profile facts and imported facts,
+  including owner cost-kind rows and cached selector matching;
 - slice output stability from profile facts and imported facts;
 - runtime folding, semantic callers, attributables, and compatibility aliases;
 - external runtime rule-pack loading without package changes;
 - slice filters, collapse, attributes, pseudo-slices, and compare gates.
 
 Real-profile parity must be optional and local-only. The helper under
-`scripts/clankerprof` compares caller-provided local reference artifacts against
-current `clankerprof` output and intentionally commits no profile data. Its
-`--check-rust-core` mode additionally compares Rust facts and generic target
-projection output against Python for the same caller-provided local inputs.
+`scripts/clankerprof` compares caller-provided local facts, target, scope,
+and slice reference artifacts against current `clankerprof` output and
+intentionally commits no profile data. Its `--check-rust-core` mode
+additionally compares Rust facts and generic target projection output against
+Python for the same caller-provided local inputs.
 
 ## Rust core parity
 
@@ -221,9 +284,10 @@ projection output against Python for the same caller-provided local inputs.
 spec. The crate must treat Python `clankerprof` as the reference until the Rust
 core has equivalent coverage for every public projection. Its stable surfaces
 currently include `clankerprof-rs facts`, generic `targets`, generic `slices`,
-and `compare`. The facts command emits the same `clankerprof.sample_facts.v1`
-payload as Python for raw profiles, gzipped profiles, inline frames, folded
-locations, and sparse pprof IDs.
+and `compare`; Python scope decomposition is not yet a Rust parity surface.
+The facts command emits the same `clankerprof.sample_facts.v1` payload as
+Python for raw profiles, gzipped profiles, inline frames, folded locations, and
+sparse pprof IDs.
 
 Projection work must build on the same Rust fact model rather than introducing
 separate tree or opportunity accounting. Any future Rust target, slice, compare,

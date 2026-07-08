@@ -31,7 +31,9 @@ EXIT_ADAPTER_ERROR = 4
 _LOCAL_OUTPUT_COMMAND_PREFIXES = (
     ("bigbets", "emit"),
     ("bigbets", "issues", "merge"),
+    ("pprof", "boundaries"),
     ("pprof", "facts"),
+    ("pprof", "scopes"),
     ("pprof", "slices"),
     ("pprof", "targets"),
 )

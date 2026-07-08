@@ -9,8 +9,9 @@ clankerprof.sample_facts.v1
 ```
 
 The crate intentionally builds every projection from the durable fact layer.
-That keeps tree, slice, target, opportunity, and comparison views tied to one
-decoded stack accounting model instead of separate ad hoc profile walkers.
+That keeps tree, slice, target, boundary, opportunity, and comparison views
+tied to one decoded stack accounting model instead of separate ad hoc profile
+walkers.
 
 ## Run
 
@@ -51,6 +52,11 @@ Python `clankerprof` output. The fixture matrix covers raw and gzipped
 profiles, inline frames, folded locations, sparse pprof function IDs, generic
 target attribution, generic slice attribution, and slice comparison.
 
+Python `clankerprof scopes` is currently the reference implementation for
+scope/cost-kind/rollup/owner decomposition. The Rust core should not claim that
+projection until it has equivalent fixture parity for cached predicates,
+residual exclusions, owner cost-kind rows, and fact replay.
+
 Cargo-specific validation:
 
 ```bash
@@ -60,18 +66,22 @@ cargo test
 
 ## Local real-profile parity
 
-Private profiles should stay outside the repo. To compare the Rust core against
-Python on a local profile, opt into the local-input safety gate:
+Private profiles should stay outside the repo. To compare local real-profile
+goldens against current Python output, and optionally compare the Rust core
+against Python where Rust supports the projection, opt into the local-input
+safety gate:
 
 ```bash
 CLANKERPROF_REAL_PROFILE_PARITY=1 \
   scripts/clankerprof/check_real_profile_parity.py \
   --profile /path/to/profile.pb.gz \
   --target-config /path/to/targets.json \
+  --scope-config /path/to/scopes.toml \
   --check-rust-core
 ```
 
-The helper writes only temporary outputs and reports `rust_facts` plus
-`rust_targets` when those parity checks pass. It also reports `rust_slices`
-when `--slice-config` uses fields the current Rust CLI can represent directly
-without changing semantics.
+The helper writes only temporary outputs. It reports Python-side `facts`,
+`targets`, `boundaries`, and `slices` when caller-provided expected artifacts
+match. It reports `rust_facts`, `rust_targets`, and compatible `rust_slices`
+when those Rust parity checks pass. Rust scope decomposition is not claimed
+until the Rust core has equivalent fixture coverage.

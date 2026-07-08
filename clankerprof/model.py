@@ -169,6 +169,14 @@ def _caller_metrics_by_string() -> dict[str, CallerMetrics]:
     return {}
 
 
+def _domain_file_stats_by_string() -> dict[str, DomainFileStats]:
+    return {}
+
+
+def _caller_metrics_by_tuple() -> dict[tuple[str, str], CallerMetrics]:
+    return {}
+
+
 @dataclass(slots=True)
 class CategoryStats:
     cpu_time: TimeNs = 0
@@ -203,3 +211,76 @@ class CategoryStats:
         metrics.caller_files[caller.filename] = (
             metrics.caller_files.get(caller.filename, 0) + 1
         )
+
+
+@dataclass(slots=True)
+class DomainFileStats:
+    filename: str
+    cpu_time: TimeNs = 0
+    sample_count: int = 0
+    functions: dict[str, FunctionMetrics] = field(
+        default_factory=_function_metrics_by_string
+    )
+    cost_kinds: dict[str, CallerMetrics] = field(
+        default_factory=_caller_metrics_by_string
+    )
+    caller_leaf_pairs: dict[tuple[str, str], CallerMetrics] = field(
+        default_factory=_caller_metrics_by_tuple
+    )
+
+    def add(
+        self,
+        owner_function: str,
+        leaf_function: str,
+        cost_kind: str,
+        value: TimeNs,
+    ) -> None:
+        self.cpu_time += value
+        self.sample_count += 1
+
+        function_metrics = self.functions.setdefault(owner_function, FunctionMetrics())
+        function_metrics.count += 1
+        function_metrics.cpu_time += value
+
+        cost_metrics = self.cost_kinds.setdefault(cost_kind, CallerMetrics())
+        cost_metrics.count += 1
+        cost_metrics.cpu_time += value
+
+        pair_metrics = self.caller_leaf_pairs.setdefault(
+            (owner_function, leaf_function),
+            CallerMetrics(),
+        )
+        pair_metrics.count += 1
+        pair_metrics.cpu_time += value
+
+
+@dataclass(slots=True)
+class DomainStats:
+    cpu_time: TimeNs = 0
+    sample_count: int = 0
+    cost_kinds: dict[str, CallerMetrics] = field(
+        default_factory=_caller_metrics_by_string
+    )
+    files: dict[str, DomainFileStats] = field(
+        default_factory=_domain_file_stats_by_string
+    )
+
+    def add(
+        self,
+        owner: Frame,
+        leaf: Frame,
+        cost_kind: str,
+        value: TimeNs,
+    ) -> None:
+        self.cpu_time += value
+        self.sample_count += 1
+
+        cost_metrics = self.cost_kinds.setdefault(cost_kind, CallerMetrics())
+        cost_metrics.count += 1
+        cost_metrics.cpu_time += value
+
+        file_stats = self.files.setdefault(
+            owner.filename,
+            DomainFileStats(filename=owner.filename),
+        )
+        file_stats.add(owner.name, leaf.name, cost_kind, value)

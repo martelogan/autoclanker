@@ -1,9 +1,9 @@
 # clankerprof sample-facts unification status
 
 `clankerprof` now has one decoded sample-facts core and several projections.
-This document records the implemented seam so target attribution, slice
-attribution, semantic caller exports, and compare gates keep shared stack facts
-without merging their distinct accounting policies.
+This document records the implemented seam so target attribution, scope
+decomposition, slice attribution, semantic caller exports, and compare gates
+keep shared stack facts without merging their distinct accounting policies.
 
 For the normative artifact shape and projection semantics, see
 [`CLANKERPROF_SPEC.md`](CLANKERPROF_SPEC.md). For tested compatibility status,
@@ -20,13 +20,13 @@ see [`CLANKERPROF_PARITY.md`](CLANKERPROF_PARITY.md).
   projection-neutral `ProfileFactIndex`.
 - `clankerprof facts --profile ...` writes the JSON fact artifact from raw or
   gzipped pprof input.
-- `clankerprof targets` and `clankerprof slices` accept either `--profile` or
-  `--facts`, so a decoded fact artifact can be replayed by multiple
-  projections.
+- `clankerprof targets`, `clankerprof scopes`/`boundaries`, and `clankerprof slices`
+  accept either `--profile` or `--facts`, so a decoded fact artifact can be
+  replayed by multiple projections.
 - `autoclanker pprof ...` exposes the same fact export and fact replay surface.
-- Target and slice library APIs consume `ProfileFacts` or iterables of
-  `SampleFact` through `analyze_target_facts(...)` and
-  `analyze_slice_facts(...)`.
+- Target, boundary, and slice library APIs consume `ProfileFacts` or iterables
+  of `SampleFact` through `analyze_target_facts(...)`,
+  `analyze_boundary_facts(...)`, and `analyze_slice_facts(...)`.
 
 ## Fact Core Boundary
 
@@ -46,6 +46,7 @@ The core does not own:
 - runtime-specific labels;
 - target category matching;
 - slice ownership;
+- scope rollup/owner decomposition;
 - collapse/filter semantics;
 - domain metadata such as owners, docs, contacts, or escalation hints;
 - terminal formatting or comparison thresholds.
@@ -75,6 +76,16 @@ Slice attribution owns bottom-frame accounting:
 - preserve default-slice unattributed dependency summaries, GC pseudo-slices,
   uncollapsible pseudo-output, by-slice limits, and compare JSON compatibility.
 
+Scope decomposition owns richer parent-denominator accounting:
+
+- keep cost-kind totals additive under each configured scope;
+- group cost kinds into scope-specific display rollups;
+- optionally map the same samples to owner frames below the scope;
+- preserve cost-kind sub-buckets under each owner;
+- support residual scopes with descendant exclusions;
+- scale caller-supplied attributables proportionally without inferring metrics
+  from pprof samples.
+
 Runtime rules own language-specific interpretation:
 
 - semantic labels;
@@ -90,6 +101,8 @@ The projection styles answer different questions:
 
 - target attribution asks: "inside this parent boundary, what leaf work
   consumed CPU, and which higher-level caller made that leaf work happen?"
+- scope decomposition asks: "inside this parent denominator, which cost kinds
+  and owners explain the CPU?"
 - slice attribution asks: "after filtering and collapse rules, which code area
   should own this sample?"
 
@@ -105,11 +118,13 @@ Indexes can accelerate fact lookup, but must not alter projection semantics.
 - sample-facts JSON export/import and malformed frame rejection;
 - fact-index helpers used by projections;
 - target output stability from profile facts and imported facts;
+- scope/boundary output stability from profile facts and imported facts;
 - slice output stability from profile facts and imported facts;
-- CLI fact export plus target/slice replay through `clankerprof` and
+- CLI fact export plus target/scope/slice replay through `clankerprof` and
   `autoclanker pprof`;
 - runtime folding, semantic callers, attributables, compatibility aliases,
-  external runtime rule packs, slice filters, collapse, attributes,
+  external runtime rule packs, scope owner decomposition, cached predicate
+  matching, residual exclusions, slice filters, collapse, attributes,
   pseudo-slices, and compare gates.
 
 ## Remaining Confidence Boundary
@@ -117,8 +132,9 @@ Indexes can accelerate fact lookup, but must not alter projection semantics.
 The self-contained test suite proves the fact contract and projection parity on
 fixture profiles. Before retiring any older profile workflow, run real-profile
 golden comparisons against representative local `.pb` / `.pb.gz` files using
-`scripts/clankerprof/check_real_profile_parity.py`. That helper is intentionally
-opt-in and commits no profile data.
+`scripts/clankerprof/check_real_profile_parity.py`. That helper covers target,
+boundary, slice, and sample-facts artifacts, is intentionally opt-in, and
+commits no profile data.
 
 Future implementation work can add faster precomputed indexes or a
 cross-language implementation of the same fact contract without changing

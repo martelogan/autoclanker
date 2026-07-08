@@ -16,20 +16,31 @@ from clankerprof.analysis import (
     DEFAULT_LIBRARY_SELECTORS,
     DEFAULT_RUNTIME_RULES,
     AttributionRule,
+    BoundaryAnalysisOptions,
+    BoundaryCategoryDefinition,
+    BoundaryCountMode,
+    BoundaryDefinition,
+    BoundaryDomainDefinition,
+    FramePredicate,
+    FramePredicateExpr,
     JsonValue,
     RuntimeRuleSet,
     SliceAnalysisOptions,
     SliceDefinition,
     TargetAnalysisOptions,
+    analyze_boundary_facts,
     analyze_slice_facts,
     analyze_target_facts,
+    frame_predicate_expr_leaf_predicates,
     load_default_ruby_core_classes,
     load_json_mapping,
     load_ruby_core_classes,
+    parse_frame_predicate,
+    parse_frame_predicates,
     ruby_rules,
     runtime_rules_from_file,
 )
-from clankerprof.compare import CompareOptions, compare_slice_json
+from clankerprof.compare import CompareOptions, compare_json
 from clankerprof.facts import (
     SampleFactsInput,
     read_sample_facts,
@@ -38,6 +49,7 @@ from clankerprof.facts import (
 from clankerprof.model import CategoryStats
 from clankerprof.proto import load_profile
 from clankerprof.render import (
+    render_boundary_json,
     render_json_payload,
     render_semantic_callers_csv,
     render_slice_json,
@@ -394,6 +406,470 @@ def _load_slices(path: str | None) -> tuple[SliceDefinition, ...]:
     return tuple(slices)
 
 
+def _load_config_payload(path: str | Path, *, description: str) -> dict[str, object]:
+    config_path = Path(path)
+    if config_path.suffix == ".toml":
+        payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    else:
+        payload = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"{description} config file must be an object.")
+    return cast(dict[str, object], payload)
+
+
+def _aliased_config_value(
+    payload: dict[str, object],
+    *names: str,
+    description: str,
+) -> tuple[str, object | None]:
+    present = [name for name in names if name in payload]
+    if len(present) > 1:
+        formatted = " or ".join(f"[{name}]" for name in names)
+        raise ValueError(f"Use only one of {formatted} for {description}.")
+    if not present:
+        return names[0], None
+    name = present[0]
+    return name, payload[name]
+
+
+def _aliased_mapping_value(
+    payload: Mapping[object, object],
+    *names: str,
+    description: str,
+) -> tuple[str, object | None]:
+    present = [name for name in names if name in payload]
+    if len(present) > 1:
+        formatted = " or ".join(names)
+        raise ValueError(f"Use only one of {formatted} for {description}.")
+    if not present:
+        return names[0], None
+    name = present[0]
+    return name, payload[name]
+
+
+def _string_values(value: object, *, field_name: str) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, list):
+        return tuple(str(item) for item in cast(list[object], value))
+    raise ValueError(f"{field_name} must be a string or array of strings.")
+
+
+def _predicate_expr_children(
+    value: object,
+    *,
+    field_name: str,
+    default_key: str,
+) -> tuple[FramePredicateExpr, ...]:
+    if isinstance(value, str):
+        return (
+            FramePredicateExpr(
+                predicates=(parse_frame_predicate(value, default_key=default_key),)
+            ),
+        )
+    if isinstance(value, list):
+        children: list[FramePredicateExpr] = []
+        for index, item in enumerate(cast(list[object], value)):
+            if isinstance(item, str):
+                children.append(
+                    FramePredicateExpr(
+                        predicates=(
+                            parse_frame_predicate(item, default_key=default_key),
+                        )
+                    )
+                )
+                continue
+            if isinstance(item, dict):
+                children.append(
+                    _predicate_expr(
+                        cast(dict[object, object], item),
+                        field_name=f"{field_name}[{index}]",
+                        default_key=default_key,
+                    )
+                )
+                continue
+            raise ValueError(
+                f"{field_name}[{index}] must be a string or predicate table."
+            )
+        return tuple(children)
+    if isinstance(value, dict):
+        return (
+            _predicate_expr(
+                cast(dict[object, object], value),
+                field_name=field_name,
+                default_key=default_key,
+            ),
+        )
+    raise ValueError(f"{field_name} must be a string, array, or predicate table.")
+
+
+def _predicate_expr(
+    value: object,
+    *,
+    field_name: str,
+    default_key: str,
+) -> FramePredicateExpr:
+    if isinstance(value, str):
+        return FramePredicateExpr(
+            predicates=(parse_frame_predicate(value, default_key=default_key),)
+        )
+    if isinstance(value, list):
+        raw_list = cast(list[object], value)
+        return FramePredicateExpr(
+            predicates=parse_frame_predicates(
+                _string_values(raw_list, field_name=field_name),
+                default_key=default_key,
+            )
+        )
+    if not isinstance(value, dict):
+        raise ValueError(f"{field_name} must be a string, array, or predicate table.")
+
+    raw_value = cast(dict[object, object], value)
+    allowed_keys = {"patterns", "match", "selector", "any", "all", "not"}
+    unknown_keys = sorted(str(key) for key in raw_value if key not in allowed_keys)
+    if unknown_keys:
+        raise ValueError(
+            f"{field_name} contains unsupported predicate keys: "
+            f"{', '.join(unknown_keys)}."
+        )
+    selector_keys = [
+        key for key in ("patterns", "match", "selector") if key in raw_value
+    ]
+    if len(selector_keys) > 1:
+        raise ValueError(
+            f"{field_name} must use only one of patterns, match, or selector."
+        )
+
+    predicates: tuple[FramePredicate, ...] = ()
+    if "patterns" in raw_value:
+        predicates = parse_frame_predicates(
+            _string_values(raw_value["patterns"], field_name=f"{field_name}.patterns"),
+            default_key=default_key,
+        )
+    if "match" in raw_value:
+        predicates = parse_frame_predicates(
+            _string_values(raw_value["match"], field_name=f"{field_name}.match"),
+            default_key=default_key,
+        )
+    if "selector" in raw_value:
+        predicates = parse_frame_predicates(
+            _string_values(
+                raw_value["selector"],
+                field_name=f"{field_name}.selector",
+            ),
+            default_key=default_key,
+        )
+    any_expr = (
+        _predicate_expr_children(
+            raw_value["any"],
+            field_name=f"{field_name}.any",
+            default_key=default_key,
+        )
+        if "any" in raw_value
+        else ()
+    )
+    all_expr = (
+        _predicate_expr_children(
+            raw_value["all"],
+            field_name=f"{field_name}.all",
+            default_key=default_key,
+        )
+        if "all" in raw_value
+        else ()
+    )
+    not_expr = (
+        _predicate_expr_children(
+            raw_value["not"],
+            field_name=f"{field_name}.not",
+            default_key=default_key,
+        )
+        if "not" in raw_value
+        else ()
+    )
+    if not (predicates or any_expr or all_expr or not_expr):
+        raise ValueError(f"{field_name} predicate table cannot be empty.")
+    return FramePredicateExpr(
+        predicates=predicates,
+        any=any_expr,
+        all=all_expr,
+        not_=not_expr,
+    )
+
+
+def _load_boundary_categories(
+    raw_table: object,
+    *,
+    section_name: str = "category",
+) -> tuple[BoundaryCategoryDefinition, ...]:
+    if raw_table is None:
+        return ()
+    if not isinstance(raw_table, dict):
+        raise ValueError(f"[{section_name}] must be an object.")
+    categories: list[BoundaryCategoryDefinition] = []
+    seen: set[str] = set()
+    for raw_name, raw_value in cast(dict[object, object], raw_table).items():
+        name = str(raw_name)
+        if name in seen:
+            raise ValueError(f"Duplicate category label: {name}")
+        seen.add(name)
+        categories.append(
+            BoundaryCategoryDefinition(
+                name=name,
+                predicates=_predicate_expr(
+                    raw_value,
+                    field_name=f"{section_name} {name}",
+                    default_key="path",
+                ),
+            )
+        )
+    return tuple(categories)
+
+
+def _load_boundary_domains(
+    raw_table: object,
+    *,
+    section_name: str = "domain",
+) -> tuple[BoundaryDomainDefinition, ...]:
+    if raw_table is None:
+        return ()
+    if not isinstance(raw_table, dict):
+        raise ValueError(f"[{section_name}] must be an object.")
+    domains: list[BoundaryDomainDefinition] = []
+    seen: set[str] = set()
+    for raw_name, raw_value in cast(dict[object, object], raw_table).items():
+        name = str(raw_name)
+        if name in seen:
+            raise ValueError(f"Duplicate domain label: {name}")
+        seen.add(name)
+        fallback = False
+        if isinstance(raw_value, dict):
+            raw_domain_mapping = cast(dict[object, object], raw_value)
+            fallback = bool(raw_domain_mapping.get("fallback", False))
+            raw_domain_predicate = {
+                key: value
+                for key, value in raw_domain_mapping.items()
+                if key != "fallback"
+            }
+            expression = _predicate_expr(
+                raw_domain_predicate,
+                field_name=f"{section_name} {name}",
+                default_key="path",
+            )
+        else:
+            expression = _predicate_expr(
+                raw_value,
+                field_name=f"{section_name} {name}",
+                default_key="path",
+            )
+        domains.append(
+            BoundaryDomainDefinition(
+                name=name,
+                predicates=expression,
+                fallback=fallback,
+            )
+        )
+    return tuple(domains)
+
+
+def _load_boundary_bucket(
+    raw_value: object,
+    *,
+    field_name: str = "boundary.bucket",
+) -> dict[str, tuple[str, ...]]:
+    if raw_value is None:
+        return {}
+    if not isinstance(raw_value, dict):
+        raise ValueError(f"{field_name} must be an object.")
+    buckets: dict[str, tuple[str, ...]] = {}
+    category_to_bucket: dict[str, str] = {}
+    for raw_name, raw_categories in cast(dict[object, object], raw_value).items():
+        name = str(raw_name)
+        categories = _string_values(
+            raw_categories,
+            field_name=f"{field_name} {name}",
+        )
+        for category in categories:
+            if category in category_to_bucket:
+                raise ValueError(
+                    f"Category {category} appears in both "
+                    f"{category_to_bucket[category]} and {name} buckets."
+                )
+            category_to_bucket[category] = name
+        buckets[name] = categories
+    return buckets
+
+
+def _load_boundary_attributables(
+    raw_value: object,
+    *,
+    field_name: str = "boundary.attributables",
+) -> dict[str, float]:
+    if raw_value is None:
+        return {}
+    if not isinstance(raw_value, dict):
+        raise ValueError(f"{field_name} must be an object.")
+    result: dict[str, float] = {}
+    for raw_name, raw_metric in cast(dict[object, object], raw_value).items():
+        metric = float(cast(Any, raw_metric))
+        if metric < 0:
+            raise ValueError(f"Boundary attributable {raw_name} cannot be negative.")
+        result[str(raw_name)] = metric
+    return result
+
+
+def _boundary_predicate_value(raw_boundary: dict[object, object]) -> object:
+    if "selector" in raw_boundary:
+        return raw_boundary["selector"]
+    if "matcher" in raw_boundary:
+        return raw_boundary["matcher"]
+    if "match" in raw_boundary:
+        return raw_boundary["match"]
+    if "function" in raw_boundary:
+        raw_function = raw_boundary["function"]
+        if isinstance(raw_function, list):
+            return [f"name_eq:{item}" for item in cast(list[object], raw_function)]
+        return f"name_eq:{raw_function}"
+    raise ValueError("Each scope must define selector, matcher, match, or function.")
+
+
+def _boundary_label_fallback(raw_predicates: object) -> str:
+    if isinstance(raw_predicates, str):
+        return raw_predicates
+    if isinstance(raw_predicates, list):
+        raw_values = cast(list[object], raw_predicates)
+        if raw_values:
+            return str(raw_values[0])
+    return "boundary"
+
+
+def _load_boundaries(
+    raw_value: object,
+    *,
+    section_name: str = "boundary",
+) -> tuple[BoundaryDefinition, ...]:
+    if not isinstance(raw_value, list):
+        raise ValueError(f"Scope config must contain a {section_name} array.")
+    boundaries: list[BoundaryDefinition] = []
+    seen_names: set[str] = set()
+    for item in cast(list[object], raw_value):
+        if not isinstance(item, dict):
+            raise ValueError("Each boundary entry must be an object.")
+        raw_boundary = cast(dict[object, object], item)
+        raw_predicates = _boundary_predicate_value(raw_boundary)
+        label = str(
+            raw_boundary.get("label")
+            or raw_boundary.get("name")
+            or raw_boundary.get("function")
+            or _boundary_label_fallback(raw_predicates)
+        )
+        if label in seen_names:
+            raise ValueError(f"Duplicate boundary label: {label}")
+        seen_names.add(label)
+        count = str(raw_boundary.get("count", "occurrence"))
+        if count not in {"occurrence", "once_per_sample"}:
+            raise ValueError(
+                f"{section_name}.count must be occurrence or once_per_sample."
+            )
+        rollup_name, raw_rollup = _aliased_mapping_value(
+            raw_boundary,
+            "rollup",
+            "bucket",
+            description=f"{section_name} {label} rollup",
+        )
+        boundaries.append(
+            BoundaryDefinition(
+                name=label,
+                predicates=_predicate_expr(
+                    raw_predicates,
+                    field_name=f"{section_name} {label}",
+                    default_key="name_eq",
+                ),
+                buckets=_load_boundary_bucket(
+                    raw_rollup,
+                    field_name=f"{section_name}.{rollup_name}",
+                ),
+                attributables=_load_boundary_attributables(
+                    raw_boundary.get("attributables"),
+                    field_name=f"{section_name}.attributables",
+                ),
+                exclude_descendants=_predicate_expr(
+                    raw_boundary.get("exclude_descendants", []),
+                    field_name=f"{section_name} {label} exclude_descendants",
+                    default_key="name_eq",
+                ),
+                count=cast(BoundaryCountMode, count),
+            )
+        )
+    return tuple(boundaries)
+
+
+def _uses_slice_predicate_in_boundary_options(
+    options: BoundaryAnalysisOptions,
+) -> bool:
+    predicates = [
+        predicate
+        for category in options.categories
+        for predicate in frame_predicate_expr_leaf_predicates(category.predicates)
+    ]
+    predicates.extend(
+        predicate
+        for domain in options.domains
+        for predicate in frame_predicate_expr_leaf_predicates(domain.predicates)
+    )
+    for boundary in options.boundaries:
+        predicates.extend(frame_predicate_expr_leaf_predicates(boundary.predicates))
+        predicates.extend(
+            frame_predicate_expr_leaf_predicates(boundary.exclude_descendants)
+        )
+    return any(predicate.key == "slice" for predicate in predicates)
+
+
+def _load_boundary_options(
+    path: str | Path,
+    *,
+    runtime_rules: RuntimeRuleSet,
+) -> BoundaryAnalysisOptions:
+    payload = _load_config_payload(path, description="Boundary")
+    slices_path = payload.get("slices")
+    slices: tuple[SliceDefinition, ...] = ()
+    if slices_path is not None:
+        raw_slices_path = Path(str(slices_path))
+        if not raw_slices_path.is_absolute():
+            raw_slices_path = Path(path).parent / raw_slices_path
+        slices = _load_slices(str(raw_slices_path))
+    category_name, raw_categories = _aliased_config_value(
+        payload,
+        "cost_kind",
+        "category",
+        description="cost-kind definitions",
+    )
+    domain_name, raw_domains = _aliased_config_value(
+        payload,
+        "owner",
+        "domain",
+        description="owner definitions",
+    )
+    scope_name, raw_scopes = _aliased_config_value(
+        payload,
+        "scope",
+        "boundary",
+        description="scope definitions",
+    )
+    options = BoundaryAnalysisOptions(
+        runtime_rules=runtime_rules,
+        categories=_load_boundary_categories(
+            raw_categories,
+            section_name=category_name,
+        ),
+        domains=_load_boundary_domains(raw_domains, section_name=domain_name),
+        boundaries=_load_boundaries(raw_scopes, section_name=scope_name),
+        slices=slices,
+    )
+    if _uses_slice_predicate_in_boundary_options(options) and not options.slices:
+        raise ValueError("slice: predicates in boundary config require slices.")
+    return options
+
+
 def _json_compatible(value: object) -> JsonValue:
     if value is None or isinstance(value, str | int | float | bool):
         return value
@@ -585,18 +1061,50 @@ def run_slices(args: argparse.Namespace) -> dict[str, Any]:
     return payload
 
 
+def run_boundaries(args: argparse.Namespace) -> dict[str, Any]:
+    sample_facts = _load_projection_input(args.profile, args.facts)
+    runtime_rules = _runtime_rules(args)
+    options = _load_boundary_options(args.config, runtime_rules=runtime_rules)
+    options = BoundaryAnalysisOptions(
+        boundaries=options.boundaries,
+        categories=options.categories,
+        domains=options.domains,
+        slices=options.slices,
+        runtime_rules=options.runtime_rules,
+        enhanced_runtime_categorization=not bool(args.no_enhanced),
+        fold_runtime_internals=bool(args.fold_runtime_internals),
+        caller_fallback_when_uncategorized=bool(args.no_enhanced),
+        legacy_no_enhanced_caller_fallback=bool(args.no_enhanced),
+    )
+    payload = cast(
+        dict[str, Any],
+        render_boundary_json(
+            analyze_boundary_facts(sample_facts, options),
+            top=args.top,
+        ),
+    )
+    if args.output:
+        Path(args.output).write_text(
+            render_json_payload(payload) + "\n",
+            encoding="utf-8",
+        )
+        return {"tool": "clankerprof_boundaries", "ok": True, "output": args.output}
+    return payload
+
+
 def run_compare(args: argparse.Namespace) -> dict[str, Any]:
     before = json.loads(Path(args.before).read_text(encoding="utf-8"))
     after = json.loads(Path(args.after).read_text(encoding="utf-8"))
     if not isinstance(before, dict) or not isinstance(after, dict):
         raise ValueError("Compare inputs must be JSON objects.")
-    return compare_slice_json(
+    return compare_json(
         cast(dict[str, Any], before),
         cast(dict[str, Any], after),
         CompareOptions(
             threshold_abs=float(args.threshold_abs),
             threshold_rel=float(args.threshold_rel),
             focus_slices=_focus_slices(args.focus_slices),
+            focus_boundaries=_focus_slices(args.focus_boundaries),
         ),
     )
 
@@ -716,6 +1224,62 @@ def register_commands(subparsers: Any) -> None:
     )
     targets.set_defaults(handler=run_targets)
 
+    boundary_help = "Run scope/cost-kind/rollup/owner decomposition over a profile."
+
+    def add_boundary_like_command(name: str) -> None:
+        parser = subparsers.add_parser(name, help=boundary_help)
+        parser.add_argument("--profile")
+        parser.add_argument(
+            "--facts",
+            help="Read versioned sample-facts JSON instead of a pprof profile.",
+        )
+        parser.add_argument(
+            "--config",
+            required=True,
+            help=(
+                "TOML/YAML config with [cost_kind], optional [owner], and "
+                "[[scope]] sections. Legacy [category], [domain], and "
+                "[[boundary]] sections remain accepted."
+            ),
+        )
+        parser.add_argument("--output")
+        parser.add_argument("--top", type=int)
+        parser.add_argument("--runtime", choices=("generic", "ruby"), default="generic")
+        parser.add_argument(
+            "--runtime-rules",
+            help=(
+                "Load a YAML runtime rule pack from disk for native/core labels, "
+                "library extraction, and folding categories."
+            ),
+        )
+        parser.add_argument(
+            "--ruby-core-classes", "--core-classes", dest="ruby_core_classes"
+        )
+        parser.add_argument(
+            "--no-enhanced",
+            action="store_true",
+            help=(
+                "Disable runtime semantic categorization and use configured "
+                "native/delegated caller fallbacks before category matching."
+            ),
+        )
+        parser.add_argument(
+            "--fold-runtime-internals",
+            "--fold-ruby-internals",
+            action="store_true",
+            dest="fold_runtime_internals",
+        )
+        parser.add_argument(
+            "--verbose-runtime-internals",
+            "--verbose-ruby-internals",
+            action="store_true",
+            dest="verbose_runtime_internals",
+        )
+        parser.set_defaults(handler=run_boundaries)
+
+    add_boundary_like_command("boundaries")
+    add_boundary_like_command("scopes")
+
     slices = subparsers.add_parser(
         "slices",
         help="Run slice attribution over a pprof profile.",
@@ -765,13 +1329,20 @@ def register_commands(subparsers: Any) -> None:
 
     compare = subparsers.add_parser(
         "compare",
-        help="Compare two clankerprof JSON slice outputs.",
+        help="Compare two clankerprof JSON slice or boundary outputs.",
     )
     compare.add_argument("--before", required=True)
     compare.add_argument("--after", required=True)
     compare.add_argument("--threshold-abs", type=float, default=2.0)
     compare.add_argument("--threshold-rel", type=float, default=15.0)
     compare.add_argument("--focus-slices", nargs="*", default=[])
+    compare.add_argument(
+        "--focus-boundaries",
+        "--focus-scopes",
+        dest="focus_boundaries",
+        nargs="*",
+        default=[],
+    )
     compare.set_defaults(handler=run_compare)
 
     facts = subparsers.add_parser(

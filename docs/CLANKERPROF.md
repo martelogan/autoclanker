@@ -16,12 +16,15 @@ the actionable caller is usually higher in the stack: `HotelSearch#rank_results`
 `CalendarExport#to_json`, or `MapView#load_tiles`.
 
 `clankerprof` keeps those views connected. It can show the low-level CPU
-mechanics, then fold or attribute that cost back to the caller, boundary,
-semantic bucket, or responsibility slice that made the work happen.
+mechanics, then fold or attribute that cost back to the caller, measured
+scope, semantic rollup, owner frame, or responsibility slice that made the work
+happen.
 
 The same sample-facts model can be rendered as target-boundary reports,
-responsibility slices, semantic caller exports, or before/after regression
-gates.
+scope decompositions, responsibility slices, semantic caller exports, or
+before/after regression gates. Existing `boundaries` commands and JSON payload
+names remain accepted for compatibility; new configs should prefer `scope`,
+`cost_kind`, `rollup`, `owner`, `runtime_label`, and `selector`.
 
 <p align="center">
   <img src="assets/clankerprof-sample-facts.svg" width="760" alt="clankerprof sample-facts architecture">
@@ -32,6 +35,8 @@ gates.
 - Decode raw and gzipped `.pb` profiles without generated protobuf runtime files.
 - Preserve pprof IDs and inline frames in a typed call graph model.
 - Explain a known parent boundary with complete target-function attribution.
+- Decompose a parent boundary into rollups, cost kinds, owners, and
+  caller-to-leaf evidence without rescanning frames combinatorially.
 - Opt into runtime rule packs such as Ruby core/native semantic labeling.
 - Fold runtime-internal cost into meaningful callers when that answers the
   investigation question.
@@ -45,8 +50,10 @@ gates.
 | Command | Use it for | Primary output |
 | --- | --- | --- |
 | `clankerprof targets` | Explain CPU under one or more configured parent functions, request handlers, renderers, jobs, or RPC boundaries. | JSON, CSV, simple CSV, or text target reports. |
+| `clankerprof scopes` | Explain one or more parent denominators with cost kinds, display rollups, owners, and calibrated attributables. | JSON scope reports using the compatible boundary payload schema. |
+| `clankerprof boundaries` | Compatibility alias for `scopes`. | JSON boundary reports. |
 | `clankerprof slices` | Attribute selected CPU to path-based responsibility slices with filters, collapse rules, and metadata. | JSON slice reports for humans, agents, and compare gates. |
-| `clankerprof compare` | Compare two slice JSON outputs with absolute and relative regression thresholds. | JSON delta report plus exit code `2` on regression. |
+| `clankerprof compare` | Compare two slice or boundary JSON outputs with absolute and relative regression thresholds. | JSON delta report plus exit code `2` on regression. |
 | `clankerprof facts` | Export the decoded pprof sample-facts model for golden tests, agents, or cross-language parity work. | Versioned sample-facts JSON. |
 | `autoclanker pprof ...` | Run the same subcommands through the main `autoclanker` CLI. | Same payloads as `clankerprof`. |
 
@@ -94,15 +101,20 @@ clankerprof targets \
   --facts tmp/profile-facts.json \
   --config examples/clankerprof/target_config.json \
   --format json
+
+clankerprof scopes \
+  --facts tmp/profile-facts.json \
+  --config examples/clankerprof/scopes.toml \
+  --output tmp/profile-scopes.json
 ```
 
-See [`../examples/clankerprof`](../examples/clankerprof) for copyable target and
-slice configs.
+See [`../examples/clankerprof`](../examples/clankerprof) for copyable target,
+scope, legacy boundary, and slice configs.
 
-`targets` and `slices` accept either `--profile` or `--facts`. Use `--profile`
-when the command should decode pprof directly. Use `--facts` when one decoded
-sample-facts artifact should be replayed by several projections, stored as a
-golden fixture, or compared by another implementation.
+`targets`, `scopes`/`boundaries`, and `slices` accept either `--profile` or `--facts`.
+Use `--profile` when the command should decode pprof directly. Use `--facts`
+when one decoded sample-facts artifact should be replayed by several
+projections, stored as a golden fixture, or compared by another implementation.
 
 ## Target Attribution
 
@@ -201,6 +213,81 @@ Interpretation:
   introduced.
 - `Low-level work` tells you the CPU mechanics or library frames that burned the
   samples.
+
+## Boundary Decomposition
+
+Use `scopes` when a flat target table is not enough. It keeps the same
+parent-denominator accounting, but adds a richer model:
+
+- `scope`: the parent frame that defines the denominator.
+- `cost_kind`: the atomic kind of work sampled at the leaf or folded caller.
+- `rollup`: scope-specific display grouping of cost-kind rows.
+- `owner`: owner frame below the scope, with cost-kind sub-buckets
+  preserved underneath.
+- `slice`: optional path ownership source that owner predicates can reference
+  with `slice:<name>`.
+
+```bash
+clankerprof scopes \
+  --profile profile.pb.gz \
+  --config examples/clankerprof/scopes.toml \
+  --output tmp/profile-scopes.json
+```
+
+Config shape:
+
+```toml
+[cost_kind]
+"Components" = "path:app/components/**"
+"Cache Client" = "library:cache-client"
+"Serialization" = ["name:JSON", "name:MessagePack"]
+"Application outside components" = { all = ["path:app/**"], not = "path:app/components/**" }
+
+[owner]
+"Rendering" = ["path:app/components/**", "path:app/view_models/**"]
+"Application fallback" = { patterns = ["path:app/**"], fallback = true }
+
+[[scope]]
+label = "Request render"
+function = "RequestHandler#render_response"
+count = "once_per_sample"
+exclude_descendants = ["name_eq:BackgroundCleanup#run"]
+
+[scope.attributables]
+p90_ms = 96.0
+
+[scope.rollup]
+"Application code" = ["Components"]
+"Mechanics" = ["Cache Client", "Serialization"]
+```
+
+Use `exclude_descendants` for residual scopes such as "request work outside a
+nested renderer." Use `count = "once_per_sample"` when a recursive or repeated
+boundary frame should contribute at most once to that boundary denominator per
+sample.
+
+Scope output ranks rollups, cost kinds, owners, top owner files, and
+representative caller -> hot leaf pairs. Owner rows answer a different
+question from slices: they say which observed frame below this specific
+scope drove each cost kind. If authoritative ownership matters, load a slice
+file with `slices = "./slices.yml"` and use `slice:<name>` predicates in
+`[owner]`.
+
+Predicate values can be a plain string, an array of strings with OR semantics,
+or a table with `any`, `all`, and `not`. Supported predicate keys include
+`name:`, `name_eq:`, `path:`, `regex:`, `native`, dependency selectors such as
+`library:`, `slice:<name>` when a slice file is loaded, `cost_kind:<label>` for
+configured cost-kind labels, and `runtime_label:<label>` for labels produced by
+the selected runtime rule pack. Compatibility aliases remain accepted:
+`category:<label>`, `runtime_category:<label>`, `[category]`, `[domain]`,
+`[[boundary]]`, and `[boundary.bucket]`. Cost-kind definitions cannot use
+`cost_kind:` or `category:` recursively; use rollups for display groupings.
+
+Performance model: cost-kind, owner, scope, and exclusion selectors are
+cached by unique frame identity, then each sample stack is streamed
+leaf-to-root once while carrying the current owner and residual
+exclusion state. That avoids `O(samples x frames x frames)` scans while still
+emitting owner-file and caller-leaf evidence.
 
 ## Ruby Runtime Rules
 
@@ -437,7 +524,7 @@ the dependency concept into the core analyzer.
 
 ## Compare
 
-Compare two JSON slice outputs in CI or in a review artifact:
+Compare two JSON slice or boundary outputs in CI or in a review artifact:
 
 ```bash
 clankerprof compare \
@@ -447,10 +534,11 @@ clankerprof compare \
   --threshold-rel 15.0
 ```
 
-The command returns JSON with `has_regression`, per-slice deltas, and top
-function regressions/improvements. The CLI exits `2` when a regression exceeds
-the configured thresholds for gate-friendly automation. `autoclanker pprof ...`
-exposes the same subcommands as a convenience alias.
+For slice reports, the command returns per-slice deltas plus top function
+regressions/improvements. For boundary reports, it returns stable deltas for
+boundary, bucket, category, and domain rows. The CLI exits `2` when a
+regression exceeds the configured thresholds for gate-friendly automation.
+`autoclanker pprof ...` exposes the same subcommands as a convenience alias.
 
 ## Library Shape
 
@@ -471,24 +559,27 @@ payload = render_target_json(results)
 For advanced integrations, `Profile.to_sample_facts()` is the stable typed
 seam. It returns a `ProfileFacts` aggregate with per-sample facts, total primary
 value, and empty-stack accounting. Each `SampleFact` keeps the sample index,
-primary value, original sample, and expanded leaf-to-root frames. Target and
-slice projections can consume those facts directly through
-`analyze_target_facts(...)` and `analyze_slice_facts(...)`, which is the
-intended path for reusable libraries, projection indexes, and cross-language
-golden tests. The same seam is available from the CLI with `clankerprof facts`
-followed by `clankerprof targets --facts ...` or
+primary value, original sample, and expanded leaf-to-root frames. Target,
+boundary, and slice projections can consume those facts directly through
+`analyze_target_facts(...)`, `analyze_boundary_facts(...)`, and
+`analyze_slice_facts(...)`, which is the intended path for reusable libraries,
+projection indexes, and cross-language golden tests. The same seam is available
+from the CLI with `clankerprof facts` followed by
+`clankerprof targets --facts ...`, `clankerprof scopes --facts ...`, or
 `clankerprof slices --facts ...`.
 
 ## Integration Guidance
 
 Prefer this order when adopting `clankerprof` in another harness:
 
-1. Produce `targets --format json` for parent-boundary diagnosis.
-2. Produce `slices --output profile-slices.json` for ownership or code-area
+1. Produce `targets --format json` for simple parent-boundary diagnosis.
+2. Produce `scopes --output profile-scopes.json` when rollups, owners,
+   residual scopes, or calibrated estimates matter.
+3. Produce `slices --output profile-slices.json` for ownership or code-area
    triage.
-3. Use `compare` only on slice JSON outputs generated from stable configs.
-4. Keep runtime-specific behavior in rule packs and config files.
-5. Keep old profile tools available until real-profile golden outputs match the
+4. Use `compare` on slice or scope/boundary JSON outputs generated from stable configs.
+5. Keep runtime-specific behavior in rule packs and config files.
+6. Keep old profile tools available until real-profile golden outputs match the
    compatibility contract you need.
 
 For repeated agent work, use
