@@ -933,4 +933,4 @@ def render_slice_json(
 
 
 def render_json_payload(payload: dict[str, object]) -> str:
-    return json.dumps(payload, indent=2, sort_keys=True)
+    return json.dumps(payload, indent=2, sort_keys=True, allow_nan=False)

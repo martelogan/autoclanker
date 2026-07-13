@@ -117,6 +117,9 @@ semantics.
 | Structured boundary comparison over boundary, bucket, category, and domain rows | covered | `test_clankerprof_compare_supports_boundary_outputs` |
 | Non-zero regression gate exit code | covered | `test_clankerprof_compare_exits_nonzero_for_regression_gate` |
 | Top per-function regressions and improvements in JSON | covered | `test_clankerprof_compare_exits_nonzero_for_regression_gate` |
+| Strict-JSON compare artifacts: new/removed rows serialize `delta_rel` as `null`, never `Infinity` | covered | `test_clankerprof_compare_new_rows_emit_finite_json` |
+| Boundary `top_improvements` ordered by magnitude, most negative first | covered | `test_clankerprof_boundary_compare_orders_top_improvements_by_magnitude` |
+| Compare dispatches on the shared `tool` field and rejects non-report payloads | covered | `test_clankerprof_compare_rejects_wrong_payload_types` |
 | Text compare report wording from older slice tools | not claimed | JSON gate compatibility is the stable contract. |
 
 ## Remaining confidence boundary

@@ -15,7 +15,11 @@ from clankerprof.analysis import (
     analyze_slices,
     analyze_targets,
 )
-from clankerprof.compare import CompareOptions, compare_slice_json
+from clankerprof.compare import (
+    CompareOptions,
+    compare_boundary_json,
+    compare_slice_json,
+)
 from clankerprof.facts import sample_facts_to_jsonable
 from clankerprof.proto import decode_profile_bytes
 from clankerprof.render import render_slice_json, render_target_json
@@ -392,3 +396,222 @@ def test_clankerprof_rust_compare_matches_python_slice_compare(tmp_path: Path) -
         CompareOptions(threshold_abs=10.0, threshold_rel=1000.0),
     )
     assert rust_payload == python_payload
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_compare_matches_python_for_new_and_removed_rows(
+    tmp_path: Path,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    before: dict[str, Any] = {
+        "tool": "clankerprof_slices",
+        "summary": {"matching_time_ns": 100, "total_time_ns": 100},
+        "slices": [{"name": "removed", "pct": 30.0, "frames": []}],
+    }
+    after: dict[str, Any] = {
+        "tool": "clankerprof_slices",
+        "summary": {"matching_time_ns": 100, "total_time_ns": 100},
+        "slices": [{"name": "added", "pct": 30.0, "frames": []}],
+    }
+    before_path = tmp_path / "before.json"
+    after_path = tmp_path / "after.json"
+    before_path.write_text(json.dumps(before), encoding="utf-8")
+    after_path.write_text(json.dumps(after), encoding="utf-8")
+
+    completed = subprocess.run(
+        [
+            "cargo",
+            "run",
+            "--quiet",
+            "-p",
+            "clankerprof-core",
+            "--bin",
+            "clankerprof-rs",
+            "--",
+            "compare",
+            "--before",
+            str(before_path),
+            "--after",
+            str(after_path),
+            "--threshold-abs",
+            "1000",
+            "--threshold-rel",
+            "1000",
+        ],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "Infinity" not in completed.stdout
+    rust_payload = json.loads(completed.stdout)
+    python_payload = compare_slice_json(
+        before,
+        after,
+        CompareOptions(threshold_abs=1000.0, threshold_rel=1000.0),
+    )
+    assert rust_payload == python_payload
+    added_row = next(
+        row for row in rust_payload["slices"] if row["name"] == "added"
+    )
+    assert added_row["delta_rel"] is None
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_compare_matches_python_boundary_compare(
+    tmp_path: Path,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    before: dict[str, Any] = {
+        "tool": "clankerprof_boundaries",
+        "summary": {"total_time_ns": 1_000},
+        "boundaries": [
+            {
+                "name": "render",
+                "pct_of_profile": 40.0,
+                "buckets": [
+                    {
+                        "name": "components",
+                        "pct": 25.0,
+                        "categories": [{"name": "Application", "pct": 20.0}],
+                    }
+                ],
+                "domains": [{"name": "cards", "pct": 15.0}],
+            }
+        ],
+    }
+    after: dict[str, Any] = {
+        "tool": "clankerprof_boundaries",
+        "summary": {"total_time_ns": 1_000},
+        "boundaries": [
+            {
+                "name": "render",
+                "pct_of_profile": 9.0,
+                "buckets": [
+                    {
+                        "name": "components",
+                        "pct": 24.5,
+                        "categories": [{"name": "Application", "pct": 20.0}],
+                    }
+                ],
+                "domains": [
+                    {"name": "cards", "pct": 15.0},
+                    {"name": "banners", "pct": 3.0},
+                ],
+            }
+        ],
+    }
+    before_path = tmp_path / "before.json"
+    after_path = tmp_path / "after.json"
+    before_path.write_text(json.dumps(before), encoding="utf-8")
+    after_path.write_text(json.dumps(after), encoding="utf-8")
+
+    completed = subprocess.run(
+        [
+            "cargo",
+            "run",
+            "--quiet",
+            "-p",
+            "clankerprof-core",
+            "--bin",
+            "clankerprof-rs",
+            "--",
+            "compare",
+            "--before",
+            str(before_path),
+            "--after",
+            str(after_path),
+            "--threshold-abs",
+            "1000",
+            "--threshold-rel",
+            "1000",
+        ],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    rust_payload = json.loads(completed.stdout)
+    python_payload = compare_boundary_json(
+        before,
+        after,
+        CompareOptions(threshold_abs=1000.0, threshold_rel=1000.0),
+    )
+    assert rust_payload == python_payload
+    improvements = rust_payload["top_improvements"]
+    assert improvements[0]["name"] == "render"
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_compare_rejects_mismatched_tools(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    before_path = tmp_path / "before.json"
+    after_path = tmp_path / "after.json"
+    before_path.write_text(
+        json.dumps({"tool": "clankerprof_slices", "slices": []}),
+        encoding="utf-8",
+    )
+    after_path.write_text(
+        json.dumps({"tool": "clankerprof_facts"}),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            "cargo",
+            "run",
+            "--quiet",
+            "-p",
+            "clankerprof-core",
+            "--bin",
+            "clankerprof-rs",
+            "--",
+            "compare",
+            "--before",
+            str(before_path),
+            "--after",
+            str(after_path),
+        ],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 2
+    assert "same clankerprof projection" in completed.stderr
+
+    after_path.write_text(
+        json.dumps({"tool": "clankerprof_facts"}),
+        encoding="utf-8",
+    )
+    before_path.write_text(
+        json.dumps({"tool": "clankerprof_facts"}),
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [
+            "cargo",
+            "run",
+            "--quiet",
+            "-p",
+            "clankerprof-core",
+            "--bin",
+            "clankerprof-rs",
+            "--",
+            "compare",
+            "--before",
+            str(before_path),
+            "--after",
+            str(after_path),
+        ],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 2
+    assert "clankerprof_slices or clankerprof_boundaries" in completed.stderr

@@ -1,4 +1,4 @@
-use clankerprof_core::compare::{compare_slice_json, CompareOptions};
+use clankerprof_core::compare::{compare_json, CompareOptions};
 use clankerprof_core::slices::{
     analyze_slice_facts, load_slices_file, render_slice_json, SliceAnalysisOptions,
 };
@@ -271,6 +271,16 @@ fn run_compare(mut args: impl Iterator<Item = String>) -> Result<(), String> {
                     .map(ToString::to_string)
                     .collect::<BTreeSet<_>>();
             }
+            "--focus-boundaries" => {
+                let Some(value) = args.next() else {
+                    return Err("--focus-boundaries requires a comma-delimited value.".to_string());
+                };
+                options.focus_boundaries = value
+                    .split(',')
+                    .filter(|part| !part.is_empty())
+                    .map(ToString::to_string)
+                    .collect::<BTreeSet<_>>();
+            }
             "--output" => {
                 let Some(value) = args.next() else {
                     return Err("--output requires a path.".to_string());
@@ -298,7 +308,7 @@ fn run_compare(mut args: impl Iterator<Item = String>) -> Result<(), String> {
         &std::fs::read_to_string(after_path).map_err(|error| error.to_string())?,
     )
     .map_err(|error| error.to_string())?;
-    let payload = compare_slice_json(&before_payload, &after_payload, &options);
+    let payload = compare_json(&before_payload, &after_payload, &options)?;
     let has_regression = payload
         .get("has_regression")
         .and_then(serde_json::Value::as_bool)

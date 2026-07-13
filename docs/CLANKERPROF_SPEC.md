@@ -282,8 +282,11 @@ Slice projection must not redefine target-boundary semantics.
 
 ## Compare contract
 
-`compare` consumes two slice JSON payloads or two boundary JSON payloads. It
-does not compare mixed projection types. For slice payloads, it reports:
+`compare` consumes two slice JSON payloads or two boundary JSON payloads,
+dispatching on their shared `tool` field. Both inputs must carry the same
+`tool`, and it must be `clankerprof_slices` or `clankerprof_boundaries`;
+anything else (including two facts exports) is a validation error, never a
+silent "no regression". For slice payloads, it reports:
 
 - total before/after primary time from summaries;
 - per-slice before percent, after percent, absolute delta, relative delta, and
@@ -296,6 +299,14 @@ does not compare mixed projection types. For slice payloads, it reports:
 For boundary payloads, it reports the same threshold semantics over stable
 boundary, bucket, category, and domain rows. Boundary compare is intentionally
 JSON-first; exact terminal prose is not part of the compatibility contract.
+
+Compare artifacts are strict JSON. A row that is new (`before_pct == 0`,
+`after_pct > 0`) has no finite relative delta; its `delta_rel` serializes as
+`null`, never as a bare `Infinity` token or a string. New rows still
+participate in regression gating: threshold math treats their relative delta
+as unbounded, so a new row whose absolute delta exceeds the absolute
+threshold gates. `top_regressions` orders rows by descending absolute delta;
+`top_improvements` orders rows by ascending (most negative first) delta.
 
 A slice is a regression only when it exceeds both the configured absolute and
 relative thresholds and is within the focus set when one is provided.

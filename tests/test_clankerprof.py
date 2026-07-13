@@ -43,6 +43,7 @@ from clankerprof.cli import main as clankerprof_main
 from clankerprof.compare import (
     CompareOptions,
     compare_boundary_json,
+    compare_json,
     compare_slice_json,
 )
 from clankerprof.facts import (
@@ -56,6 +57,7 @@ from clankerprof.model import Frame, ValueType
 from clankerprof.proto import decode_profile_bytes, load_profile
 from clankerprof.render import (
     render_boundary_json,
+    render_json_payload,
     render_semantic_callers_csv,
     render_slice_json,
     render_target_csv,
@@ -763,6 +765,94 @@ def test_clankerprof_facts_export_is_compact_with_pretty_opt_in() -> None:
     pretty = dumps_sample_facts(facts, pretty=True)
     assert pretty.startswith("{\n  ")
     assert json.loads(pretty) == json.loads(compact)
+
+
+def _compare_slice_report(slices: list[dict[str, object]]) -> dict[str, Any]:
+    return {
+        "tool": "clankerprof_slices",
+        "summary": {
+            "matching_time_ns": 100,
+            "total_time_ns": 100,
+            "matching_pct": 100.0,
+        },
+        "slices": slices,
+    }
+
+
+def _compare_boundary_report(boundaries: list[dict[str, object]]) -> dict[str, Any]:
+    return {
+        "tool": "clankerprof_boundaries",
+        "summary": {"total_time_ns": 1_000},
+        "boundaries": boundaries,
+    }
+
+
+def test_clankerprof_compare_new_rows_emit_finite_json() -> None:
+    before = _compare_slice_report(
+        [{"name": "existing", "pct": 50.0, "frames": []}]
+    )
+    after = _compare_slice_report(
+        [
+            {"name": "existing", "pct": 40.0, "frames": []},
+            {"name": "brand-new", "pct": 10.0, "frames": []},
+        ]
+    )
+
+    compared = compare_slice_json(before, after)
+    by_name = {
+        cast(str, row["name"]): row
+        for row in cast(list[dict[str, Any]], compared["slices"])
+    }
+    assert by_name["brand-new"]["delta_rel"] is None
+    assert by_name["existing"]["delta_rel"] == -20.0
+
+    rendered = render_json_payload(compared)
+    assert "Infinity" not in rendered
+
+    boundary_compared = compare_boundary_json(
+        _compare_boundary_report([]),
+        _compare_boundary_report([{"name": "fresh", "pct_of_profile": 12.0}]),
+    )
+    fresh_row = cast(list[dict[str, Any]], boundary_compared["rows"])[0]
+    assert fresh_row["delta_rel"] is None
+    assert "Infinity" not in render_json_payload(boundary_compared)
+
+
+def test_clankerprof_boundary_compare_orders_top_improvements_by_magnitude() -> None:
+    before = _compare_boundary_report(
+        [
+            {"name": "alpha", "pct_of_profile": 40.0},
+            {"name": "beta", "pct_of_profile": 30.0},
+            {"name": "gamma", "pct_of_profile": 20.0},
+        ]
+    )
+    after = _compare_boundary_report(
+        [
+            {"name": "alpha", "pct_of_profile": 9.0},
+            {"name": "beta", "pct_of_profile": 25.0},
+            {"name": "gamma", "pct_of_profile": 19.5},
+        ]
+    )
+
+    compared = compare_boundary_json(before, after)
+    improvements = cast(list[dict[str, Any]], compared["top_improvements"])
+    assert [row["name"] for row in improvements] == ["alpha", "beta", "gamma"]
+    assert [row["delta_abs"] for row in improvements] == [-31.0, -5.0, -0.5]
+
+
+def test_clankerprof_compare_rejects_wrong_payload_types() -> None:
+    facts_like: dict[str, Any] = {"tool": "clankerprof_facts"}
+    with pytest.raises(
+        ValueError,
+        match="must be clankerprof_slices or clankerprof_boundaries",
+    ):
+        compare_json(facts_like, dict(facts_like))
+
+    with pytest.raises(ValueError, match="same clankerprof projection"):
+        compare_json(
+            {"tool": "clankerprof_slices"},
+            {"tool": "clankerprof_boundaries"},
+        )
 
 
 @covers("M9-001", "M9-006")
@@ -3352,10 +3442,12 @@ def test_clankerprof_compare_exits_nonzero_for_regression_gate(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     before: dict[str, Any] = {
+        "tool": "clankerprof_slices",
         "summary": {"total_time_ns": 100, "matching_time_ns": 100},
         "slices": [{"name": "rendering", "pct": 10.0, "frames": []}],
     }
     after: dict[str, Any] = {
+        "tool": "clankerprof_slices",
         "summary": {"total_time_ns": 100, "matching_time_ns": 100},
         "slices": [{"name": "rendering", "pct": 15.0, "frames": []}],
     }
