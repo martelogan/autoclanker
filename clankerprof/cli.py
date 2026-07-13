@@ -270,7 +270,6 @@ def _valid_filter_keys(rules: RuntimeRuleSet) -> frozenset[str]:
 
 def _runtime_rules(args: argparse.Namespace) -> RuntimeRuleSet:
     runtime = str(getattr(args, "runtime", "generic"))
-    no_enhanced = bool(getattr(args, "no_enhanced", False))
     runtime_rules_path = getattr(args, "runtime_rules", None)
     core_classes: frozenset[str] = (
         load_ruby_core_classes(args.ruby_core_classes)
@@ -285,11 +284,9 @@ def _runtime_rules(args: argparse.Namespace) -> RuntimeRuleSet:
             core_classes=core_classes,
             verbose=bool(args.verbose_runtime_internals),
         )
-    if runtime == "generic" and not no_enhanced:
+    if runtime == "generic":
         return DEFAULT_RUNTIME_RULES
-    if runtime == "generic" and no_enhanced:
-        core_classes = load_default_ruby_core_classes()
-    elif runtime != "ruby":
+    if runtime != "ruby":
         raise ValueError(f"Unsupported runtime: {runtime}")
     return ruby_rules(
         core_classes,

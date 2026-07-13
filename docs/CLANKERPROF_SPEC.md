@@ -181,6 +181,36 @@ and `library_selector_path_patterns` for selector-specific dependency paths.
 Older alias keys may remain accepted for migration, but aliases must normalize
 to the same `RuntimeRuleSet` fields before analysis begins.
 
+### Rule matching semantics
+
+Within one rule, `name_contains` entries match as substrings anywhere in the
+frame name, `name_prefixes` entries anchor at the start of the name, and
+`name_patterns` entries are regular expressions; a rule matches when any
+entry matches and the frame path is not in `except_paths`. Rules evaluate in
+pack order; the first matching rule wins.
+
+Semantic rules may only claim frames on **runtime-owned paths**: native
+pseudo-paths, runtime stdlib paths, runtime-internal paths, and
+dependency/library paths per the active pack. Frames on plain application
+paths are never claimed by semantic rules, no matter how their names read —
+an application class whose name happens to contain a dependency's name stays
+application code. A pack that declares no path-ownership configuration
+(no native/stdlib/library path keys) cannot distinguish application paths,
+so its semantic rules apply to every frame.
+
+The `special_namespace_prefixes` guard blocks qualified names
+(`OpenSSL::Cipher#encrypt`) from resolving through the core-class table. Bare
+module-function names on guarded namespaces (`Zlib.inflate`,
+`OpenSSL.fixed_length_secure_compare`) resolve through the pack's ordered
+native-name rules **before** the core-class table when they appear on native
+paths, so the core table's default category never swallows names the pack
+labels semantically; off native paths, the core category maps
+(`core_semantic_categories` and friends) keep their legacy claims.
+
+The `--no-enhanced` flag disables enhanced runtime categorization for the
+**active** runtime's rules; it never swaps rule packs. Under the generic
+runtime, `--no-enhanced` keeps the generic pack.
+
 ## Target projection contract
 
 `targets` answers: “inside this parent boundary, what leaf work consumed CPU,

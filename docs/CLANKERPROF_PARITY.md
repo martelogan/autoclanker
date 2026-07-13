@@ -33,6 +33,9 @@ behavior must not define or override target-attribution semantics.
 | Generic request/rendering boundary attribution outside a specific application domain | covered | `test_clankerprof_supports_generic_request_rendering_attribution` |
 | Packaged Ruby core class CSV is used by default for `--runtime ruby`, with explicit override still available | covered | `test_clankerprof_loads_packaged_ruby_core_classes_by_default` |
 | Ruby core/native semantic labels including OpenSSL false-positive avoidance | covered | `test_clankerprof_ruby_rule_pack_preserves_legacy_categorization_cases` |
+| Semantic rules never claim application-path frames by name substring (runtime-owned-path constraint) | covered | `test_clankerprof_semantic_rules_do_not_claim_app_frames_by_substring` |
+| Guarded bare module-function names (`Zlib.inflate`) resolve through native-name rules, not the core default | covered | `test_clankerprof_special_namespace_guard_covers_bare_module_names` |
+| `--no-enhanced` keeps the active runtime's pack; generic never silently loads ruby rules | covered | `test_clankerprof_no_enhanced_generic_runtime_keeps_generic_rules`, `test_clankerprof_no_enhanced_runtime_selection_is_observable` |
 | Four legacy Ruby flag combinations for verbose/non-verbose and folded/non-folded modes | covered | `test_clankerprof_preserves_legacy_ruby_flag_combinations` |
 | Main simplified categories and “main categories never fold” behavior | covered | `test_clankerprof_preserves_main_simplified_category_totals_and_never_folds` |
 | Proportional CPU attributables in CSV output | covered | `test_clankerprof_ruby_rules_support_simplification_folding_and_attributables` |

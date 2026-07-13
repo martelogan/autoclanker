@@ -697,15 +697,57 @@ def _direct_core_class(function_name: str, rules: RuntimeRuleSet) -> str | None:
     return None
 
 
+def _bare_guarded_namespace(function_name: str, rules: RuntimeRuleSet) -> bool:
+    """Whether the name is a bare module-function on a guarded namespace.
+
+    Qualified guarded names (`OpenSSL::Cipher#encrypt`) never reach the
+    core-class table; bare forms (`Zlib.inflate`) do, so native-path
+    categorization gives the pack's native-name rules the first claim before
+    the core table's default swallows them.
+    """
+    clean = function_name.lstrip(":")
+    if "#" in clean:
+        class_name = clean.split("#", 1)[0]
+    elif "." in clean:
+        class_name = clean.split(".", 1)[0]
+    else:
+        return False
+    return "::" not in class_name and class_name in rules.special_namespace_prefixes
+
+
+def _is_runtime_owned_path(path: str, rules: RuntimeRuleSet) -> bool:
+    """Whether the runtime, its stdlib, or a dependency owns this path.
+
+    Semantic rules label runtime and dependency overhead by name; frames on
+    plain application paths are never claimed, no matter how their names read.
+    A pack that declares no path-ownership configuration cannot distinguish
+    application paths, so its semantic rules apply to every frame.
+    """
+    if not (
+        rules.native_path_markers
+        or rules.native_path_patterns
+        or rules.stdlib_path_markers
+        or rules.library_path_patterns
+        or rules.library_selector_path_patterns
+    ):
+        return True
+    if _is_native_path(path, rules):
+        return True
+    if is_runtime_stdlib_path(path, rules):
+        return True
+    return extract_library_name(path, rules) is not None
+
+
 def categorize_runtime_frame(frame: Frame, rules: RuntimeRuleSet) -> str | None:
     name = frame.name
     path = frame.filename
 
-    for rule in rules.semantic_rules:
-        if rule.matches(name, path):
-            if path == "<cfunc>" and rule.native_category is not None:
-                return rule.native_category
-            return rule.category
+    if rules.semantic_rules and _is_runtime_owned_path(path, rules):
+        for rule in rules.semantic_rules:
+            if rule.matches(name, path):
+                if path == "<cfunc>" and rule.native_category is not None:
+                    return rule.native_category
+                return rule.category
 
     core_class = _direct_core_class(name, rules)
     if core_class is not None:
@@ -717,6 +759,10 @@ def categorize_runtime_frame(frame: Frame, rules: RuntimeRuleSet) -> str | None:
             )
         )
         if explicit_native_path:
+            if _bare_guarded_namespace(name, rules):
+                for rule in rules.native_rules:
+                    if rule.matches(name, path):
+                        return rule.category
             return rules.core_native_categories.get(
                 core_class, rules.core_native_default_category
             )

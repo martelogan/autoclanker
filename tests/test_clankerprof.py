@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Any, cast
 import pytest
 
 import clankerprof.analysis as clankerprof_analysis
+import clankerprof.cli as clankerprof_cli
 
 from autoclanker.cli import main as autoclanker_main
 from clankerprof.analysis import (
@@ -853,6 +855,139 @@ def test_clankerprof_compare_rejects_wrong_payload_types() -> None:
             {"tool": "clankerprof_slices"},
             {"tool": "clankerprof_boundaries"},
         )
+
+
+def _runtime_args(**overrides: object) -> argparse.Namespace:
+    args: dict[str, object] = {
+        "runtime": "generic",
+        "no_enhanced": False,
+        "runtime_rules": None,
+        "ruby_core_classes": None,
+        "verbose_runtime_internals": False,
+    }
+    args.update(overrides)
+    return argparse.Namespace(**args)
+
+
+def test_clankerprof_no_enhanced_generic_runtime_keeps_generic_rules() -> None:
+    generic_no_enhanced = clankerprof_cli._runtime_rules(  # pyright: ignore[reportPrivateUsage]
+        _runtime_args(no_enhanced=True)
+    )
+    assert generic_no_enhanced.name == "generic"
+    assert generic_no_enhanced is DEFAULT_RUNTIME_RULES
+
+    ruby_no_enhanced = clankerprof_cli._runtime_rules(  # pyright: ignore[reportPrivateUsage]
+        _runtime_args(runtime="ruby", no_enhanced=True)
+    )
+    assert ruby_no_enhanced.name == "ruby"
+
+    with pytest.raises(ValueError, match="Unsupported runtime"):
+        clankerprof_cli._runtime_rules(  # pyright: ignore[reportPrivateUsage]
+            _runtime_args(runtime="python")
+        )
+
+
+def test_clankerprof_no_enhanced_runtime_selection_is_observable(
+    tmp_path: Path,
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(
+        builder.function("Target#render", "/app/responders/target.rb")
+    )
+    app_caller = builder.location(
+        builder.function("App::Renderer#render", "/app/renderers/app_renderer.rb")
+    )
+    stdlib_delegator = builder.location(
+        builder.function(
+            "Forwardable#def_delegator",
+            "/usr/local/lib/ruby/3.2.0/forwardable.rb",
+        )
+    )
+    native_leaf = builder.location(builder.function("NativeExtension#work", "<cfunc>"))
+    builder.sample((native_leaf, stdlib_delegator, app_caller, target), 5_000_000)
+
+    profile_path = tmp_path / "profile.pb"
+    config_path = tmp_path / "target-config.json"
+    profile_path.write_bytes(builder.encode())
+    config_path.write_text(
+        json.dumps({"Target#render": {"Application": r"[/\\]app[/\\]"}}),
+        encoding="utf-8",
+    )
+
+    def top_category(*extra: str) -> str:
+        output_path = tmp_path / f"out-{len(extra)}.json"
+        assert (
+            clankerprof_main(
+                [
+                    "targets",
+                    "--profile",
+                    str(profile_path),
+                    "--config",
+                    str(config_path),
+                    "--no-enhanced",
+                    *extra,
+                    "--output",
+                    str(output_path),
+                ]
+            )
+            == 0
+        )
+        payload = json.loads(output_path.read_text(encoding="utf-8"))
+        parent = cast(
+            dict[str, Any],
+            cast(dict[str, Any], payload["parents"])["Target#render"],
+        )
+        return cast(str, cast(list[dict[str, Any]], parent["categories"])[0]["name"])
+
+    assert top_category() == "Other"
+    assert top_category("--runtime", "ruby") == "Application"
+
+
+def test_clankerprof_semantic_rules_do_not_claim_app_frames_by_substring() -> None:
+    rules = ruby_rules(_ruby_core_classes())
+
+    def category(name: str, filename: str) -> str | None:
+        return categorize_ruby_frame(
+            Frame(location_id=1, function_id=1, name=name, filename=filename),
+            rules,
+        )
+
+    assert category("MyStatsDHelper#emit", "/srv/app/lib/my_statsd_helper.rb") is None
+    assert category("ShopI18nAudit#run", "/app/services/shop_i18n_audit.rb") is None
+    assert (
+        category("ActiveRecordish::Auditor#call", "/app/models/auditor.rb") is None
+    )
+
+    assert (
+        category(
+            "StatsD::Batcher#flush",
+            "/gems/statsd-instrument-3.5.0/lib/batcher.rb",
+        )
+        == "StatsD Gem"
+    )
+    assert (
+        category("StatsD.distribution", "/usr/local/lib/ruby/3.2.0/forwardable.rb")
+        == "StatsD Gem"
+    )
+    assert category("StatsD.increment", "<cfunc>") == "StatsD (Native)"
+
+
+def test_clankerprof_special_namespace_guard_covers_bare_module_names() -> None:
+    rules = ruby_rules(_ruby_core_classes())
+
+    def category(name: str, filename: str) -> str | None:
+        return categorize_ruby_frame(
+            Frame(location_id=1, function_id=1, name=name, filename=filename),
+            rules,
+        )
+
+    assert category("Zlib.inflate", "<cfunc>") == "Compression (Native)"
+    assert (
+        category("OpenSSL.fixed_length_secure_compare", "<cfunc>")
+        == "OpenSSL (Native)"
+    )
+    assert category("Zlib::Deflate.deflate", "<cfunc>") == "Compression (Native)"
+    assert category("OpenSSL::Cipher#encrypt", "<cfunc>") == "OpenSSL (Native)"
 
 
 @covers("M9-001", "M9-006")
