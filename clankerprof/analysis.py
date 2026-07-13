@@ -416,6 +416,10 @@ def parse_frame_predicate(
     if not key:
         raise ValueError(f"Predicate key cannot be empty: {raw}")
     if key == "native":
+        if value not in {"", "true", "false"}:
+            raise ValueError(
+                f"native: predicate value must be true or false, got {value!r}."
+            )
         return FramePredicate("native", value)
     if not value:
         raise ValueError(f"Predicate value cannot be empty: {raw}")
@@ -553,7 +557,8 @@ class _FramePredicateMatcher:
         if key == "regex":
             return match_regex(value, frame.filename)
         if key == "native":
-            return _is_native_path(frame.filename, self._rules)
+            is_native = _is_native_path(frame.filename, self._rules)
+            return not is_native if value == "false" else is_native
         if key == "category":
             if self._configured_category_matcher is None:
                 raise ValueError("category: predicates require configured categories.")
@@ -818,7 +823,17 @@ def _should_fold_category(
     ):
         return True
     if category in rules.always_foldable_categories:
-        for caller in stack[1:3]:
+        # The caller window spans the next two distinct locations so the
+        # outcome is independent of inline expansion of the leaf's location.
+        leaf_location_id = stack[0].location_id if stack else 0
+        window_location_ids: list[int] = []
+        for caller in stack[1:]:
+            if caller.location_id == leaf_location_id and not window_location_ids:
+                continue
+            if caller.location_id not in window_location_ids:
+                if len(window_location_ids) == 2:
+                    break
+                window_location_ids.append(caller.location_id)
             caller_category = categorize_frame(caller, rules)
             if caller_category and not _is_internal_category_for_rules(
                 caller_category, rules
@@ -1373,6 +1388,31 @@ def _filter_matches_stack(
     inverted, descendant, body = _parse_filter_prefixes(raw_filter)
     key, _, value = body.partition(":")
     frames = stack if descendant else (bottom or stack[0],)
+    if key == "slice" and not descendant:
+        matched = any(
+            _slice_for_frame(
+                frame,
+                stack,
+                options,
+                options.slices,
+                options.attributes,
+                include_descendant_attributes=False,
+            )
+            == value
+            for frame in frames
+        )
+        if (
+            not matched
+            and bottom is not None
+            and _sample_has_descendant_attribute_for_slice(
+                stack,
+                options,
+                options.attributes,
+                value,
+            )
+        ):
+            matched = True
+        return not matched if inverted else matched
     if key == "slice":
         matches = (
             _slice_for_frame(
@@ -1386,18 +1426,6 @@ def _filter_matches_stack(
             == value
             for frame in frames
         )
-        if (
-            not descendant
-            and not inverted
-            and bottom is not None
-            and _sample_has_descendant_attribute_for_slice(
-                stack,
-                options,
-                options.attributes,
-                value,
-            )
-        ):
-            return True
     else:
         matches = (
             _matches_frame_filter(frame, body, options.runtime_rules)
@@ -1536,9 +1564,13 @@ def analyze_slice_facts(
     gc_time = 0
     stats_by_slice: dict[str, SliceStats] = {}
     uncollapsible_stats = SliceStats(name=UNCOLLAPSIBLE_PSEUDO_SLICE)
-    default_slice = next(
-        (item.name for item in options.slices if item.is_default), "(all)"
-    )
+    default_names = [item.name for item in options.slices if item.is_default]
+    if len(default_names) > 1:
+        raise ValueError(
+            "Slice config declares multiple default slices: "
+            f"{', '.join(default_names)}. Exactly one slice may set default."
+        )
+    default_slice = default_names[0] if default_names else "(all)"
     index = ProfileFactIndex.from_input(sample_facts)
 
     for fact in index.samples():

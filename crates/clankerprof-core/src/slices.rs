@@ -140,6 +140,17 @@ pub fn load_slices_file(path: impl AsRef<Path>) -> Result<Vec<SliceDefinition>, 
             metadata: BTreeMap::new(),
         });
     }
+    let default_names: Vec<&str> = slices
+        .iter()
+        .filter(|slice| slice.is_default)
+        .map(|slice| slice.name.as_str())
+        .collect();
+    if default_names.len() > 1 {
+        return Err(format!(
+            "Slice config declares multiple default slices: {}. Exactly one slice may set default.",
+            default_names.join(", ")
+        ));
+    }
     Ok(slices)
 }
 

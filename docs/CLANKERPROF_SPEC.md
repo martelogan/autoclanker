@@ -226,6 +226,9 @@ For each sample:
 - start from the leaf frame as the self-time owner;
 - optionally label the leaf using runtime rules;
 - optionally fold runtime-internal leaves into the first meaningful caller;
+  the fold heuristic's caller window spans the next two **distinct locations**
+  below the leaf, so the outcome is independent of inline expansion of the
+  leaf's own location;
 - match configured target categories against the chosen frame path;
 - place unmatched time in `Other`;
 - track leaf functions, categorized files, folded-from totals, semantic callers,
@@ -256,7 +259,10 @@ Scope, cost-kind, owner, and exclusion selectors accept a plain selector,
 an OR list of selectors, or an expression table with `any`, `all`, and `not`.
 Supported selector keys are intentionally generic: function name contains,
 function name equality, path/glob, regex, native frame, dependency selectors,
-optional slice label, configured cost-kind label, and runtime-rule label. A
+optional slice label, configured cost-kind label, and runtime-rule label.
+The `native:` selector takes `true` (or a bare `native`) to match native
+frames and `false` to match non-native frames; any other value is a
+validation error. A
 `cost_kind:<label>` selector matches the configured `[cost_kind]` label for a
 frame and is valid for owners, scopes, and exclusions. A
 `runtime_label:<label>` selector matches labels produced by the selected
@@ -307,6 +313,15 @@ For each sample:
 - report GC pseudo-slice time for `(marking)` and `(sweeping)`;
 - report unattributed dependency/library summaries for default-slice time when
   requested.
+
+Bottom `slice:<name>` filters evaluate the sample's **effective** attribution
+in both polarities: a sample rescued into a slice by a descendant attribute
+rule matches `slice:<name>` and is excluded by `!slice:<name>`. Collapse
+`slice:` rules intentionally do not use the descendant-attribute rescue.
+
+At most one slice may set `default: true`; declaring several is a validation
+error (previously attribution silently used the last while tracking used the
+first).
 
 Slice projection must not redefine target-boundary semantics.
 

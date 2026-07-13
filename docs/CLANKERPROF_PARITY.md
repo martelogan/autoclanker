@@ -97,6 +97,10 @@ semantics.
 | Descendant filters such as `<name:RequestHandler#render_response`, including OR semantics across descendant filters | covered | `test_clankerprof_slice_descendant_filters_use_or_semantics` |
 | Repeated `!` and `<` filter prefixes in any order | covered | `test_clankerprof_slice_filter_prefixes_can_repeat_in_any_order` |
 | Bottom `slice:<name>` filters include descendant-attribute rescue behavior | covered | `test_clankerprof_slice_filter_honors_descendant_attribute_slice_matches` |
+| Negated `!slice:<name>` filters exclude descendant-attributed samples (rescue applies to both polarities) | covered | `test_clankerprof_slice_filter_negation_respects_descendant_attribution` |
+| Multiple `default: true` slices are rejected | covered | `test_clankerprof_duplicate_default_slices_rejected` |
+| `native:false` predicates match non-native frames; invalid values rejected | covered | `test_clankerprof_native_predicate_value_honored` |
+| Runtime-internal fold window spans distinct locations, invariant to leaf inline expansion | covered | `test_clankerprof_fold_heuristic_ignores_leaf_inline_expansion` |
 | `slice:<name>` collapse does not use descendant-attribute rescue | covered | `test_clankerprof_slice_collapse_does_not_use_descendant_attribute_rescue` |
 | Non-descendant filters apply to the selected bottom attribution frame after native/collapse handling | covered | `test_clankerprof_slice_filters_apply_to_bottom_frame_after_native_collapse` |
 | Unsupported filter keys, malformed filters, and collapse prefixes are rejected | covered | `test_clankerprof_slice_cli_validates_filter_and_collapse_contract` |

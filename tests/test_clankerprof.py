@@ -887,6 +887,164 @@ def test_clankerprof_no_enhanced_generic_runtime_keeps_generic_rules() -> None:
         )
 
 
+def test_clankerprof_slice_filter_negation_respects_descendant_attribution() -> None:
+    builder = PprofFixtureBuilder.create()
+    request = builder.location(
+        builder.function("RequestHandler#render_response", "/app/http/request.rb")
+    )
+    component = builder.location(
+        builder.function("ComponentRenderer#render", "/app/components/card.rb")
+    )
+    wrapper = builder.location(
+        builder.function("TelemetryWrapper#call", "/app/lib/telemetry.rb")
+    )
+    cache = builder.location(
+        builder.function("CacheClient#get", "/vendor/cache-client-1.2.3/lib/client.rb")
+    )
+    builder.sample((cache, wrapper, component, request), 70_000_000)
+    builder.sample((cache, component, request), 30_000_000)
+    profile = decode_profile_bytes(builder.encode())
+
+    options = SliceAnalysisOptions(
+        filters=("!slice:instrumentation",),
+        slices=(
+            SliceDefinition("components", ("app/components/**",)),
+            SliceDefinition("instrumentation", ()),
+        ),
+        attributes=(
+            AttributionRule(
+                "name",
+                "TelemetryWrapper#call",
+                "instrumentation",
+                descendant=True,
+            ),
+        ),
+    )
+    result = analyze_slices(profile, options)
+    assert result.matching_time_ns == 30_000_000
+
+    positive = analyze_slices(
+        profile,
+        SliceAnalysisOptions(
+            filters=("slice:instrumentation",),
+            slices=options.slices,
+            attributes=options.attributes,
+        ),
+    )
+    assert positive.matching_time_ns == 70_000_000
+
+
+def test_clankerprof_duplicate_default_slices_rejected() -> None:
+    profile = decode_profile_bytes(_slice_semantics_profile_bytes())
+    options = SliceAnalysisOptions(
+        slices=(
+            SliceDefinition("first", is_default=True),
+            SliceDefinition("second", is_default=True),
+        ),
+    )
+    with pytest.raises(ValueError, match="multiple default slices"):
+        analyze_slices(profile, options)
+
+
+def test_clankerprof_native_predicate_value_honored(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(ValueError, match="native: predicate value must be"):
+        parse_frame_predicates(("native:maybe",))
+
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(
+        builder.function("Target#render", "/app/responders/target.rb")
+    )
+    native_leaf = builder.location(builder.function("NativeExtension#work", "<cfunc>"))
+    app_leaf = builder.location(builder.function("Presenter#call", "/app/presenter.rb"))
+    builder.sample((native_leaf, target), 4_000_000)
+    builder.sample((app_leaf, target), 6_000_000)
+
+    profile_path = tmp_path / "profile.pb"
+    config_path = tmp_path / "boundaries.toml"
+    profile_path.write_bytes(builder.encode())
+    config_path.write_text(
+        """
+[category]
+"Native work" = "native:true"
+"Pure app" = "native:false"
+
+[[boundary]]
+label = "Request render"
+match = "name_eq:Target#render"
+
+[boundary.bucket]
+"Native" = ["Native work"]
+"App" = ["Pure app"]
+""".strip(),
+        encoding="utf-8",
+    )
+
+    assert (
+        clankerprof_main(
+            [
+                "boundaries",
+                "--profile",
+                str(profile_path),
+                "--config",
+                str(config_path),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    boundary = cast(list[dict[str, object]], payload["boundaries"])[0]
+    buckets = {
+        item["name"]: item
+        for item in cast(list[dict[str, object]], boundary["buckets"])
+    }
+    assert buckets["Native"]["time_ns"] == 4_000_000
+    assert buckets["App"]["time_ns"] == 6_000_000
+
+
+def _fold_window_profile_bytes(*, inline_padding: bool) -> bytes:
+    builder = PprofFixtureBuilder.create()
+    target_fn = builder.function("Target#render", "/app/responders/target.rb")
+    gem_fn = builder.function(
+        "StatsD::Batcher#flush",
+        "/gems/statsd-instrument-3.5.0/lib/batcher.rb",
+    )
+    leaf_fn = builder.function("Array#map", "<cfunc>")
+    if inline_padding:
+        helper_a = builder.function("Helper#a", "/app/lib/helper_a.rb")
+        helper_b = builder.function("Helper#b", "/app/lib/helper_b.rb")
+        leaf_location = builder.inline_location((leaf_fn, helper_a, helper_b))
+    else:
+        leaf_location = builder.location(leaf_fn)
+    gem_location = builder.location(gem_fn)
+    target_location = builder.location(target_fn)
+    builder.sample((leaf_location, gem_location, target_location), 9_000_000)
+    return builder.encode()
+
+
+def test_clankerprof_fold_heuristic_ignores_leaf_inline_expansion() -> None:
+    config = {"Target#render": {"Application": r"[/\\]app[/\\]"}}
+    for inline_padding in (False, True):
+        profile = decode_profile_bytes(
+            _fold_window_profile_bytes(inline_padding=inline_padding)
+        )
+        categories = analyze_targets(
+            profile,
+            config,
+            TargetAnalysisOptions(runtime_rules=ruby_rules(_ruby_core_classes())),
+        )["Target#render"]
+        folded = {
+            name: dict(stats.folded_from)
+            for name, stats in categories.items()
+            if stats.folded_from
+        }
+        assert folded, f"expected runtime-internal folding (inline={inline_padding})"
+        folded_leaves = {leaf for leaves in folded.values() for leaf in leaves}
+        assert folded_leaves == {"Array#map"}
+
+
 def test_clankerprof_no_enhanced_runtime_selection_is_observable(
     tmp_path: Path,
 ) -> None:
