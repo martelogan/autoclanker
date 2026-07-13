@@ -5,7 +5,7 @@ sample-facts core. Its first compatibility target is the versioned JSON schema
 documented in `docs/CLANKERPROF_SPEC.md`:
 
 ```text
-clankerprof.sample_facts.v1
+clankerprof.sample_facts.v2
 ```
 
 The crate intentionally builds every projection from the durable fact layer.
@@ -20,7 +20,8 @@ cargo run -p clankerprof-core --bin clankerprof-rs -- \
   facts --profile profile.pb.gz --output sample-facts.json
 ```
 
-Without `--output`, the command writes pretty JSON to stdout.
+Without `--output`, the command writes compact JSON to stdout; `--pretty`
+opts in to indented output.
 
 Generic target attribution:
 

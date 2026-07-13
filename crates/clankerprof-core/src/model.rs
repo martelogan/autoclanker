@@ -23,14 +23,44 @@ pub struct Frame {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValueType {
+    pub type_name: String,
+    pub unit: String,
+}
+
+/// Pick the value index projections aggregate, per pprof convention.
+///
+/// `default_sample_type` wins when it names a declared sample type; otherwise
+/// the last declared type is the default. Profiles that declare no sample
+/// types keep index 0.
+pub fn select_primary_value_index(sample_types: &[ValueType], default_sample_type: &str) -> usize {
+    if !default_sample_type.is_empty() {
+        if let Some(index) = sample_types
+            .iter()
+            .position(|value_type| value_type.type_name == default_sample_type)
+        {
+            return index;
+        }
+    }
+    sample_types.len().saturating_sub(1)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sample {
     pub location_ids: Vec<u64>,
     pub values: Vec<TimeNs>,
+    pub primary_index: usize,
 }
 
 impl Sample {
     pub fn primary_value(&self) -> TimeNs {
-        self.values.first().copied().unwrap_or(0)
+        if self.values.is_empty() {
+            return 0;
+        }
+        self.values
+            .get(self.primary_index)
+            .copied()
+            .unwrap_or(self.values[0])
     }
 }
 
@@ -56,6 +86,11 @@ pub struct ProfileFacts {
     pub samples: Vec<SampleFact>,
     pub total_primary_value: TimeNs,
     pub empty_sample_count: usize,
+    pub value_types: Vec<ValueType>,
+    pub period_type: Option<ValueType>,
+    pub period: i64,
+    pub default_sample_type: String,
+    pub primary_value_index: usize,
 }
 
 impl ProfileFacts {
@@ -77,6 +112,11 @@ pub struct Profile {
     pub functions: BTreeMap<u64, Function>,
     pub locations: BTreeMap<u64, Location>,
     pub samples: Vec<Sample>,
+    pub sample_types: Vec<ValueType>,
+    pub period_type: Option<ValueType>,
+    pub period: i64,
+    pub default_sample_type: String,
+    pub primary_value_index: usize,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -167,6 +207,11 @@ impl Profile {
             samples,
             total_primary_value,
             empty_sample_count,
+            value_types: self.sample_types.clone(),
+            period_type: self.period_type.clone(),
+            period: self.period,
+            default_sample_type: self.default_sample_type.clone(),
+            primary_value_index: self.primary_value_index,
         }
     }
 }

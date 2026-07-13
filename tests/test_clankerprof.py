@@ -52,7 +52,7 @@ from clankerprof.facts import (
     loads_sample_facts,
     sample_facts_to_jsonable,
 )
-from clankerprof.model import Frame
+from clankerprof.model import Frame, ValueType
 from clankerprof.proto import decode_profile_bytes, load_profile
 from clankerprof.render import (
     render_boundary_json,
@@ -574,14 +574,171 @@ def test_clankerprof_sample_facts_import_rejects_malformed_frames() -> None:
     samples = cast(list[dict[str, object]], exported["samples"])
     samples[0]["stack"] = ["not-a-frame"]
 
-    with pytest.raises(ValueError, match="Each sample fact frame must be an object"):
+    with pytest.raises(ValueError, match="stack entries must be frame indexes"):
         loads_sample_facts(json.dumps(exported))
 
     exported = sample_facts_to_jsonable(profile.to_sample_facts())
     samples = cast(list[dict[str, object]], exported["samples"])
-    samples[0]["primary_value"] = 1
-    with pytest.raises(ValueError, match="primary value does not match"):
+    samples[0]["stack"] = [10_000]
+    with pytest.raises(ValueError, match="frame index 10000 is out of range"):
         loads_sample_facts(json.dumps(exported))
+
+    exported = sample_facts_to_jsonable(profile.to_sample_facts())
+    frames = cast(list[list[object]], exported["frames"])
+    frames[0] = frames[0][:5]
+    with pytest.raises(ValueError, match="six-element array"):
+        loads_sample_facts(json.dumps(exported))
+
+    exported = sample_facts_to_jsonable(profile.to_sample_facts())
+    summary = cast(dict[str, object], exported["summary"])
+    summary["total_primary_value"] = 1
+    with pytest.raises(ValueError, match="summary total does not match"):
+        loads_sample_facts(json.dumps(exported))
+
+
+def _multi_value_profile_bytes(
+    *,
+    default_sample_type: str | None = None,
+    packed_samples: bool = False,
+) -> bytes:
+    builder = PprofFixtureBuilder.create(
+        sample_types=(("samples", "count"), ("cpu", "nanoseconds")),
+        default_sample_type=default_sample_type,
+        period_type=("cpu", "nanoseconds"),
+        period=10_000_000,
+    )
+    handler = builder.location(
+        builder.function("RequestHandler#call", "/srv/app/handler.py")
+    )
+    worker = builder.location(builder.function("Worker#perform", "/srv/app/worker.py"))
+    builder.sample((worker, handler), (3, 30_000_000))
+    builder.sample((handler,), (2, 20_000_000))
+    return builder.encode(packed_samples=packed_samples)
+
+
+def test_clankerprof_primary_value_defaults_to_last_value_type() -> None:
+    profile = decode_profile_bytes(_multi_value_profile_bytes())
+    assert profile.sample_types == (
+        ValueType(type_name="samples", unit="count"),
+        ValueType(type_name="cpu", unit="nanoseconds"),
+    )
+    assert profile.period_type == ValueType(type_name="cpu", unit="nanoseconds")
+    assert profile.period == 10_000_000
+    assert profile.primary_value_index == 1
+
+    facts = profile.to_sample_facts()
+    assert facts.total_primary_value == 50_000_000
+    assert [fact.primary_value for fact in facts.samples] == [30_000_000, 20_000_000]
+
+
+def test_clankerprof_primary_value_honors_default_sample_type() -> None:
+    profile = decode_profile_bytes(
+        _multi_value_profile_bytes(default_sample_type="samples")
+    )
+    assert profile.default_sample_type == "samples"
+    assert profile.primary_value_index == 0
+    assert profile.to_sample_facts().total_primary_value == 5
+
+
+def test_clankerprof_primary_value_unknown_default_falls_back_to_last() -> None:
+    profile = decode_profile_bytes(
+        _multi_value_profile_bytes(default_sample_type="walltime")
+    )
+    assert profile.primary_value_index == 1
+    assert profile.to_sample_facts().total_primary_value == 50_000_000
+
+
+def test_clankerprof_decodes_packed_sample_encoding_identically() -> None:
+    unpacked = decode_profile_bytes(_multi_value_profile_bytes())
+    packed = decode_profile_bytes(_multi_value_profile_bytes(packed_samples=True))
+    assert packed == unpacked
+
+
+def test_clankerprof_decodes_signed_int64_fields_as_twos_complement() -> None:
+    builder = PprofFixtureBuilder.create()
+    negative_line = builder.location(
+        builder.function("Native#call", "<cfunc>"),
+        line=-1,
+    )
+    builder.sample((negative_line,), -5)
+
+    profile = decode_profile_bytes(builder.encode())
+    frame = profile.stack_for_sample(profile.samples[0])[0]
+    assert frame.line == -1
+    assert profile.samples[0].values == (-5,)
+    assert profile.samples[0].primary_value == -5
+
+
+def test_clankerprof_facts_replay_matches_direct_decode_for_multi_value() -> None:
+    profile = decode_profile_bytes(_multi_value_profile_bytes())
+    facts = profile.to_sample_facts()
+
+    imported = loads_sample_facts(dumps_sample_facts(facts))
+    assert imported == facts
+    assert imported.primary_value_index == 1
+    assert imported.value_types == facts.value_types
+    assert imported.period == 10_000_000
+
+    config = {"RequestHandler#call": {"Workers": "path:srv/app"}}
+    assert render_target_json(
+        analyze_target_facts(imported, config)
+    ) == render_target_json(analyze_target_facts(facts, config))
+
+
+def test_clankerprof_facts_import_accepts_v1_payloads() -> None:
+    payload = {
+        "schema_version": "clankerprof.sample_facts.v1",
+        "tool": "clankerprof_facts",
+        "summary": {
+            "sample_count": 1,
+            "empty_sample_count": 0,
+            "non_empty_sample_count": 1,
+            "total_primary_value": 7,
+        },
+        "samples": [
+            {
+                "sample_index": 0,
+                "primary_value": 7,
+                "values": [7, 9],
+                "location_ids": [1],
+                "is_empty": False,
+                "stack": [
+                    {
+                        "location_id": 1,
+                        "function_id": 1,
+                        "name": "Legacy#call",
+                        "filename": "/srv/app/legacy.py",
+                        "line": 3,
+                        "location_is_folded": False,
+                    }
+                ],
+            }
+        ],
+    }
+
+    imported = loads_sample_facts(json.dumps(payload))
+    assert imported.total_primary_value == 7
+    assert imported.samples[0].stack[0].name == "Legacy#call"
+    assert imported.primary_value_index == 0
+
+
+def test_clankerprof_facts_import_rejects_unknown_schema_version() -> None:
+    with pytest.raises(ValueError, match="Unsupported sample facts schema version"):
+        loads_sample_facts(
+            json.dumps({"schema_version": "clankerprof.sample_facts.v9"})
+        )
+
+
+def test_clankerprof_facts_export_is_compact_with_pretty_opt_in() -> None:
+    facts = decode_profile_bytes(_multi_value_profile_bytes()).to_sample_facts()
+
+    compact = dumps_sample_facts(facts)
+    assert "\n" not in compact
+    assert '"schema_version":"clankerprof.sample_facts.v2"' in compact
+
+    pretty = dumps_sample_facts(facts, pretty=True)
+    assert pretty.startswith("{\n  ")
+    assert json.loads(pretty) == json.loads(compact)
 
 
 @covers("M9-001", "M9-006")
@@ -2225,6 +2382,7 @@ def test_clankerprof_operator_skill_documents_portable_workflow() -> None:
     rendered = skill.read_text(encoding="utf-8")
     for phrase in [
         "docs/CLANKERPROF_SPEC.md",
+        "clankerprof.sample_facts.v2",
         "clankerprof.sample_facts.v1",
         "runtime-rules.yml",
         "caller_fallback_name_prefixes",

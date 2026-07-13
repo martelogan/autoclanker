@@ -16,6 +16,31 @@ class Function:
 
 
 @dataclass(frozen=True, slots=True)
+class ValueType:
+    type_name: str
+    unit: str
+
+
+def select_primary_value_index(
+    sample_types: tuple[ValueType, ...],
+    default_sample_type: str,
+) -> int:
+    """Pick the value index projections aggregate, per pprof convention.
+
+    `default_sample_type` wins when it names a declared sample type; otherwise
+    the last declared type is the default. Profiles that declare no sample
+    types keep index 0.
+    """
+    if default_sample_type:
+        for index, value_type in enumerate(sample_types):
+            if value_type.type_name == default_sample_type:
+                return index
+    if sample_types:
+        return len(sample_types) - 1
+    return 0
+
+
+@dataclass(frozen=True, slots=True)
 class Frame:
     location_id: int
     function_id: int
@@ -29,10 +54,15 @@ class Frame:
 class Sample:
     location_ids: tuple[int, ...]
     values: tuple[int, ...]
+    primary_index: int = 0
 
     @property
     def primary_value(self) -> int:
-        return self.values[0] if self.values else 0
+        if not self.values:
+            return 0
+        if 0 <= self.primary_index < len(self.values):
+            return self.values[self.primary_index]
+        return self.values[0]
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +89,11 @@ class ProfileFacts:
     samples: tuple[SampleFact, ...]
     total_primary_value: TimeNs
     empty_sample_count: int
+    value_types: tuple[ValueType, ...] = ()
+    period_type: ValueType | None = None
+    period: int = 0
+    default_sample_type: str = ""
+    primary_value_index: int = 0
 
     @property
     def non_empty_sample_count(self) -> int:
@@ -81,6 +116,11 @@ class Profile:
     functions: dict[int, Function]
     locations: dict[int, Location]
     samples: tuple[Sample, ...]
+    sample_types: tuple[ValueType, ...] = ()
+    period_type: ValueType | None = None
+    period: int = 0
+    default_sample_type: str = ""
+    primary_value_index: int = 0
 
     def stack_for_sample(self, sample: Sample) -> tuple[Frame, ...]:
         frames: list[Frame] = []
@@ -117,6 +157,11 @@ class Profile:
             samples=facts,
             total_primary_value=sum(fact.primary_value for fact in facts),
             empty_sample_count=sum(1 for fact in facts if fact.is_empty),
+            value_types=self.sample_types,
+            period_type=self.period_type,
+            period=self.period,
+            default_sample_type=self.default_sample_type,
+            primary_value_index=self.primary_value_index,
         )
 
     def sample_facts(self) -> tuple[SampleFact, ...]:

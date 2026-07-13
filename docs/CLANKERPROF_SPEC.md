@@ -23,11 +23,31 @@ must preserve:
 
 - sparse pprof function IDs and location IDs;
 - sample order and stable zero-based `sample_index`;
-- all sample values, with `values[0]` as the primary CPU value;
+- all sample values, plus the profile's declared `sample_type` value types,
+  `period_type`, `period`, and `default_sample_type`;
 - pprof leaf-to-root location order;
 - all inline frames from each location, in pprof line order;
 - function name, system name, filename, start line, sample line, and folded
   location marker when present.
+
+Signed pprof `int64` fields (sample values, line numbers, start lines,
+`period`) decode as two's-complement 64-bit integers; a varint encoding of
+`-1` must decode as `-1`, never as `2^64 - 1`.
+
+### Primary-value selection
+
+Projections aggregate exactly one value per sample, the *primary value*,
+selected once per profile:
+
+1. If `default_sample_type` is set and names a declared sample type, the
+   primary value index is that type's position.
+2. Otherwise the primary value index is the **last** declared sample type
+   (pprof convention — e.g. Go CPU profiles declare
+   `[samples/count, cpu/nanoseconds]` and mean nanoseconds).
+3. Profiles that declare no sample types use index 0.
+
+Samples missing a value at the selected index fall back to `values[0]`
+(or `0` when the sample has no values at all).
 
 The decoder must not assume IDs are contiguous array indexes. Optimized
 implementations can build indexes, but indexes must be derived from profile IDs
@@ -39,8 +59,11 @@ without changing visible facts.
 current schema version is:
 
 ```json
-"clankerprof.sample_facts.v1"
+"clankerprof.sample_facts.v2"
 ```
+
+The artifact is compact JSON with sorted keys by default; `--pretty` opts in
+to indented output. Both encodings parse identically.
 
 Top-level fields:
 
@@ -48,36 +71,57 @@ Top-level fields:
 | --- | --- |
 | `schema_version` | Exact schema identifier. Readers must reject unknown versions. |
 | `tool` | Producer identifier, currently `clankerprof_facts`. |
+| `profile.value_types` | Declared sample value types, each `{"type", "unit"}`. |
+| `profile.period_type` | Declared period type (`{"type", "unit"}`) or `null`. |
+| `profile.period` | Declared sampling period, `0` when absent. |
+| `profile.default_sample_type` | Declared default sample type name, `""` when absent. |
+| `profile.primary_value_index` | Selected primary value index (see primary-value selection). |
 | `summary.sample_count` | Number of decoded samples. |
 | `summary.empty_sample_count` | Samples whose stack could not be decoded. |
 | `summary.non_empty_sample_count` | Decoded samples with at least one frame. |
 | `summary.total_primary_value` | Sum of primary sample values. |
+| `strings` | Interned string table for frame names and filenames. |
+| `frames` | Interned frame table; stacks reference rows by index. |
 | `samples` | Ordered sample fact array. |
+
+Each `frames` row is a six-element array:
+
+```json
+[location_id, function_id, name_index, filename_index, line, location_is_folded]
+```
+
+where `name_index` and `filename_index` point into `strings`, `line` is the
+sample line number (otherwise `0`), and `location_is_folded` is the pprof
+folded-location marker. Interning order is normative so exports are
+byte-comparable across implementations: samples in order, stack frames in
+order; each new frame interns its name, then its filename, then appends its
+own row.
 
 Each sample contains:
 
 | Field | Meaning |
 | --- | --- |
 | `sample_index` | Stable zero-based index from the original profile order. |
-| `primary_value` | First sample value, used as CPU time by current projections. |
 | `values` | All raw sample values. |
 | `location_ids` | Raw pprof location IDs for the sample. |
-| `is_empty` | Whether the decoded stack is empty. |
-| `stack` | Leaf-to-root decoded frames. |
+| `stack` | Leaf-to-root frame indexes into `frames`. |
 
-Each frame contains:
-
-| Field | Meaning |
-| --- | --- |
-| `location_id` | Original pprof location ID. |
-| `function_id` | Original pprof function ID. |
-| `name` | Function name. |
-| `filename` | Source or pseudo path. |
-| `line` | Sample line number when available, otherwise `0`. |
-| `location_is_folded` | pprof folded-location marker. |
+Per-sample primary values and emptiness are derived on import:
+`primary_value = values[profile.primary_value_index]` (with the fallbacks from
+primary-value selection) and `is_empty = stack == []`. Importers must validate
+frame and string indexes, reject non-integer stack entries, and reject
+summaries that disagree with the reconstructed samples.
 
 Round-tripping this JSON through `loads_sample_facts` must preserve target and
 slice projection outputs.
+
+### Legacy v1 imports
+
+Readers must continue to accept `clankerprof.sample_facts.v1` payloads
+(denormalized per-sample `primary_value`/`is_empty`/frame objects). v1
+predates value-type metadata: v1 samples keep `values[0]` as their primary
+value, preserving the meaning the artifact had when it was produced. Writers
+always emit v2.
 
 ## Fact index contract
 
@@ -285,9 +329,9 @@ spec. The crate must treat Python `clankerprof` as the reference until the Rust
 core has equivalent coverage for every public projection. Its stable surfaces
 currently include `clankerprof-rs facts`, generic `targets`, generic `slices`,
 and `compare`; Python scope decomposition is not yet a Rust parity surface.
-The facts command emits the same `clankerprof.sample_facts.v1` payload as
-Python for raw profiles, gzipped profiles, inline frames, folded locations, and
-sparse pprof IDs.
+The facts command emits the same `clankerprof.sample_facts.v2` payload as
+Python for raw profiles, gzipped profiles, inline frames, folded locations,
+sparse pprof IDs, multi-value samples, and packed sample encoding.
 
 Projection work must build on the same Rust fact model rather than introducing
 separate tree or opportunity accounting. Any future Rust target, slice, compare,

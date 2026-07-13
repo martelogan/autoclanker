@@ -5,7 +5,7 @@ use clankerprof_core::slices::{
 use clankerprof_core::targets::{
     analyze_target_facts, parse_target_config_json, render_target_json,
 };
-use clankerprof_core::{load_profile, sample_facts_to_pretty_json};
+use clankerprof_core::{load_profile, sample_facts_to_compact_json, sample_facts_to_pretty_json};
 use std::collections::BTreeSet;
 use std::env;
 use std::path::PathBuf;
@@ -49,6 +49,7 @@ fn run() -> Result<(), String> {
 fn run_facts(mut args: impl Iterator<Item = String>) -> Result<(), String> {
     let mut profile: Option<PathBuf> = None;
     let mut output: Option<PathBuf> = None;
+    let mut pretty = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--profile" => {
@@ -63,6 +64,7 @@ fn run_facts(mut args: impl Iterator<Item = String>) -> Result<(), String> {
                 };
                 output = Some(PathBuf::from(value));
             }
+            "--pretty" => pretty = true,
             "--help" | "-h" => {
                 println!("{}", usage());
                 return Ok(());
@@ -75,8 +77,12 @@ fn run_facts(mut args: impl Iterator<Item = String>) -> Result<(), String> {
         return Err("--profile is required.".to_string());
     };
     let profile = load_profile(profile_path).map_err(|error| error.to_string())?;
-    let rendered = sample_facts_to_pretty_json(&profile.to_sample_facts())
-        .map_err(|error| error.to_string())?;
+    let facts = profile.to_sample_facts();
+    let rendered = if pretty {
+        sample_facts_to_pretty_json(&facts).map_err(|error| error.to_string())?
+    } else {
+        sample_facts_to_compact_json(&facts).map_err(|error| error.to_string())?
+    };
     if let Some(output_path) = output {
         std::fs::write(output_path, format!("{rendered}\n")).map_err(|error| error.to_string())?;
     } else {

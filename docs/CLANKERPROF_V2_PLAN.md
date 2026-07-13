@@ -254,3 +254,22 @@ promise in-process), benchmark suite vs Python on large synthetic profiles.
 - Resolve the spec/doc drift items (35) in the same PRs that touch the behavior.
 - clankerprof is not a coverage target and its docs are not doc-sync-tested today, but
   `skills/clankerprof-operator` documents the CLI surface — update it with CLI changes.
+
+## Appendix: measured evidence (updated as waves land)
+
+### A1/A4 — facts v2 compact encoding (2026-07-14)
+
+Synthetic profile: 10,000 samples, 200 unique frames, depth 3–25 (seed 7).
+
+| Artifact | Size | Ratio vs raw pprof |
+| --- | --- | --- |
+| pprof raw | 413,560 B | 1.0x |
+| pprof gzipped | 227,970 B | 0.55x |
+| facts v1 (denormalized, indent=2) | — | ~90x (pre-v2 measurement) |
+| facts v2 compact | 1,668,260 B | 4.0x |
+| facts v2 `--pretty` | 4,918,529 B | 11.9x |
+
+Replay speed: decode+to_sample_facts 179.1 ms; v2 facts replay 57.5 ms —
+replay is now 3.1x faster than re-decoding (v1 replay was slower than
+re-decoding). Python and Rust compact exports verified byte-identical,
+including non-ASCII frame names.

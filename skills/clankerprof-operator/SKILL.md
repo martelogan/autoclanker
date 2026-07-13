@@ -123,8 +123,8 @@ cargo test -p clankerprof-core
 
 ## Cross-Language Port Checklist
 
-- Preserve `clankerprof.sample_facts.v1` byte-level semantics, not Python object
-  internals.
+- Preserve `clankerprof.sample_facts.v2` byte-level semantics, not Python object
+  internals; keep accepting legacy `clankerprof.sample_facts.v1` imports.
 - Preserve sparse pprof IDs, inline frames, folded-location markers, sample
   order, all sample values, and leaf-to-root stack order.
 - Implement target, scope/boundary, and slice projections over sample facts, not over

@@ -29,6 +29,11 @@ def _fixture_matrix() -> dict[str, bytes]:
         "inline": _inline_profile_bytes(),
         "folded": _folded_profile_bytes(),
         "sparse": _sparse_profile_bytes(),
+        "multi_value": _multi_value_profile_bytes(),
+        "multi_value_default": _multi_value_profile_bytes(
+            default_sample_type="samples"
+        ),
+        "packed": _multi_value_profile_bytes(packed_samples=True),
     }
 
 
@@ -65,6 +70,26 @@ def _folded_profile_bytes() -> bytes:
     )
     builder.sample((folded_leaf, target), 6_000_000)
     return builder.encode()
+
+
+def _multi_value_profile_bytes(
+    *,
+    default_sample_type: str | None = None,
+    packed_samples: bool = False,
+) -> bytes:
+    builder = PprofFixtureBuilder.create(
+        sample_types=(("samples", "count"), ("cpu", "nanoseconds")),
+        default_sample_type=default_sample_type,
+        period_type=("cpu", "nanoseconds"),
+        period=10_000_000,
+    )
+    handler = builder.location(
+        builder.function("RequestHandler#call", "/srv/app/handler.py")
+    )
+    worker = builder.location(builder.function("Worker#perform", "/srv/app/worker.py"))
+    builder.sample((worker, handler), (3, 30_000_000))
+    builder.sample((handler,), (2, 20_000_000))
+    return builder.encode(packed_samples=packed_samples)
 
 
 def _sparse_profile_bytes() -> bytes:

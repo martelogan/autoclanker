@@ -18,6 +18,9 @@ behavior must not define or override target-attribution semantics.
 | Capability | Status | Test coverage |
 | --- | --- | --- |
 | Raw and gzipped pprof profile decoding without generated protobuf runtime files | covered | `test_clankerprof_decodes_raw_and_gzipped_pprof_profiles` |
+| Value-type metadata (`sample_type`, `period_type`, `period`, `default_sample_type`) selects the primary value per pprof convention | covered | `test_clankerprof_primary_value_defaults_to_last_value_type`, `test_clankerprof_primary_value_honors_default_sample_type`, `test_clankerprof_primary_value_unknown_default_falls_back_to_last` |
+| Packed varint sample encoding decodes identically to unpacked encoding | covered | `test_clankerprof_decodes_packed_sample_encoding_identically` |
+| Signed int64 protobuf fields (sample values, line numbers) decode as two's-complement | covered | `test_clankerprof_decodes_signed_int64_fields_as_twos_complement` |
 | Inline frames from repeated `Location.line` entries participate in leaf-to-root target traversal | covered | `test_clankerprof_expands_inline_location_frames_for_target_traversal` |
 | First-class sample-facts API exposes per-sample value, leaf-to-root stack, inline frames, and stable sample index | covered | `test_clankerprof_sample_facts_are_the_shared_projection_surface` |
 | Versioned sample-facts JSON export/import preserves projection behavior and rejects malformed frame entries | covered | `test_clankerprof_sample_facts_export_round_trips_projection_inputs`, `test_clankerprof_sample_facts_import_rejects_malformed_frames` |

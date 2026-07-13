@@ -21,9 +21,9 @@ file — it is the single source of execution state.
 | A1-01 | Spec decision recorded: recursive target frames count once per sample per parent (item 1) | SPEC.md clankerprof section | todo | |
 | A1-02 | Python targets: recursion no longer multiply-counts sample values (item 1) | tests/test_clankerprof.py::test_targets_recursive_frames_count_once_per_sample | todo | dedup per (parent, target) per sample |
 | A1-03 | Rust targets: same recursion fix, parity-pinned (item 1) | tests/test_clankerprof_rust_parity.py recursion fixture | todo | mirrors A1-02 |
-| A1-04 | Python decodes sample_type/period_type/period/default_sample_type; primary value honors default_sample_type else last value type (item 2) | test_primary_value_uses_default_sample_type; test_primary_value_defaults_to_last_value_type | todo | Go CPU profiles must stop reporting counts as ns |
-| A1-05 | Rust decodes the same fields with identical selection (item 2) | parity multi-value fixture test | todo | proto.rs fields 1/11/12/14 |
-| A1-06 | Facts carry value-type metadata so replay == direct decode; SAMPLE_FACTS_SCHEMA_VERSION bumped symmetrically (v2) with v1 import kept | replay-identity multi-value test; v1-import test | todo | single bump coordinated with A4-02 |
+| A1-04 | Python decodes sample_type/period_type/period/default_sample_type; primary value honors default_sample_type else last value type (item 2) | test_clankerprof_primary_value_defaults_to_last_value_type; test_clankerprof_primary_value_honors_default_sample_type; test_clankerprof_primary_value_unknown_default_falls_back_to_last | done | selection rule spec'd in CLANKERPROF_SPEC.md |
+| A1-05 | Rust decodes the same fields with identical selection (item 2) | parity fixtures multi_value / multi_value_default / packed | done | proto.rs fields 1/11/12/14 |
+| A1-06 | Facts carry value-type metadata so replay == direct decode; SAMPLE_FACTS_SCHEMA_VERSION bumped symmetrically (v2) with v1 import kept | test_clankerprof_facts_replay_matches_direct_decode_for_multi_value; test_clankerprof_facts_import_accepts_v1_payloads; test_clankerprof_facts_import_rejects_unknown_schema_version | done | v2 byte-identical Python↔Rust (verified incl. unicode) |
 | A1-07 | `--no-enhanced` under generic runtime must not load the ruby pack (item 3) | test_no_enhanced_generic_runtime_keeps_generic_rules | todo | cli.py _runtime_rules |
 | A1-08 | Semantic rule matching spec'd + fixed: `name_contains` no longer claims app-path frames; `name_prefixes` meaningful (item 4) | test_semantic_rules_do_not_claim_app_frames_by_substring | todo | matching contract goes in SPEC.md |
 | A1-09 | `special_namespace_prefixes` guard also covers bare module-function names (item 5) | test_special_namespace_guard_bare_module_names | todo | Zlib.inflate etc. |
@@ -34,7 +34,7 @@ file — it is the single source of execution state.
 | A1-14 | Compare emits finite JSON only: new/removed rows use `delta_rel: null` + `"status"`; Python and Rust identical (items 10, 24) | test_compare_new_row_finite_json; parity new/removed-rows test | todo | no bare Infinity anywhere |
 | A1-15 | `compare_boundary_json` orders top_improvements correctly, never drops the largest (item 11) | test_boundary_compare_top_improvements_ordering | todo | |
 | A1-16 | Compare validates payload types; mismatched/wrong `tool` → exit 2 envelope in both languages (items 12, 24) | test_compare_rejects_wrong_payload_types; parity tool-mismatch test | todo | |
-| A1-17 | Python decodes signed int64 protobuf fields as two's-complement, matching Rust (item 21) | test_signed_int64_fields_twos_complement | todo | line = -1 case |
+| A1-17 | Python decodes signed int64 protobuf fields as two's-complement, matching Rust (item 21) | test_clankerprof_decodes_signed_int64_fields_as_twos_complement | done | line/value = -1 decode as -1 |
 | A1-18 | Rust uses insertion-ordered maps wherever Python relies on insertion order: rule/category precedence, ranked-array tie order (item 19) | parity category-precedence + tie-order test | todo | indexmap |
 
 ## Wave A2 — CLI / error contract
@@ -66,7 +66,7 @@ file — it is the single source of execution state.
 | ID | Requirement | Verify | Status | Notes |
 | --- | --- | --- | --- | --- |
 | A4-01 | Frames interned at decode (unique-frame table, occurrences reference it); `Profile.sample_facts()` memoized (item 25) | identity test + perf evidence | todo | |
-| A4-02 | Facts v2 compact encoding: string/frame tables + per-sample index lists; compact separators by default, `--pretty` opt-in (item 28) | size ratio recorded; replay identity tests | todo | same bump as A1-06 |
+| A4-02 | Facts v2 compact encoding: string/frame tables + per-sample index lists; compact separators by default, `--pretty` opt-in (item 28) | size ratio recorded; replay identity tests | done | 4.0x raw pprof (was ~90x); replay 3.1x faster than re-decode (plan appendix) |
 | A4-03 | Boundary loop: predicate exprs normalized once at config parse; exclude-descendants pass skipped when no boundary uses it (item 26) | equivalence tests + perf evidence | todo | |
 | A4-04 | Benchmark evidence recorded (large synthetic profile, before/after) in plan doc appendix | docs/CLANKERPROF_V2_PLAN.md appendix | todo | |
 

@@ -45,6 +45,7 @@ from clankerprof.facts import (
     SampleFactsInput,
     read_sample_facts,
     sample_facts_to_jsonable,
+    write_sample_facts,
 )
 from clankerprof.model import CategoryStats
 from clankerprof.proto import load_profile
@@ -1111,12 +1112,10 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
 
 def run_facts(args: argparse.Namespace) -> dict[str, Any]:
     profile = load_profile(args.profile)
-    payload = sample_facts_to_jsonable(profile.to_sample_facts())
+    facts = profile.to_sample_facts()
+    payload = sample_facts_to_jsonable(facts)
     if args.output:
-        Path(args.output).write_text(
-            render_json_payload(cast(dict[str, Any], payload)) + "\n",
-            encoding="utf-8",
-        )
+        write_sample_facts(args.output, facts, pretty=bool(args.pretty))
         return {
             "tool": "clankerprof_facts",
             "ok": True,
@@ -1351,6 +1350,11 @@ def register_commands(subparsers: Any) -> None:
     )
     facts.add_argument("--profile", required=True)
     facts.add_argument("--output")
+    facts.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Indent the facts artifact for humans (default is compact JSON).",
+    )
     facts.set_defaults(handler=run_facts)
 
 
