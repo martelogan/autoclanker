@@ -1,0 +1,146 @@
+# clankerprof v2 — requirements tracker
+
+Execution tracker for `docs/CLANKERPROF_V2_PLAN.md`. Every row is a checkable
+requirement; `(item N)` references the plan's confirmed-defect inventory.
+
+**Deterministic goal:** `python3 scripts/clankerprof_v2_goal.py --goal` exits 0
+only when every row below is `done` (or `dropped` with a reason in Notes) AND
+`./bin/dev check` AND `cargo test --workspace` pass.
+
+Status vocabulary: `todo` | `doing` | `done` | `blocked` | `dropped`.
+
+Checkpoint protocol: work lands in small clusters on branch `clankerprof-v2`;
+each cluster is committed only when the focused tests for its rows are green;
+statuses flip to `done` in the same commit. On interruption, resume from this
+file — it is the single source of execution state.
+
+## Wave A1 — semantics + contract
+
+| ID | Requirement | Verify | Status | Notes |
+| --- | --- | --- | --- | --- |
+| A1-01 | Spec decision recorded: recursive target frames count once per sample per parent (item 1) | SPEC.md clankerprof section | todo | |
+| A1-02 | Python targets: recursion no longer multiply-counts sample values (item 1) | tests/test_clankerprof.py::test_targets_recursive_frames_count_once_per_sample | todo | dedup per (parent, target) per sample |
+| A1-03 | Rust targets: same recursion fix, parity-pinned (item 1) | tests/test_clankerprof_rust_parity.py recursion fixture | todo | mirrors A1-02 |
+| A1-04 | Python decodes sample_type/period_type/period/default_sample_type; primary value honors default_sample_type else last value type (item 2) | test_primary_value_uses_default_sample_type; test_primary_value_defaults_to_last_value_type | todo | Go CPU profiles must stop reporting counts as ns |
+| A1-05 | Rust decodes the same fields with identical selection (item 2) | parity multi-value fixture test | todo | proto.rs fields 1/11/12/14 |
+| A1-06 | Facts carry value-type metadata so replay == direct decode; SAMPLE_FACTS_SCHEMA_VERSION bumped symmetrically (v2) with v1 import kept | replay-identity multi-value test; v1-import test | todo | single bump coordinated with A4-02 |
+| A1-07 | `--no-enhanced` under generic runtime must not load the ruby pack (item 3) | test_no_enhanced_generic_runtime_keeps_generic_rules | todo | cli.py _runtime_rules |
+| A1-08 | Semantic rule matching spec'd + fixed: `name_contains` no longer claims app-path frames; `name_prefixes` meaningful (item 4) | test_semantic_rules_do_not_claim_app_frames_by_substring | todo | matching contract goes in SPEC.md |
+| A1-09 | `special_namespace_prefixes` guard also covers bare module-function names (item 5) | test_special_namespace_guard_bare_module_names | todo | Zlib.inflate etc. |
+| A1-10 | `slice:`/`!slice:` filters evaluate with descendant attribution semantics (item 6) | test_slice_filter_respects_descendant_attribution | todo | |
+| A1-11 | Multiple `default: true` slices rejected at config validation (item 7) | test_duplicate_default_slices_rejected | todo | exit 2 envelope |
+| A1-12 | `native:<value>` predicate honors its value; `native:false` = not native (item 8) | test_native_predicate_value_honored | todo | |
+| A1-13 | Fold-heuristic window spec'd over pre-inline frames; outcome independent of inline expansion (item 9) | test_fold_heuristic_ignores_inline_expansion | todo | SPEC.md fold rule |
+| A1-14 | Compare emits finite JSON only: new/removed rows use `delta_rel: null` + `"status"`; Python and Rust identical (items 10, 24) | test_compare_new_row_finite_json; parity new/removed-rows test | todo | no bare Infinity anywhere |
+| A1-15 | `compare_boundary_json` orders top_improvements correctly, never drops the largest (item 11) | test_boundary_compare_top_improvements_ordering | todo | |
+| A1-16 | Compare validates payload types; mismatched/wrong `tool` → exit 2 envelope in both languages (items 12, 24) | test_compare_rejects_wrong_payload_types; parity tool-mismatch test | todo | |
+| A1-17 | Python decodes signed int64 protobuf fields as two's-complement, matching Rust (item 21) | test_signed_int64_fields_twos_complement | todo | line = -1 case |
+| A1-18 | Rust uses insertion-ordered maps wherever Python relies on insertion order: rule/category precedence, ranked-array tie order (item 19) | parity category-precedence + tie-order test | todo | indexmap |
+
+## Wave A2 — CLI / error contract
+
+| ID | Requirement | Verify | Status | Notes |
+| --- | --- | --- | --- | --- |
+| A2-01 | Typed error boundary: gzip/EOF/zlib, missing file, YAML, facts-KeyError/validation → exit 2 JSON envelope (item 14) | test_error_envelope_{truncated_gzip,missing_file,bad_yaml,bad_facts} | todo | no tracebacks on contracted errors |
+| A2-02 | `--format csv/text` without `--output`: raw payload only on stdout, never mixed with the JSON envelope (item 13) | test_csv_format_stdout_not_mixed_with_envelope | todo | contract goes in SPEC.md |
+| A2-03 | Standalone `clankerprof --output` before subcommand honored like the umbrella CLI (item 15) | test_standalone_global_output_normalized | todo | |
+| A2-04 | Filter/collapse shape validation always on, even with no slices config (item 16) | test_filter_validation_without_slices_config | todo | empty `name:` rejected |
+| A2-05 | `--target-csv-layout=compat` with `--format json` explicitly rejected (item 17) | test_csv_layout_compat_requires_csv_format | todo | |
+| A2-06 | Decoder robustness in both languages: truncated fixed32/64 rejected; varint >10 bytes rejected before shift overflow (items 18, 20) | test_decoder_rejects_truncated_and_overlong; cargo proto tests | todo | |
+| A2-07 | Rule packs strict: unknown keys rejected, `runtime_rules.v1` version field required-or-defaulted (item 32) | test_rule_pack_strict_keys_and_version | todo | Python now; Rust in B1 |
+| A2-08 | Rust CLI parses arguments strictly via clap, rejecting what Python rejects (item 23) | parity malformed-flags test | todo | |
+
+## Wave A3 — architecture
+
+| ID | Requirement | Verify | Status | Notes |
+| --- | --- | --- | --- | --- |
+| A3-01 | `analysis.py` split into `patterns.py`, `categorize.py`, `targets.py`, `slices.py`, `scopes.py`; `analysis.py` stays as re-export shim (item 29) | import-compat test | todo | no public-API break |
+| A3-02 | One categorization engine; `_target_category`/`_boundary_category` duplicates deleted (item 29) | test_categorize_engine_shared | todo | |
+| A3-03 | Slice filter/collapse DSL retyped on FramePredicate, parsed once, memoized per unique frame (items 30, 27) | equivalence tests over existing slice fixtures | todo | kills per-occurrence parsing |
+| A3-04 | Projection accumulators moved out of `model.py` into the projection layer (item 31) | model.py contains model only | todo | |
+| A3-05 | `__init__.py` exports the real public API (decode/facts/projections/compare) (item 33) | test_public_api_exports | todo | |
+| A3-06 | Scopes rename finished: scopes primary, boundaries documented legacy alias everywhere (item 34) | grep gate + docs updated | todo | CLI aliases kept |
+
+## Wave A4 — performance
+
+| ID | Requirement | Verify | Status | Notes |
+| --- | --- | --- | --- | --- |
+| A4-01 | Frames interned at decode (unique-frame table, occurrences reference it); `Profile.sample_facts()` memoized (item 25) | identity test + perf evidence | todo | |
+| A4-02 | Facts v2 compact encoding: string/frame tables + per-sample index lists; compact separators by default, `--pretty` opt-in (item 28) | size ratio recorded; replay identity tests | todo | same bump as A1-06 |
+| A4-03 | Boundary loop: predicate exprs normalized once at config parse; exclude-descendants pass skipped when no boundary uses it (item 26) | equivalence tests + perf evidence | todo | |
+| A4-04 | Benchmark evidence recorded (large synthetic profile, before/after) in plan doc appendix | docs/CLANKERPROF_V2_PLAN.md appendix | todo | |
+
+## Wave A5 — tests
+
+| ID | Requirement | Verify | Status | Notes |
+| --- | --- | --- | --- | --- |
+| A5-01 | Fixture builder covers: packed varints, recursion, multi-value samples, unicode names, deep stacks, inline+folded combos, truncated/corrupt inputs (items 36, 38) | new fixture tests in default lane | todo | packed varints = critical gap |
+| A5-02 | Property/invariant tests: slice totals == profile total; category sums == parent totals; facts round-trip identity (item 38) | invariant tests in test_clankerprof.py | todo | |
+| A5-03 | Every strict-validation branch in facts import covered, incl. unknown schema version (item 38) | coverage of facts.py import paths | todo | |
+| A5-04 | `generic.yml` ↔ Rust generic rules equivalence test (item 38) | parity equivalence test | todo | trivially true after B1 include_str! |
+
+## Wave B0 — Rust defect fixes
+
+| ID | Requirement | Verify | Status | Notes |
+| --- | --- | --- | --- | --- |
+| B0-01 | Insertion-ordered maps replace BTreeMap where order-sensitive (item 19) | alias of A1-18 | todo | flips with A1-18 |
+| B0-02 | Varint shift-overflow guard before the shift (item 20) | alias of A2-06 | todo | flips with A2-06 |
+| B0-03 | clap argument parsing (item 23) | alias of A2-08 | todo | flips with A2-08 |
+| B0-04 | No `Regex::new` in per-frame hot loops; rules precompiled once (item 22) | cargo test + code gate | todo | |
+| B0-05 | Compare dispatches on `tool` + finite-JSON contract (items 24, 10) | alias of A1-14/A1-16 | todo | flips with A1-14/16 |
+
+## Wave B1 — Rust rule system
+
+| ID | Requirement | Verify | Status | Notes |
+| --- | --- | --- | --- | --- |
+| B1-01 | YAML rule-pack loading; packaged `generic.yml`/`ruby.yml` via include_str!; hardcoded `RuntimeRuleSet::generic()` deleted | cargo tests + A5-04 equivalence | todo | drift impossible by construction |
+| B1-02 | Core-classes CSV loading + `--core-classes` override | parity test w/ ruby fixture | todo | |
+| B1-03 | `--runtime ruby` + `--runtime-rules <pack>` flags | parity tests vs Python ruby runtime | todo | |
+| B1-04 | Full rule semantics: semantic labels, simplification maps, foldability categories, ordered native_name_category_rules | parity on ruby fixtures across projections | todo | |
+
+## Wave B2 — Rust scopes/boundaries projection
+
+| ID | Requirement | Verify | Status | Notes |
+| --- | --- | --- | --- | --- |
+| B2-01 | Typed predicate model + expression parser (`any`/`all`/`not`, `cost_kind:`, `runtime_label:`, `slice:`, `native:`, `name:`, `path:`) | cargo tests + parity | todo | |
+| B2-02 | Scopes config: TOML/YAML, preferred+legacy section aliases, mixed-section rejection | scopes config-variant parity tests | todo | |
+| B2-03 | Cost kinds, rollups, owners + sub-buckets, exclude_descendants, once_per_sample, attributables | parity on scopes fixtures | todo | |
+| B2-04 | Frame-identity predicate caching; scopes runs from facts replay identically | scopes facts-replay parity test | todo | |
+| B2-05 | Scope/boundary compare with gates in Rust | boundary-compare parity test | todo | |
+
+## Wave B3 — Rust target/slice completeness
+
+| ID | Requirement | Verify | Status | Notes |
+| --- | --- | --- | --- | --- |
+| B3-01 | `--fold-runtime-internals` + folded-from accounting | parity tests | todo | |
+| B3-02 | `--track-semantic-callers` + semantic-caller CSV; caller-to-leaf pairs; callsite stdlib-skipping | parity tests | todo | |
+| B3-03 | `--no-enhanced` / caller-fallback prefixes; `--cpu-attributables`; minimal `--target` mode | parity tests | todo | |
+| B3-04 | Output formats: csv / simple-csv / text; `--target-csv-layout compat` | byte-level parity tests | todo | |
+| B3-05 | Slice config files + `./slices.yml` discovery; `--by-slice` grammar; attribute/virtual-slice validation; GC/uncollapsible pseudo-slices; unattributed libraries | parity tests | todo | |
+
+## Wave B4 — parity harness v2
+
+| ID | Requirement | Verify | Status | Notes |
+| --- | --- | --- | --- | --- |
+| B4-01 | Shared fixture corpus with Python-generated goldens; byte-level output comparison | tests/test_clankerprof_rust_parity.py rewritten | todo | |
+| B4-02 | Flag-matrix sweep per subcommand (not one pinned combo) | parity matrix test | todo | |
+| B4-03 | Native Rust unit tests exist and run (`cargo test` > 0 tests) | cargo test output | todo | currently 0 tests |
+| B4-04 | Cargo lane wired into `bin/dev` (`test-rust`) and `check` when cargo present | scripts/check.sh runs it | todo | check stays green without cargo |
+
+## Wave B5 — Rust-native performance
+
+| ID | Requirement | Verify | Status | Notes |
+| --- | --- | --- | --- | --- |
+| B5-01 | String-interning arena for names/paths; RegexSet for rule matching | timing evidence | todo | |
+| B5-02 | Single-pass multi-projection mode: decode once → targets+slices+scopes in one invocation | parity + cargo tests | todo | |
+| B5-03 | Benchmark vs Python on large synthetic profiles; results recorded in plan appendix | docs/CLANKERPROF_V2_PLAN.md appendix | todo | |
+
+## Wave G — governance / docs
+
+| ID | Requirement | Verify | Status | Notes |
+| --- | --- | --- | --- | --- |
+| G-01 | SPEC.md records every spec decision (recursion, value-type selection, compare contract, int64, rule matching, fold window, csv/text stream contract); item-35 drift resolved | doc review + doc-sync tests | todo | |
+| G-02 | docs/CLANKERPROF_PARITY.md matrix: every capability row has an explicit Rust column ("covered"+fixture or "not claimed") | doc review | todo | |
+| G-03 | skills/clankerprof-operator updated to final CLI surface | skill-sync tests pass | todo | |
+| G-04 | SAMPLE_FACTS_SCHEMA_VERSION symmetric Python↔Rust, enforced by a test | parity version test | todo | |
+| G-05 | README / docs / CLAUDE.md updated where behavior descriptions changed (Rust no longer "lightweight subset") | doc-sync tests + review | todo | |
