@@ -18,9 +18,9 @@ file — it is the single source of execution state.
 
 | ID | Requirement | Verify | Status | Notes |
 | --- | --- | --- | --- | --- |
-| A1-01 | Spec decision recorded: recursive target frames count once per sample per parent (item 1) | SPEC.md clankerprof section | todo | |
-| A1-02 | Python targets: recursion no longer multiply-counts sample values (item 1) | tests/test_clankerprof.py::test_targets_recursive_frames_count_once_per_sample | todo | dedup per (parent, target) per sample |
-| A1-03 | Rust targets: same recursion fix, parity-pinned (item 1) | tests/test_clankerprof_rust_parity.py recursion fixture | todo | mirrors A1-02 |
+| A1-01 | Spec decision recorded: recursive target frames count once per sample per parent (item 1) | CLANKERPROF_SPEC.md target projection contract | done | "once per matching parent" rule |
+| A1-02 | Python targets: recursion no longer multiply-counts sample values (item 1) | test_clankerprof_targets_recursive_frames_count_once_per_sample | done | dedup by target name per sample |
+| A1-03 | Rust targets: same recursion fix, parity-pinned (item 1) | targets parity test, recursive case | done | mirrors A1-02 |
 | A1-04 | Python decodes sample_type/period_type/period/default_sample_type; primary value honors default_sample_type else last value type (item 2) | test_clankerprof_primary_value_defaults_to_last_value_type; test_clankerprof_primary_value_honors_default_sample_type; test_clankerprof_primary_value_unknown_default_falls_back_to_last | done | selection rule spec'd in CLANKERPROF_SPEC.md |
 | A1-05 | Rust decodes the same fields with identical selection (item 2) | parity fixtures multi_value / multi_value_default / packed | done | proto.rs fields 1/11/12/14 |
 | A1-06 | Facts carry value-type metadata so replay == direct decode; SAMPLE_FACTS_SCHEMA_VERSION bumped symmetrically (v2) with v1 import kept | test_clankerprof_facts_replay_matches_direct_decode_for_multi_value; test_clankerprof_facts_import_accepts_v1_payloads; test_clankerprof_facts_import_rejects_unknown_schema_version | done | v2 byte-identical Python↔Rust (verified incl. unicode) |

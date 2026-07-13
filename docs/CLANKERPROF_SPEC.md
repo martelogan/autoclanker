@@ -189,7 +189,10 @@ and which higher-level caller made it matter?”
 For each sample:
 
 - find every configured parent frame contained in the stack;
-- attribute the full primary sample value to each matching parent;
+- attribute the full primary sample value **once per matching parent**: a
+  parent appearing multiple times in one stack (direct or indirect recursion)
+  still receives the sample value exactly once, so a parent's total can never
+  exceed the profile total;
 - start from the leaf frame as the self-time owner;
 - optionally label the leaf using runtime rules;
 - optionally fold runtime-internal leaves into the first meaningful caller;

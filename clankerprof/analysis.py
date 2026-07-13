@@ -910,7 +910,11 @@ def analyze_target_facts(
         target_frames = index.target_frames(fact, target_names)
         if not target_frames:
             continue
+        seen_targets: set[str] = set()
         for target_frame in target_frames:
+            if target_frame.name in seen_targets:
+                continue
+            seen_targets.add(target_frame.name)
             parent_results = results.setdefault(target_frame.name, {})
             category, frame_to_categorize, folded, folded_category = _target_category(
                 stack,

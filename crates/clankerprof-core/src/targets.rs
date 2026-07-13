@@ -2,7 +2,7 @@ use crate::facts::{sample_facts_to_json_value, SAMPLE_FACTS_SCHEMA_VERSION};
 use crate::model::{CategoryStats, Frame, FunctionMetrics, ProfileFacts, TimeNs};
 use regex::Regex;
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub type TargetConfig = BTreeMap<String, BTreeMap<String, String>>;
 pub type TargetResults = BTreeMap<String, BTreeMap<String, CategoryStats>>;
@@ -115,7 +115,11 @@ pub fn analyze_target_facts_with_options(
             .stack
             .iter()
             .filter(|frame| config.contains_key(&frame.name));
+        let mut seen_targets: BTreeSet<&str> = BTreeSet::new();
         for target_frame in target_frames {
+            if !seen_targets.insert(target_frame.name.as_str()) {
+                continue;
+            }
             let parent_results = results.entry(target_frame.name.clone()).or_default();
             let category = target_category(
                 leaf,

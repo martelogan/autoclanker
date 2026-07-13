@@ -616,6 +616,30 @@ def _multi_value_profile_bytes(
     return builder.encode(packed_samples=packed_samples)
 
 
+def _recursive_target_profile_bytes() -> bytes:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("Target#render", "/srv/app/target.py"))
+    helper = builder.location(builder.function("Helper#step", "/srv/app/helper.py"))
+    leaf = builder.location(builder.function("Leaf#work", "/srv/app/leaf.py"))
+    builder.sample((leaf, target, helper, target), 8_000_000)
+    builder.sample((leaf, target), 2_000_000)
+    return builder.encode()
+
+
+def test_clankerprof_targets_recursive_frames_count_once_per_sample() -> None:
+    profile = decode_profile_bytes(_recursive_target_profile_bytes())
+    config = {"Target#render": {"App": "path:srv/app"}}
+
+    categories = analyze_targets(profile, config)["Target#render"]
+    total = sum(stats.cpu_time for stats in categories.values())
+    assert total == 10_000_000
+    assert sum(stats.sample_count for stats in categories.values()) == 2
+
+    rendered = render_target_json(analyze_targets(profile, config))
+    parents = cast(dict[str, Any], rendered["parents"])
+    assert parents["Target#render"]["total_time_ns"] == 10_000_000
+
+
 def test_clankerprof_primary_value_defaults_to_last_value_type() -> None:
     profile = decode_profile_bytes(_multi_value_profile_bytes())
     assert profile.sample_types == (

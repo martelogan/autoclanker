@@ -28,6 +28,7 @@ behavior must not define or override target-attribution semantics.
 | Target projection can consume sample facts directly with identical output to profile-based analysis | covered | `test_clankerprof_target_projection_matches_sample_fact_projection` |
 | Target CLI can replay `clankerprof facts` JSON through standalone and umbrella command surfaces | covered | `test_clankerprof_cli_and_autoclanker_alias_generate_outputs` |
 | Target-contained sample self-time attribution by leaf frame | covered | `test_clankerprof_preserves_target_attribution_parity` |
+| Recursive parent frames attribute the sample value once per sample per parent | covered | `test_clankerprof_targets_recursive_frames_count_once_per_sample` |
 | Complete target accounting with `Other` catch-all | covered | `test_clankerprof_preserves_target_attribution_parity` |
 | Generic request/rendering boundary attribution outside a specific application domain | covered | `test_clankerprof_supports_generic_request_rendering_attribution` |
 | Packaged Ruby core class CSV is used by default for `--runtime ruby`, with explicit override still available | covered | `test_clankerprof_loads_packaged_ruby_core_classes_by_default` |

@@ -140,50 +140,69 @@ def test_clankerprof_rust_facts_match_python_sample_facts(tmp_path: Path) -> Non
         assert rust_payload == python_payload
 
 
+def _recursive_profile_bytes() -> bytes:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("Target#render", "/srv/app/target.py"))
+    helper = builder.location(builder.function("Helper#step", "/srv/app/helper.py"))
+    leaf = builder.location(builder.function("Leaf#work", "/srv/app/leaf.py"))
+    builder.sample((leaf, target, helper, target), 8_000_000)
+    builder.sample((leaf, target), 2_000_000)
+    return builder.encode()
+
+
 @pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
 def test_clankerprof_rust_targets_match_python_generic_projection(
     tmp_path: Path,
 ) -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    profile_bytes = _profile_bytes(gzipped=False)
-    profile_path = tmp_path / "profile.pb"
-    config_path = tmp_path / "targets.json"
-    profile_path.write_bytes(profile_bytes)
-    config = {
-        "RequestHandler#render_response": {
-            "Components": "path:srv/app/components",
-            "Cache Client": "library:cache-client",
-        }
+    cases: dict[str, tuple[bytes, dict[str, dict[str, str]]]] = {
+        "standard": (
+            _profile_bytes(gzipped=False),
+            {
+                "RequestHandler#render_response": {
+                    "Components": "path:srv/app/components",
+                    "Cache Client": "library:cache-client",
+                }
+            },
+        ),
+        "recursive": (
+            _recursive_profile_bytes(),
+            {"Target#render": {"App": "path:srv/app"}},
+        ),
     }
-    config_path.write_text(json.dumps(config), encoding="utf-8")
+    for name, (profile_bytes, config) in cases.items():
+        profile_path = tmp_path / f"{name}.pb"
+        config_path = tmp_path / f"{name}-targets.json"
+        profile_path.write_bytes(profile_bytes)
+        config_path.write_text(json.dumps(config), encoding="utf-8")
 
-    completed = subprocess.run(
-        [
-            "cargo",
-            "run",
-            "--quiet",
-            "-p",
-            "clankerprof-core",
-            "--bin",
-            "clankerprof-rs",
-            "--",
-            "targets",
-            "--profile",
-            str(profile_path),
-            "--config",
-            str(config_path),
-        ],
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+        completed = subprocess.run(
+            [
+                "cargo",
+                "run",
+                "--quiet",
+                "-p",
+                "clankerprof-core",
+                "--bin",
+                "clankerprof-rs",
+                "--",
+                "targets",
+                "--profile",
+                str(profile_path),
+                "--config",
+                str(config_path),
+            ],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
-    rust_payload = json.loads(completed.stdout)
-    python_payload = render_target_json(
-        analyze_targets(decode_profile_bytes(profile_bytes), config)
-    )
-    assert rust_payload == python_payload
+        rust_payload = json.loads(completed.stdout)
+        python_payload = render_target_json(
+            analyze_targets(decode_profile_bytes(profile_bytes), config)
+        )
+        assert rust_payload == python_payload, f"targets parity diverged for {name}"
 
 
 @pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
