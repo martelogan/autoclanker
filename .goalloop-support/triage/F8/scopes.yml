@@ -1,0 +1,4 @@
+cost_kind:
+  Invalid: "bogus:value"
+scope:
+  - function: T

@@ -1,0 +1,42 @@
+{
+  "after_total_ns": 100000000,
+  "before_total_ns": 100000000,
+  "has_regression": false,
+  "slices": [
+    {
+      "after_pct": 100.0,
+      "before_pct": 100.0,
+      "delta_abs": 0.0,
+      "delta_rel": 0.0,
+      "frame_deltas": [
+        {
+          "after_pct": 70.0,
+          "before_pct": 75.0,
+          "delta_abs": -5.0,
+          "function": "other",
+          "slice": "(all)"
+        },
+        {
+          "after_pct": 10.0,
+          "before_pct": 10.0,
+          "delta_abs": 0.0,
+          "function": "f",
+          "slice": "(all)"
+        }
+      ],
+      "name": "(all)",
+      "status": "stable"
+    }
+  ],
+  "tool": "clankerprof_compare",
+  "top_improvements": [
+    {
+      "after_pct": 70.0,
+      "before_pct": 75.0,
+      "delta_abs": -5.0,
+      "function": "other",
+      "slice": "(all)"
+    }
+  ],
+  "top_regressions": []
+}

@@ -1,0 +1,16 @@
+{
+  "tool": "clankerprof_slices",
+  "summary": {"total_time_ns": 100000000},
+  "slices": [
+    {
+      "name": "A",
+      "time_ns": 30000000,
+      "pct": 30.0,
+      "frames": [
+        {"function": "f", "filename": "/one", "line": 1, "time_ns": 10000000, "pct": 10.0},
+        {"function": "f", "filename": "/two", "line": 2, "time_ns": 15000000, "pct": 15.0},
+        {"function": "g", "filename": "/g", "line": 3, "time_ns": 5000000, "pct": 5.0}
+      ]
+    }
+  ]
+}

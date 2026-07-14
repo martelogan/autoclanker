@@ -1,0 +1,5 @@
+cost_kind:
+  AppWork: "name:Leaf"
+scope:
+  - label: bad
+    selector: "bogus:value"

@@ -1,0 +1,27 @@
+{
+  "after_total_ns": 10000000,
+  "before_total_ns": 10000000,
+  "has_regression": false,
+  "slices": [
+    {
+      "after_pct": 100.0,
+      "before_pct": 100.0,
+      "delta_abs": 0.0,
+      "delta_rel": 0.0,
+      "frame_deltas": [
+        {
+          "after_pct": 100.0,
+          "before_pct": 100.0,
+          "delta_abs": 0.0,
+          "function": "Child#work",
+          "slice": "(all)"
+        }
+      ],
+      "name": "(all)",
+      "status": "stable"
+    }
+  ],
+  "tool": "clankerprof_compare",
+  "top_improvements": [],
+  "top_regressions": []
+}

@@ -1,0 +1,7 @@
+
+[cost_kind]
+"Components" = "path:app/components/**"
+
+[[scope]]
+label = "x"
+match = "name_eq:RequestHandler#render_response"

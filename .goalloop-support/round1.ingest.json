@@ -1,0 +1,52 @@
+[
+ {
+  "title": "Compare accepts truncated or corrupt reports and fails open",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Rust coerces non-numeric pct to 0.0 -> false-green exit 0 where Python exits 2 (parity break, fail-open gate); missing slices/boundaries key accepted as empty in both. Full evidence: .goalloop-support/round1.triage.json#F1"
+ },
+ {
+  "title": "NaN thresholds disable regression gating in both implementations",
+  "verdict": "confirmed",
+  "evidence": "Reproduced in both languages: --threshold-abs/rel nan turns a real 10->20pct regression into stable/exit 0. No finiteness validation anywhere. #F2"
+ },
+ {
+  "title": "Duplicate function names overwrite frame data in compare reports",
+  "verdict": "confirmed",
+  "evidence": "Reproduced byte-for-byte in both: compare keys frames by function only, overwriting (f,/one)+(f,/two); +5 regression vanishes from top_regressions. #F3"
+ },
+ {
+  "title": "Facts-v2 numeric handling rejects valid IDs, coerces floats, and can panic",
+  "verdict": "confirmed",
+  "evidence": "Reproduced, worse than claimed: both exporters emit u64 IDs > i64::MAX from real .pb, so Rust rejects its own export (round-trip violation, misleading error); Python truncates 7.9->7; Rust i64 sum overflow panics (debug). #F4"
+ },
+ {
+  "title": "The promised JSON error boundary does not cover CLI usage or Python conversion errors",
+  "verdict": "confirmed",
+  "evidence": "Reproduced: argparse/clap usage errors print prose (exit 2, no JSON envelope); Python OverflowError from top:.inf escapes as traceback exit 1. #F5"
+ },
+ {
+  "title": "`--output` violates the documented receipt and global-option contract",
+  "verdict": "confirmed",
+  "evidence": "Reproduced: Python targets --format json --output prints full artifact instead of receipt; Rust prints nothing on all --output writes; compare accepts no --output at all in either language despite spec. #F6"
+ },
+ {
+  "title": "Published Rust CLI parity omits tracked slice-config and compare-alias surfaces",
+  "verdict": "confirmed",
+  "evidence": "Reproduced: Rust lacks slices --config and compare --focus-scopes despite PARITY.md claims and B3-05 done; tracker note admits deferral. #F7"
+ },
+ {
+  "title": "Rust silently ignores invalid scope predicates and `--by-slice` values",
+  "verdict": "confirmed",
+  "evidence": "Reproduced: Rust .ok().flatten() drops configured cost-kind predicate errors (all cost -> Other, exit 0) and ignores unparsable --by-slice; Python exits 2 on both. #F8"
+ },
+ {
+  "title": "Rust path/glob matching is not compatible with Python",
+  "verdict": "confirmed",
+  "evidence": "Reproduced: Rust tokenizes [ as glob but escapes brackets in regex conversion -> path:/app/[ab].rb matches in Python (Application), never in Rust (Other); also affects scopes path predicates. #F9"
+ },
+ {
+  "title": "Rust silently drops later members from valid concatenated gzip profiles",
+  "verdict": "confirmed",
+  "evidence": "Reproduced: Rust GzDecoder reads only first gzip member; Python decodes all. Valid RFC1952 multi-member profile -> Rust silently returns empty profile, exit 0. #F10"
+ }
+]

@@ -1,0 +1,3 @@
+usage: clankerprof [-h] [--version] [--output OUTPUT]
+                   {targets,scopes,boundaries,slices,compare,facts} ...
+clankerprof: error: unrecognized arguments: --output /dev/null
