@@ -887,6 +887,100 @@ def test_clankerprof_compare_rejects_wrong_payload_types() -> None:
         )
 
 
+def test_clankerprof_compare_rejects_missing_row_arrays_and_bad_numbers() -> None:
+    report = _compare_slice_report([{"name": "A", "pct": 10.0, "frames": []}])
+    with pytest.raises(ValueError, match="must contain a slices array"):
+        compare_slice_json({"tool": "clankerprof_slices"}, report)
+    with pytest.raises(ValueError, match="must contain a boundaries array"):
+        compare_boundary_json(
+            {"tool": "clankerprof_boundaries"},
+            _compare_boundary_report([]),
+        )
+    with pytest.raises(ValueError, match="Slice field 'pct' must be a number"):
+        compare_slice_json(
+            report,
+            _compare_slice_report([{"name": "A", "pct": "not-a-number"}]),
+        )
+    with pytest.raises(ValueError, match="Frame field 'pct' must be a number"):
+        compare_slice_json(
+            report,
+            _compare_slice_report(
+                [{"name": "A", "pct": 10.0, "frames": [{"function": "f", "pct": True}]}]
+            ),
+        )
+    with pytest.raises(ValueError, match="field 'total_time_ns' must be an integer"):
+        compare_slice_json(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": "later"},
+                "slices": [],
+            },
+            report,
+        )
+    with pytest.raises(
+        ValueError, match="Boundary field 'pct_of_profile' must be a number"
+    ):
+        compare_boundary_json(
+            _compare_boundary_report([{"name": "web", "pct_of_profile": []}]),
+            _compare_boundary_report([]),
+        )
+
+
+def test_clankerprof_compare_rejects_non_finite_thresholds() -> None:
+    before = _compare_slice_report([{"name": "A", "pct": 10.0, "frames": []}])
+    after = _compare_slice_report([{"name": "A", "pct": 20.0, "frames": []}])
+    assert compare_slice_json(before, after)["has_regression"] is True
+    for threshold in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValueError, match="thresholds must be finite"):
+            compare_slice_json(before, after, CompareOptions(threshold_abs=threshold))
+        with pytest.raises(ValueError, match="thresholds must be finite"):
+            compare_boundary_json(
+                _compare_boundary_report([]),
+                _compare_boundary_report([]),
+                CompareOptions(threshold_rel=threshold),
+            )
+
+
+def test_clankerprof_compare_aggregates_duplicate_function_frames() -> None:
+    before = _compare_slice_report(
+        [
+            {
+                "name": "A",
+                "pct": 30.0,
+                "frames": [
+                    {"function": "f", "filename": "/one", "pct": 10.0},
+                    {"function": "f", "filename": "/two", "pct": 15.0},
+                    {"function": "g", "filename": "/g", "pct": 5.0},
+                ],
+            }
+        ]
+    )
+    after = _compare_slice_report(
+        [
+            {
+                "name": "A",
+                "pct": 30.0,
+                "frames": [
+                    {"function": "f", "filename": "/one", "pct": 15.0},
+                    {"function": "f", "filename": "/two", "pct": 15.0},
+                    {"function": "g", "filename": "/g", "pct": 0.0},
+                ],
+            }
+        ]
+    )
+    compared = compare_slice_json(before, after)
+    frame_deltas = cast(
+        list[dict[str, Any]],
+        cast(list[dict[str, Any]], compared["slices"])[0]["frame_deltas"],
+    )
+    f_row = next(row for row in frame_deltas if row["function"] == "f")
+    assert f_row["before_pct"] == 25.0
+    assert f_row["after_pct"] == 30.0
+    assert f_row["delta_abs"] == 5.0
+    regressions = cast(list[dict[str, Any]], compared["top_regressions"])
+    assert [(row["function"], row["delta_abs"]) for row in regressions] == [("f", 5.0)]
+
+
 def _runtime_args(**overrides: object) -> argparse.Namespace:
     args: dict[str, object] = {
         "runtime": "generic",

@@ -19,8 +19,35 @@ def _finite_or_none(value: float) -> float | None:
     return value if math.isfinite(value) else None
 
 
+def _validated_options(options: CompareOptions | None) -> CompareOptions:
+    resolved = options or CompareOptions()
+    if not (
+        math.isfinite(resolved.threshold_abs) and math.isfinite(resolved.threshold_rel)
+    ):
+        raise ValueError("Compare thresholds must be finite numbers.")
+    return resolved
+
+
+def _require_number(payload: dict[str, Any], key: str, context: str) -> float:
+    """Absent numeric fields default to 0; present non-numbers are malformed."""
+    value: object = payload.get(key, 0)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{context} field {key!r} must be a number.")
+    return float(value)
+
+
+def _summary_total(payload: dict[str, Any]) -> int:
+    raw_summary: object = payload.get("summary", {})
+    if not isinstance(raw_summary, dict):
+        raise ValueError("Report summary must be an object.")
+    value: object = cast(dict[str, Any], raw_summary).get("total_time_ns", 0)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("Report summary field 'total_time_ns' must be an integer.")
+    return value
+
+
 def _slice_map(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    raw_slices = payload.get("slices", [])
+    raw_slices: object = payload.get("slices")
     if not isinstance(raw_slices, list):
         raise ValueError("Profile comparison input must contain a slices array.")
     result: dict[str, dict[str, Any]] = {}
@@ -39,7 +66,10 @@ def _frames_by_function(slice_payload: dict[str, Any]) -> dict[str, float]:
     for item in cast(list[object], raw_frames):
         if isinstance(item, dict):
             raw_item = cast(dict[str, Any], item)
-            frames[str(raw_item.get("function", ""))] = float(raw_item.get("pct", 0))
+            function = str(raw_item.get("function", ""))
+            frames[function] = frames.get(function, 0.0) + _require_number(
+                raw_item, "pct", "Frame"
+            )
     return frames
 
 
@@ -75,7 +105,7 @@ def compare_slice_json(
     after: dict[str, Any],
     options: CompareOptions | None = None,
 ) -> dict[str, Any]:
-    resolved = options or CompareOptions()
+    resolved = _validated_options(options)
     before_slices = _slice_map(before)
     after_slices = _slice_map(after)
     names = sorted(set(before_slices) | set(after_slices))
@@ -86,8 +116,8 @@ def compare_slice_json(
     for name in names:
         before_payload = before_slices.get(name, {})
         after_payload = after_slices.get(name, {})
-        before_pct = float(before_payload.get("pct", 0))
-        after_pct = float(after_payload.get("pct", 0))
+        before_pct = _require_number(before_payload, "pct", "Slice")
+        after_pct = _require_number(after_payload, "pct", "Slice")
         delta_abs = after_pct - before_pct
         delta_rel = _delta_rel(before_pct, after_pct)
 
@@ -146,12 +176,8 @@ def compare_slice_json(
 
     return {
         "tool": "clankerprof_compare",
-        "before_total_ns": int(
-            cast(dict[str, Any], before.get("summary", {})).get("total_time_ns", 0)
-        ),
-        "after_total_ns": int(
-            cast(dict[str, Any], after.get("summary", {})).get("total_time_ns", 0)
-        ),
+        "before_total_ns": _summary_total(before),
+        "after_total_ns": _summary_total(after),
         "slices": slice_deltas,
         "top_regressions": top_regressions,
         "top_improvements": top_improvements,
@@ -160,7 +186,7 @@ def compare_slice_json(
 
 
 def _boundary_rows(payload: dict[str, Any]) -> dict[tuple[str, str, str], float]:
-    raw_boundaries = payload.get("boundaries", [])
+    raw_boundaries: object = payload.get("boundaries")
     if not isinstance(raw_boundaries, list):
         raise ValueError("Boundary comparison input must contain a boundaries array.")
     rows: dict[tuple[str, str, str], float] = {}
@@ -169,8 +195,8 @@ def _boundary_rows(payload: dict[str, Any]) -> dict[tuple[str, str, str], float]
             continue
         boundary = cast(dict[str, Any], item)
         boundary_name = str(boundary.get("name", ""))
-        rows[("boundary", boundary_name, boundary_name)] = float(
-            boundary.get("pct_of_profile", 0)
+        rows[("boundary", boundary_name, boundary_name)] = _require_number(
+            boundary, "pct_of_profile", "Boundary"
         )
         raw_buckets = boundary.get("buckets", [])
         if isinstance(raw_buckets, list):
@@ -179,8 +205,8 @@ def _boundary_rows(payload: dict[str, Any]) -> dict[tuple[str, str, str], float]
                     continue
                 bucket = cast(dict[str, Any], bucket_item)
                 bucket_name = str(bucket.get("name", ""))
-                rows[("bucket", boundary_name, bucket_name)] = float(
-                    bucket.get("pct", 0)
+                rows[("bucket", boundary_name, bucket_name)] = _require_number(
+                    bucket, "pct", "Bucket"
                 )
                 raw_categories = bucket.get("categories", [])
                 if isinstance(raw_categories, list):
@@ -189,8 +215,8 @@ def _boundary_rows(payload: dict[str, Any]) -> dict[tuple[str, str, str], float]
                             continue
                         category = cast(dict[str, Any], category_item)
                         category_name = str(category.get("name", ""))
-                        rows[("category", boundary_name, category_name)] = float(
-                            category.get("pct", 0)
+                        rows[("category", boundary_name, category_name)] = (
+                            _require_number(category, "pct", "Category")
                         )
         raw_domains = boundary.get("domains", [])
         if isinstance(raw_domains, list):
@@ -199,8 +225,8 @@ def _boundary_rows(payload: dict[str, Any]) -> dict[tuple[str, str, str], float]
                     continue
                 domain = cast(dict[str, Any], domain_item)
                 domain_name = str(domain.get("name", ""))
-                rows[("domain", boundary_name, domain_name)] = float(
-                    domain.get("pct", 0)
+                rows[("domain", boundary_name, domain_name)] = _require_number(
+                    domain, "pct", "Domain"
                 )
     return rows
 
@@ -210,7 +236,7 @@ def compare_boundary_json(
     after: dict[str, Any],
     options: CompareOptions | None = None,
 ) -> dict[str, Any]:
-    resolved = options or CompareOptions()
+    resolved = _validated_options(options)
     before_rows = _boundary_rows(before)
     after_rows = _boundary_rows(after)
     row_deltas: list[dict[str, Any]] = []
@@ -250,12 +276,8 @@ def compare_boundary_json(
     return {
         "tool": "clankerprof_compare",
         "projection": "boundaries",
-        "before_total_ns": int(
-            cast(dict[str, Any], before.get("summary", {})).get("total_time_ns", 0)
-        ),
-        "after_total_ns": int(
-            cast(dict[str, Any], after.get("summary", {})).get("total_time_ns", 0)
-        ),
+        "before_total_ns": _summary_total(before),
+        "after_total_ns": _summary_total(after),
         "rows": row_deltas,
         "top_regressions": [
             item for item in row_deltas if cast(float, item["delta_abs"]) > 0.1

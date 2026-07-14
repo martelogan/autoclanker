@@ -141,6 +141,8 @@ semantics.
 | Strict-JSON compare artifacts: new/removed rows serialize `delta_rel` as `null`, never `Infinity` | covered | `test_clankerprof_compare_new_rows_emit_finite_json` |
 | Boundary `top_improvements` ordered by magnitude, most negative first | covered | `test_clankerprof_boundary_compare_orders_top_improvements_by_magnitude` |
 | Compare dispatches on the shared `tool` field and rejects non-report payloads | covered | `test_clankerprof_compare_rejects_wrong_payload_types` |
+| Compare fails closed on malformed reports: missing `slices`/`boundaries` arrays, non-numeric fields, and non-finite thresholds exit 2 with matching envelopes in both languages | covered | `test_clankerprof_compare_rejects_missing_row_arrays_and_bad_numbers`, `test_clankerprof_compare_rejects_non_finite_thresholds`, `test_clankerprof_rust_compare_rejects_malformed_reports_like_python` |
+| Frames sharing a function name aggregate (sum) in per-function deltas, byte-identically across languages | covered | `test_clankerprof_compare_aggregates_duplicate_function_frames`, `test_clankerprof_rust_compare_aggregates_duplicate_functions_like_python` |
 | Text compare report wording from older slice tools | not claimed | JSON gate compatibility is the stable contract. |
 
 ## Remaining confidence boundary

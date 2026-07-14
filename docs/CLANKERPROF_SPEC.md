@@ -341,12 +341,20 @@ Slice projection must not redefine target-boundary semantics.
 dispatching on their shared `tool` field. Both inputs must carry the same
 `tool`, and it must be `clankerprof_slices` or `clankerprof_boundaries`;
 anything else (including two facts exports) is a validation error, never a
-silent "no regression". For slice payloads, it reports:
+silent "no regression". Each report must contain its projection's row array
+(`slices` or `boundaries`); a payload missing it is a validation error, not
+an empty comparison. Numeric report fields (`pct`, `pct_of_profile`,
+`total_time_ns`) must be JSON numbers: malformed values are a validation
+error in both implementations, never coerced to zero. Compare thresholds
+must be finite numbers; a NaN or infinite threshold is an option-validation
+error (a non-finite threshold would silently disable gating). For slice
+payloads, it reports:
 
 - total before/after primary time from summaries;
 - per-slice before percent, after percent, absolute delta, relative delta, and
   status;
-- per-function deltas within each slice;
+- per-function deltas within each slice (frames sharing a function name are
+  summed);
 - top regressions and improvements;
 - `has_regression`;
 - exit code `2` for regression through the CLI.

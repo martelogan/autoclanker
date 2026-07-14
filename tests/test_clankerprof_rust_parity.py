@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -22,7 +23,11 @@ from clankerprof.compare import (
 )
 from clankerprof.facts import sample_facts_to_jsonable
 from clankerprof.proto import decode_profile_bytes
-from clankerprof.render import render_slice_json, render_target_json
+from clankerprof.render import (
+    render_json_payload,
+    render_slice_json,
+    render_target_json,
+)
 from tests.fixtures.pprof_builder import PprofFixtureBuilder
 
 
@@ -717,6 +722,148 @@ def test_clankerprof_rust_compare_rejects_mismatched_tools(tmp_path: Path) -> No
     assert "clankerprof_slices or clankerprof_boundaries" in completed.stderr
 
 
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_compare_rejects_malformed_reports_like_python(
+    tmp_path: Path,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    good: dict[str, Any] = {
+        "tool": "clankerprof_slices",
+        "summary": {"total_time_ns": 100},
+        "slices": [{"name": "A", "pct": 10.0, "frames": []}],
+    }
+    cases: list[tuple[dict[str, Any], dict[str, Any], list[str], str]] = [
+        (
+            {"tool": "clankerprof_slices"},
+            good,
+            [],
+            "Profile comparison input must contain a slices array.",
+        ),
+        (
+            good,
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "A", "pct": "not-a-number"}],
+            },
+            [],
+            "Slice field 'pct' must be a number.",
+        ),
+        (
+            good,
+            good,
+            ["--threshold-abs", "NaN"],
+            "Compare thresholds must be finite numbers.",
+        ),
+    ]
+    for index, (before, after, extra_argv, message) in enumerate(cases):
+        with pytest.raises(ValueError, match=re.escape(message)):
+            compare_slice_json(
+                before,
+                after,
+                CompareOptions(threshold_abs=float("nan"))
+                if extra_argv
+                else CompareOptions(),
+            )
+        before_path = tmp_path / f"malformed-{index}-before.json"
+        after_path = tmp_path / f"malformed-{index}-after.json"
+        before_path.write_text(json.dumps(before), encoding="utf-8")
+        after_path.write_text(json.dumps(after), encoding="utf-8")
+        completed = subprocess.run(
+            [
+                "cargo",
+                "run",
+                "--quiet",
+                "-p",
+                "clankerprof-core",
+                "--bin",
+                "clankerprof-rs",
+                "--",
+                "compare",
+                "--before",
+                str(before_path),
+                "--after",
+                str(after_path),
+                *extra_argv,
+            ],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 2, (message, completed.stderr)
+        assert message in completed.stderr, completed.stderr
+        assert '"ok":false' in completed.stderr, completed.stderr
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_compare_aggregates_duplicate_functions_like_python(
+    tmp_path: Path,
+) -> None:
+    before = {
+        "tool": "clankerprof_slices",
+        "summary": {"total_time_ns": 100},
+        "slices": [
+            {
+                "name": "A",
+                "pct": 30.0,
+                "frames": [
+                    {"function": "f", "filename": "/one", "pct": 10.0},
+                    {"function": "f", "filename": "/two", "pct": 15.0},
+                    {"function": "g", "filename": "/g", "pct": 5.0},
+                ],
+            }
+        ],
+    }
+    after = {
+        "tool": "clankerprof_slices",
+        "summary": {"total_time_ns": 100},
+        "slices": [
+            {
+                "name": "A",
+                "pct": 30.0,
+                "frames": [
+                    {"function": "f", "filename": "/one", "pct": 15.0},
+                    {"function": "f", "filename": "/two", "pct": 15.0},
+                    {"function": "g", "filename": "/g", "pct": 0.0},
+                ],
+            }
+        ],
+    }
+    before_path = tmp_path / "dup-before.json"
+    after_path = tmp_path / "dup-after.json"
+    before_path.write_text(json.dumps(before), encoding="utf-8")
+    after_path.write_text(json.dumps(after), encoding="utf-8")
+    rust_out = tmp_path / "dup-rust.out"
+    _run_rust_cli(
+        [
+            "compare",
+            "--before",
+            str(before_path),
+            "--after",
+            str(after_path),
+            "--output",
+            str(rust_out),
+        ]
+    )
+    python_payload = compare_slice_json(before, after)
+    frame_deltas = cast(
+        list[dict[str, Any]],
+        cast(list[dict[str, Any]], python_payload["slices"])[0]["frame_deltas"],
+    )
+    f_row = next(row for row in frame_deltas if row["function"] == "f")
+    assert f_row["before_pct"] == 25.0
+    assert f_row["after_pct"] == 30.0
+    assert f_row["delta_abs"] == 5.0
+    assert [
+        row["function"]
+        for row in cast(list[dict[str, Any]], python_payload["top_regressions"])
+    ] == ["f"]
+    rust_text = rust_out.read_text(encoding="utf-8")
+    assert json.loads(rust_text) == python_payload
+    assert rust_text == render_json_payload(python_payload) + "\n"
+
+
 def _ruby_runtime_profile_bytes() -> bytes:
     builder = PprofFixtureBuilder.create()
     target = builder.location(
@@ -1076,9 +1223,7 @@ def _flag_matrix_cases(tmp_path: Path) -> list[tuple[str, list[str], str]]:
     )
     attributables_path = tmp_path / "attributables.json"
     attributables_path.write_text(
-        json.dumps(
-            {"db_queries": {"Example::HtmlResponder#render_template": 40.0}}
-        ),
+        json.dumps({"db_queries": {"Example::HtmlResponder#render_template": 40.0}}),
         encoding="utf-8",
     )
     slices_path = tmp_path / "matrix-slices.yml"

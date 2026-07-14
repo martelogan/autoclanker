@@ -34,17 +34,29 @@ pub fn compare_json(
         return Err("Compare inputs must use the same clankerprof projection.".to_string());
     }
     match before_tool {
-        Some("clankerprof_boundaries") => Ok(compare_boundary_json(before, after, options)),
-        Some("clankerprof_slices") => Ok(compare_slice_json(before, after, options)),
+        Some("clankerprof_boundaries") => compare_boundary_json(before, after, options),
+        Some("clankerprof_slices") => compare_slice_json(before, after, options),
         other => Err(format!(
             "Compare inputs must be clankerprof_slices or clankerprof_boundaries reports; got tool {other:?}."
         )),
     }
 }
 
-pub fn compare_slice_json(before: &Value, after: &Value, options: &CompareOptions) -> Value {
-    let before_slices = slice_map(before);
-    let after_slices = slice_map(after);
+fn validate_options(options: &CompareOptions) -> Result<(), String> {
+    if !options.threshold_abs.is_finite() || !options.threshold_rel.is_finite() {
+        return Err("Compare thresholds must be finite numbers.".to_string());
+    }
+    Ok(())
+}
+
+pub fn compare_slice_json(
+    before: &Value,
+    after: &Value,
+    options: &CompareOptions,
+) -> Result<Value, String> {
+    validate_options(options)?;
+    let before_slices = slice_map(before)?;
+    let after_slices = slice_map(after)?;
     let names: BTreeSet<_> = before_slices
         .keys()
         .chain(after_slices.keys())
@@ -58,10 +70,12 @@ pub fn compare_slice_json(before: &Value, after: &Value, options: &CompareOption
         let before_payload = before_slices.get(&name);
         let after_payload = after_slices.get(&name);
         let before_pct = before_payload
-            .map(|value| number(value, "pct"))
+            .map(|value| require_number(value, "pct", "Slice"))
+            .transpose()?
             .unwrap_or(0.0);
         let after_pct = after_payload
-            .map(|value| number(value, "pct"))
+            .map(|value| require_number(value, "pct", "Slice"))
+            .transpose()?
             .unwrap_or(0.0);
         let delta_abs = after_pct - before_pct;
         let delta_rel = if before_pct > 0.0 {
@@ -87,8 +101,14 @@ pub fn compare_slice_json(before: &Value, after: &Value, options: &CompareOption
             "stable"
         };
 
-        let before_frames = before_payload.map(frames_by_function).unwrap_or_default();
-        let after_frames = after_payload.map(frames_by_function).unwrap_or_default();
+        let before_frames = before_payload
+            .map(frames_by_function)
+            .transpose()?
+            .unwrap_or_default();
+        let after_frames = after_payload
+            .map(frames_by_function)
+            .transpose()?
+            .unwrap_or_default();
         let functions: BTreeSet<_> = before_frames
             .keys()
             .chain(after_frames.keys())
@@ -140,37 +160,48 @@ pub fn compare_slice_json(before: &Value, after: &Value, options: &CompareOption
         .cloned()
         .collect::<Vec<_>>();
 
-    json!({
-        "after_total_ns": summary_total(after),
-        "before_total_ns": summary_total(before),
+    Ok(json!({
+        "after_total_ns": summary_total(after)?,
+        "before_total_ns": summary_total(before)?,
         "has_regression": has_regression,
         "slices": slice_deltas,
         "tool": "clankerprof_compare",
         "top_improvements": top_improvements,
         "top_regressions": top_regressions,
-    })
+    }))
 }
 
-fn slice_map(payload: &Value) -> BTreeMap<String, Value> {
-    payload
+fn slice_map(payload: &Value) -> Result<BTreeMap<String, Value>, String> {
+    let items = payload
         .get("slices")
         .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
+        .ok_or_else(|| "Profile comparison input must contain a slices array.".to_string())?;
+    Ok(items
+        .iter()
         .filter(|item| item.is_object())
         .map(|item| (string_field(item, "name"), item.clone()))
-        .collect()
+        .collect())
 }
 
-fn frames_by_function(slice_payload: &Value) -> BTreeMap<String, f64> {
-    slice_payload
+/// Frames sharing a function name are summed; iteration follows the frames
+/// array in both languages, so f64 accumulation order (and byte parity) is
+/// preserved. Output ordering never depends on this map's iteration order:
+/// both sides walk the sorted union of function names.
+fn frames_by_function(slice_payload: &Value) -> Result<BTreeMap<String, f64>, String> {
+    let mut frames = BTreeMap::new();
+    for item in slice_payload
         .get("frames")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter(|item| item.is_object())
-        .map(|item| (string_field(item, "function"), number(item, "pct")))
-        .collect()
+    {
+        if !item.is_object() {
+            continue;
+        }
+        let pct = require_number(item, "pct", "Frame")?;
+        *frames.entry(string_field(item, "function")).or_insert(0.0) += pct;
+    }
+    Ok(frames)
 }
 
 fn string_field(payload: &Value, key: &str) -> String {
@@ -181,14 +212,33 @@ fn string_field(payload: &Value, key: &str) -> String {
         .to_string()
 }
 
-fn summary_total(payload: &Value) -> i64 {
-    payload
-        .get("summary")
-        .and_then(|summary| summary.get("total_time_ns"))
-        .and_then(Value::as_i64)
-        .unwrap_or(0)
+fn summary_total(payload: &Value) -> Result<i64, String> {
+    let Some(summary) = payload.get("summary") else {
+        return Ok(0);
+    };
+    if !summary.is_object() {
+        return Err("Report summary must be an object.".to_string());
+    }
+    match summary.get("total_time_ns") {
+        None => Ok(0),
+        Some(value) => value
+            .as_i64()
+            .ok_or_else(|| "Report summary field 'total_time_ns' must be an integer.".to_string()),
+    }
 }
 
+/// Strict read of an input-report numeric field: absent defaults to 0,
+/// present non-numbers are malformed input (mirrors Python `_require_number`).
+fn require_number(payload: &Value, key: &str, context: &str) -> Result<f64, String> {
+    match payload.get(key) {
+        None => Ok(0.0),
+        Some(value) => value
+            .as_f64()
+            .ok_or_else(|| format!("{context} field '{key}' must be a number.")),
+    }
+}
+
+/// Infallible read for rows this module constructed itself.
 fn number(payload: &Value, key: &str) -> f64 {
     payload.get(key).and_then(Value::as_f64).unwrap_or(0.0)
 }
@@ -205,13 +255,12 @@ fn finite_json_number(value: f64) -> Value {
     }
 }
 
-fn boundary_rows(payload: &Value) -> BTreeMap<(String, String, String), f64> {
+fn boundary_rows(payload: &Value) -> Result<BTreeMap<(String, String, String), f64>, String> {
     let mut rows = BTreeMap::new();
     let boundaries = payload
         .get("boundaries")
         .and_then(Value::as_array)
-        .into_iter()
-        .flatten();
+        .ok_or_else(|| "Boundary comparison input must contain a boundaries array.".to_string())?;
     for boundary in boundaries {
         if !boundary.is_object() {
             continue;
@@ -223,7 +272,7 @@ fn boundary_rows(payload: &Value) -> BTreeMap<(String, String, String), f64> {
                 boundary_name.clone(),
                 boundary_name.clone(),
             ),
-            number(boundary, "pct_of_profile"),
+            require_number(boundary, "pct_of_profile", "Boundary")?,
         );
         for bucket in boundary
             .get("buckets")
@@ -240,7 +289,7 @@ fn boundary_rows(payload: &Value) -> BTreeMap<(String, String, String), f64> {
                     boundary_name.clone(),
                     string_field(bucket, "name"),
                 ),
-                number(bucket, "pct"),
+                require_number(bucket, "pct", "Bucket")?,
             );
             for category in bucket
                 .get("categories")
@@ -257,7 +306,7 @@ fn boundary_rows(payload: &Value) -> BTreeMap<(String, String, String), f64> {
                         boundary_name.clone(),
                         string_field(category, "name"),
                     ),
-                    number(category, "pct"),
+                    require_number(category, "pct", "Category")?,
                 );
             }
         }
@@ -276,16 +325,21 @@ fn boundary_rows(payload: &Value) -> BTreeMap<(String, String, String), f64> {
                     boundary_name.clone(),
                     string_field(domain, "name"),
                 ),
-                number(domain, "pct"),
+                require_number(domain, "pct", "Domain")?,
             );
         }
     }
-    rows
+    Ok(rows)
 }
 
-pub fn compare_boundary_json(before: &Value, after: &Value, options: &CompareOptions) -> Value {
-    let before_rows = boundary_rows(before);
-    let after_rows = boundary_rows(after);
+pub fn compare_boundary_json(
+    before: &Value,
+    after: &Value,
+    options: &CompareOptions,
+) -> Result<Value, String> {
+    validate_options(options)?;
+    let before_rows = boundary_rows(before)?;
+    let after_rows = boundary_rows(after)?;
     let keys: BTreeSet<_> = before_rows.keys().chain(after_rows.keys()).collect();
     let mut row_deltas = Vec::new();
     let mut has_regression = false;
@@ -348,14 +402,124 @@ pub fn compare_boundary_json(before: &Value, after: &Value, options: &CompareOpt
         .sort_by(|left, right| number(left, "delta_abs").total_cmp(&number(right, "delta_abs")));
     improvements.truncate(10);
 
-    json!({
-        "after_total_ns": summary_total(after),
-        "before_total_ns": summary_total(before),
+    Ok(json!({
+        "after_total_ns": summary_total(after)?,
+        "before_total_ns": summary_total(before)?,
         "has_regression": has_regression,
         "projection": "boundaries",
         "rows": row_deltas,
         "tool": "clankerprof_compare",
         "top_improvements": improvements,
         "top_regressions": top_regressions,
-    })
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn slice_report(slices: Value) -> Value {
+        json!({
+            "tool": "clankerprof_slices",
+            "summary": {"total_time_ns": 100},
+            "slices": slices,
+        })
+    }
+
+    #[test]
+    fn missing_row_arrays_are_validation_errors() {
+        let report = slice_report(json!([]));
+        let truncated = json!({"tool": "clankerprof_slices"});
+        let error = compare_slice_json(&truncated, &report, &CompareOptions::default())
+            .expect_err("missing slices array must be rejected");
+        assert!(error.contains("must contain a slices array"));
+        let boundary_truncated = json!({"tool": "clankerprof_boundaries"});
+        let error = compare_boundary_json(
+            &boundary_truncated,
+            &boundary_truncated,
+            &CompareOptions::default(),
+        )
+        .expect_err("missing boundaries array must be rejected");
+        assert!(error.contains("must contain a boundaries array"));
+    }
+
+    #[test]
+    fn non_numeric_fields_are_validation_errors() {
+        let good = slice_report(json!([{"name": "A", "pct": 10.0, "frames": []}]));
+        let bad_pct = slice_report(json!([{"name": "A", "pct": "not-a-number"}]));
+        let error = compare_slice_json(&good, &bad_pct, &CompareOptions::default())
+            .expect_err("non-numeric pct must be rejected");
+        assert_eq!(error, "Slice field 'pct' must be a number.");
+        let bad_frame = slice_report(
+            json!([{"name": "A", "pct": 10.0, "frames": [{"function": "f", "pct": true}]}]),
+        );
+        let error = compare_slice_json(&good, &bad_frame, &CompareOptions::default())
+            .expect_err("non-numeric frame pct must be rejected");
+        assert_eq!(error, "Frame field 'pct' must be a number.");
+        let bad_total = json!({
+            "tool": "clankerprof_slices",
+            "summary": {"total_time_ns": "later"},
+            "slices": [],
+        });
+        let error = compare_slice_json(&bad_total, &good, &CompareOptions::default())
+            .expect_err("non-integer summary total must be rejected");
+        assert_eq!(
+            error,
+            "Report summary field 'total_time_ns' must be an integer."
+        );
+    }
+
+    #[test]
+    fn non_finite_thresholds_are_validation_errors() {
+        let report = slice_report(json!([]));
+        for threshold in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let options = CompareOptions {
+                threshold_abs: threshold,
+                ..CompareOptions::default()
+            };
+            let error = compare_slice_json(&report, &report, &options)
+                .expect_err("non-finite threshold must be rejected");
+            assert_eq!(error, "Compare thresholds must be finite numbers.");
+            let options = CompareOptions {
+                threshold_rel: threshold,
+                ..CompareOptions::default()
+            };
+            compare_boundary_json(
+                &json!({"tool": "clankerprof_boundaries", "boundaries": []}),
+                &json!({"tool": "clankerprof_boundaries", "boundaries": []}),
+                &options,
+            )
+            .expect_err("non-finite threshold must be rejected");
+        }
+    }
+
+    #[test]
+    fn duplicate_function_frames_aggregate_instead_of_overwrite() {
+        let before = slice_report(json!([{"name": "A", "pct": 30.0, "frames": [
+            {"function": "f", "filename": "/one", "pct": 10.0},
+            {"function": "f", "filename": "/two", "pct": 15.0},
+            {"function": "g", "filename": "/g", "pct": 5.0},
+        ]}]));
+        let after = slice_report(json!([{"name": "A", "pct": 30.0, "frames": [
+            {"function": "f", "filename": "/one", "pct": 15.0},
+            {"function": "f", "filename": "/two", "pct": 15.0},
+            {"function": "g", "filename": "/g", "pct": 0.0},
+        ]}]));
+        let compared = compare_slice_json(&before, &after, &CompareOptions::default())
+            .expect("valid reports compare");
+        let deltas = compared["slices"][0]["frame_deltas"]
+            .as_array()
+            .expect("frame deltas");
+        let f_row = deltas
+            .iter()
+            .find(|row| row["function"] == "f")
+            .expect("aggregated f row");
+        assert_eq!(f_row["before_pct"], json!(25.0));
+        assert_eq!(f_row["after_pct"], json!(30.0));
+        assert_eq!(f_row["delta_abs"], json!(5.0));
+        let regressions = compared["top_regressions"]
+            .as_array()
+            .expect("top regressions");
+        assert!(regressions.iter().any(|row| row["function"] == "f"));
+    }
 }
