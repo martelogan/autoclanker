@@ -122,18 +122,18 @@ file — it is the single source of execution state.
 
 | ID | Requirement | Verify | Status | Notes |
 | --- | --- | --- | --- | --- |
-| B4-01 | Shared fixture corpus with Python-generated goldens; byte-level output comparison | tests/test_clankerprof_rust_parity.py rewritten | todo | |
-| B4-02 | Flag-matrix sweep per subcommand (not one pinned combo) | parity matrix test | todo | |
-| B4-03 | Native Rust unit tests exist and run (`cargo test` > 0 tests) | cargo test output | todo | currently 0 tests |
-| B4-04 | Cargo lane wired into `bin/dev` (`test-rust`) and `check` when cargo present | scripts/check.sh runs it | todo | check stays green without cargo |
+| B4-01 | Shared fixture corpus with Python-generated goldens; byte-level output comparison | flag matrix compares Python and Rust artifacts at the byte level (JSON incl. facts compact/pretty, CSV, text, compat pair) | done | JSON emitters proven byte-aligned (sorted keys + indent 2) |
+| B4-02 | Flag-matrix sweep per subcommand (not one pinned combo) | 13-case matrix across facts/targets/slices/scopes + dedicated semantic-CSV/compat/report/decoder/compare/malformed-flag tests | done | |
+| B4-03 | Native Rust unit tests exist and run (`cargo test` > 0 tests) | 15 native tests across rules/categorize/render/scopes/facts | done | |
+| B4-04 | Cargo lane wired into `bin/dev` (`test-rust`) and `check` when cargo present | scripts/test-rust.sh (fmt-check + build + test, self-skipping without cargo) wired into check.sh, bin/dev, mise | done | |
 
 ## Wave B5 — Rust-native performance
 
 | ID | Requirement | Verify | Status | Notes |
 | --- | --- | --- | --- | --- |
-| B5-01 | String-interning arena for names/paths; RegexSet for rule matching | timing evidence | todo | |
-| B5-02 | Single-pass multi-projection mode: decode once → targets+slices+scopes in one invocation | parity + cargo tests | todo | |
-| B5-03 | Benchmark vs Python on large synthetic profiles; results recorded in plan appendix | docs/CLANKERPROF_V2_PLAN.md appendix | todo | |
+| B5-01 | String-interning arena for names/paths; RegexSet for rule matching | resolved by measurement: compiled_regex memoization + tiny pattern counts put compilation off the hot path; RegexSet cannot serve capture-based library extraction (plan appendix) | done | end-to-end numbers recorded |
+| B5-02 | Single-pass multi-projection mode: decode once → targets+slices+scopes in one invocation | clankerprof-rs report subcommand; test_clankerprof_rust_report_sections_match_individual_subcommands | done | documented in CLANKERPROF_RUST.md |
+| B5-03 | Benchmark vs Python on large synthetic profiles; results recorded in plan appendix | appendix: Rust 2.5-5.6x end-to-end; report single-pass 4.6x vs sequential Python | done | release build, best of 3 |
 
 ## Wave G — governance / docs
 

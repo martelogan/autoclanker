@@ -556,3 +556,39 @@ pub fn render_target_text(
     }
     lines.join("\n")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_time_matches_python_units() {
+        assert_eq!(format_time(5_000_000), "5.00 ms");
+        assert_eq!(format_time(1_500_000_000), "1.50 s");
+        assert_eq!(format_time(120_000_000_000), "2.00 min");
+        assert_eq!(format_time(0), "0.00 ms");
+    }
+
+    #[test]
+    fn csv_fields_quote_like_python_quote_minimal() {
+        assert_eq!(csv_field("plain"), "plain");
+        assert_eq!(csv_field("has,comma"), "\"has,comma\"");
+        assert_eq!(csv_field("has \"quote\""), "\"has \"\"quote\"\"\"");
+        assert_eq!(
+            csv_rows(vec![
+                vec!["a".to_string(), "b,c".to_string()],
+                vec!["d".to_string(), "e".to_string()],
+            ]),
+            "a,\"b,c\"\r\nd,e"
+        );
+    }
+
+    #[test]
+    fn first_max_keeps_the_first_maximum() {
+        let alpha = "alpha".to_string();
+        let beta = "beta".to_string();
+        let entries = vec![(&alpha, 3usize), (&beta, 3usize)];
+        let (name, value) = first_max(entries.into_iter());
+        assert_eq!((name.as_str(), value), ("alpha", 3));
+    }
+}

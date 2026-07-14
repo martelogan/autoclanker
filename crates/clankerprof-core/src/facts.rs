@@ -485,3 +485,84 @@ fn empty_profile_facts() -> ProfileFacts {
         primary_value_index: 0,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn import_rejects_unknown_schema_version() {
+        let error =
+            sample_facts_from_json(&json!({"schema_version": "clankerprof.sample_facts.v9"}))
+                .unwrap_err();
+        assert!(error.contains("Unsupported sample facts schema version"));
+    }
+
+    #[test]
+    fn import_validates_v2_shapes() {
+        let base = json!({
+            "schema_version": SAMPLE_FACTS_SCHEMA_VERSION,
+            "profile": {
+                "value_types": [{"type": "cpu", "unit": "nanoseconds"}],
+                "period_type": null,
+                "period": 0,
+                "default_sample_type": "",
+                "primary_value_index": 0,
+            },
+            "strings": ["Leaf#work", "/srv/app/leaf.py"],
+            "frames": [[1, 1, 0, 1, 3, false]],
+            "samples": [
+                {"sample_index": 0, "values": [7], "location_ids": [1], "stack": [0]}
+            ],
+        });
+        let facts = sample_facts_from_json(&base).expect("valid payload");
+        assert_eq!(facts.total_primary_value, 7);
+        assert_eq!(facts.samples[0].stack[0].name, "Leaf#work");
+
+        let mut bad = base.clone();
+        bad["frames"][0][2] = json!(99);
+        assert!(sample_facts_from_json(&bad)
+            .unwrap_err()
+            .contains("string index 99 is out of range"));
+
+        let mut bad = base.clone();
+        bad["samples"][0]["stack"] = json!([5]);
+        assert!(sample_facts_from_json(&bad)
+            .unwrap_err()
+            .contains("frame index 5 is out of range"));
+
+        let mut bad = base.clone();
+        bad["profile"]["primary_value_index"] = json!(-1);
+        assert!(sample_facts_from_json(&bad)
+            .unwrap_err()
+            .contains("must be non-negative"));
+    }
+
+    #[test]
+    fn import_accepts_v1_and_checks_derived_fields() {
+        let payload = json!({
+            "schema_version": SAMPLE_FACTS_SCHEMA_VERSION_V1,
+            "samples": [{
+                "sample_index": 0,
+                "primary_value": 7,
+                "values": [7, 9],
+                "location_ids": [1],
+                "is_empty": false,
+                "stack": [{
+                    "location_id": 1, "function_id": 1, "name": "Legacy#call",
+                    "filename": "/srv/app/legacy.py", "line": 3,
+                    "location_is_folded": false,
+                }],
+            }],
+        });
+        let facts = sample_facts_from_json(&payload).expect("valid v1");
+        assert_eq!(facts.total_primary_value, 7);
+
+        let mut bad = payload.clone();
+        bad["samples"][0]["primary_value"] = json!(999);
+        assert!(sample_facts_from_json(&bad)
+            .unwrap_err()
+            .contains("primary value does not match"));
+    }
+}

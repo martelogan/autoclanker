@@ -1201,3 +1201,85 @@ pub fn load_boundary_options(
     }
     Ok(options)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn predicate_parser_matches_python_validation() {
+        assert_eq!(
+            parse_frame_predicate("native", "path").unwrap(),
+            FramePredicate {
+                key: "native".to_string(),
+                value: String::new(),
+            }
+        );
+        assert_eq!(
+            parse_frame_predicate("cost_kind:IO", "path").unwrap().key,
+            "category"
+        );
+        assert_eq!(
+            parse_frame_predicate("runtime_label:Ruby Stdlib", "path")
+                .unwrap()
+                .key,
+            "runtime_category"
+        );
+        assert_eq!(
+            parse_frame_predicate("bare-value", "name_eq").unwrap(),
+            FramePredicate {
+                key: "name_eq".to_string(),
+                value: "bare-value".to_string(),
+            }
+        );
+        assert!(parse_frame_predicate("native:maybe", "path")
+            .unwrap_err()
+            .contains("must be true or false"));
+        assert!(parse_frame_predicate(":oops", "path")
+            .unwrap_err()
+            .contains("key cannot be empty"));
+        assert!(parse_frame_predicate("name:", "path")
+            .unwrap_err()
+            .contains("value cannot be empty"));
+    }
+
+    #[test]
+    fn config_rejects_mixed_preferred_and_legacy_sections() {
+        let config = r#"
+[cost_kind]
+"A" = "path:app/**"
+
+[category]
+"B" = "path:app/**"
+
+[[scope]]
+label = "x"
+match = "name_eq:X"
+"#;
+        let path = std::env::temp_dir().join("clankerprof-mixed-sections-test.toml");
+        std::fs::write(&path, config).unwrap();
+        let error = load_boundary_options(&path, crate::rules::RuntimeRuleSet::generic().clone())
+            .unwrap_err();
+        std::fs::remove_file(&path).ok();
+        assert!(
+            error.contains("Use only one of [cost_kind] or [category]"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn boundary_count_mode_and_duplicate_labels_validate() {
+        let bad_count = r#"
+[[scope]]
+label = "x"
+match = "name_eq:X"
+count = "twice"
+"#;
+        let path = std::env::temp_dir().join("clankerprof-count-test.toml");
+        std::fs::write(&path, bad_count).unwrap();
+        let error = load_boundary_options(&path, crate::rules::RuntimeRuleSet::generic().clone())
+            .unwrap_err();
+        std::fs::remove_file(&path).ok();
+        assert!(error.contains("count must be occurrence or once_per_sample"));
+    }
+}

@@ -38,6 +38,14 @@ cargo run -p clankerprof-core --bin clankerprof-rs -- \
   --collapse 'library:*' --unattributed-libraries
 ```
 
+Single-pass multi-projection (decode once, emit several sections):
+
+```bash
+cargo run -p clankerprof-core --bin clankerprof-rs -- \
+  report --profile profile.pb.gz --config targets.json \
+  --slices slices.yml --scopes-config scopes.toml --include-facts
+```
+
 Slice comparison:
 
 ```bash

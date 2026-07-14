@@ -1104,6 +1104,10 @@ slices:
     gc_builder.sample((gc_leaf, gc_target), 4_000_000)
     gc_builder.sample((app_leaf, gc_target), 6_000_000)
     gc_profile_path.write_bytes(gc_builder.encode())
+    scopes_config_path = tmp_path / "matrix-scopes.toml"
+    scopes_config_path.write_text(_SCOPES_PREFERRED_CONFIG, encoding="utf-8")
+    scopes_profile_path = tmp_path / "matrix-scopes.pb"
+    scopes_profile_path.write_bytes(_scopes_decomposition_profile_bytes())
 
     target_base = [
         "targets",
@@ -1201,6 +1205,60 @@ slices:
             ],
             "json",
         ),
+        (
+            "facts-compact",
+            ["facts", "--profile", str(profile_path)],
+            "bytes",
+        ),
+        (
+            "facts-pretty",
+            ["facts", "--profile", str(profile_path), "--pretty"],
+            "bytes",
+        ),
+        (
+            "targets-generic-default",
+            [
+                "targets",
+                "--profile",
+                str(profile_path),
+                "--config",
+                str(config_path),
+            ],
+            "json",
+        ),
+        (
+            "scopes-top",
+            [
+                "scopes",
+                "--profile",
+                str(scopes_profile_path),
+                "--config",
+                str(scopes_config_path),
+                "--top",
+                "2",
+            ],
+            "json",
+        ),
+        (
+            "slices-filter-collapse-top-paths",
+            [
+                "slices",
+                "--profile",
+                str(profile_path),
+                "--slices",
+                str(slices_path),
+                "--filter",
+                "!name:NoSuchThing",
+                "--collapse",
+                "library:*",
+                "--top",
+                "3",
+                "--show-paths",
+                "--runtime",
+                "ruby",
+            ],
+            "json",
+        ),
     ]
 
 
@@ -1213,10 +1271,12 @@ def test_clankerprof_rust_cli_flag_matrix_matches_python(tmp_path: Path) -> None
         _run_rust_cli([*argv, "--output", str(rust_out)])
         python_text = python_out.read_text(encoding="utf-8")
         rust_text = rust_out.read_text(encoding="utf-8")
+        # JSON artifacts are byte-identical across emitters (sorted keys,
+        # matching indentation); everything compares at the byte level, with
+        # a parsed comparison first for a readable diff on JSON regressions.
         if mode == "json":
             assert json.loads(rust_text) == json.loads(python_text), name
-        else:
-            assert rust_text == python_text, name
+        assert rust_text == python_text, name
 
 
 @pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
@@ -1315,3 +1375,72 @@ def test_clankerprof_rust_compat_csv_artifacts_match_python(tmp_path: Path) -> N
         python_text = (python_dir / relative).read_text(encoding="utf-8")
         rust_text = (rust_dir / relative).read_text(encoding="utf-8")
         assert rust_text == python_text, relative
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_report_sections_match_individual_subcommands(
+    tmp_path: Path,
+) -> None:
+    profile_path = tmp_path / "report.pb"
+    profile_path.write_bytes(_scopes_decomposition_profile_bytes())
+    config_path = tmp_path / "report-targets.json"
+    config_path.write_text(
+        json.dumps({"RequestHandler#render_response": {"App": "path:app/**"}}),
+        encoding="utf-8",
+    )
+    slices_path = tmp_path / "report-slices.yml"
+    slices_path.write_text(
+        "slices:\n  - name: app\n    paths:\n      - app\n  - name: default\n    default: true\n",
+        encoding="utf-8",
+    )
+    scopes_config_path = tmp_path / "report-scopes.toml"
+    scopes_config_path.write_text(_SCOPES_PREFERRED_CONFIG, encoding="utf-8")
+
+    report_out = tmp_path / "report.json"
+    _run_rust_cli(
+        [
+            "report",
+            "--profile",
+            str(profile_path),
+            "--config",
+            str(config_path),
+            "--slices",
+            str(slices_path),
+            "--scopes-config",
+            str(scopes_config_path),
+            "--include-facts",
+            "--output",
+            str(report_out),
+        ]
+    )
+    report = json.loads(report_out.read_text(encoding="utf-8"))
+    assert report["tool"] == "clankerprof_report"
+
+    for section, argv in {
+        "facts": ["facts", "--profile", str(profile_path)],
+        "targets": [
+            "targets",
+            "--profile",
+            str(profile_path),
+            "--config",
+            str(config_path),
+        ],
+        "slices": [
+            "slices",
+            "--profile",
+            str(profile_path),
+            "--slices",
+            str(slices_path),
+        ],
+        "scopes": [
+            "scopes",
+            "--profile",
+            str(profile_path),
+            "--config",
+            str(scopes_config_path),
+        ],
+    }.items():
+        individual_out = tmp_path / f"report-{section}.json"
+        _run_rust_cli([*argv, "--output", str(individual_out)])
+        individual = json.loads(individual_out.read_text(encoding="utf-8"))
+        assert report[section] == individual, section

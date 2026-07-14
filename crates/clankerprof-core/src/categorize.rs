@@ -482,4 +482,20 @@ mod tests {
     fn categorize_ruby_case(name: &str, filename: &str, rules: &RuntimeRuleSet) -> Option<String> {
         categorize_runtime_frame(&frame(name, filename), rules)
     }
+
+    #[test]
+    fn simplification_respects_verbose_and_main_categories() {
+        let rules = ruby_rules(load_default_ruby_core_classes(), false).expect("ruby pack");
+        assert_eq!(
+            simplify_category("StatsD Gem", false, &rules),
+            "Instrumentation Overhead"
+        );
+        assert_eq!(simplify_category("StatsD Gem", true, &rules), "StatsD Gem");
+        assert!(is_internal_category_for_rules(
+            Some("Ruby Core (Native)"),
+            &rules
+        ));
+        assert!(!is_internal_category_for_rules(Some("StatsD Gem"), &rules));
+        assert!(!is_internal_category_for_rules(None, &rules));
+    }
 }

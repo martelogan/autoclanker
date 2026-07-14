@@ -289,3 +289,27 @@ Best-of-3 on the 10,000-sample / 200-unique-frame / depth 3–25 profile:
 Boundary analysis additionally skips the exclude-descendants scan entirely
 when no boundary declares exclusions and normalizes exclusion expressions
 once per analysis (A4-03).
+
+### B5 — Rust vs Python end-to-end CLI (2026-07-14, release build)
+
+Same 10,000-sample / 200-frame synthetic profile; best of 3, full process
+time including startup (Python via `uv run clankerprof`, so its numbers
+include ~100 ms of interpreter and import startup — this is the honest
+end-to-end CLI comparison).
+
+| Case | Python | Rust | Speedup |
+| --- | --- | --- | --- |
+| facts | 209.6 ms | 44.6 ms | 4.7x |
+| targets (20 parents) | 210.5 ms | 37.3 ms | 5.6x |
+| slices (20 slices) | 167.3 ms | 65.7 ms | 2.5x |
+| report (targets+slices, single decode) | 378.4 ms (two runs) | 81.6 ms | 4.6x |
+
+`clankerprof-rs report` decodes once and emits multiple projections in one
+run, realizing the sample-facts design's decode-once promise in-process.
+
+B5-01 resolution: regex compilation is memoized per unique pattern
+(`compiled_regex`), and packs carry few patterns (four generic library
+patterns, one ruby native pattern), so compilation is off the hot path
+entirely; a `RegexSet` cannot serve the library-extraction path anyway, which
+needs per-pattern capture groups. Measured end-to-end numbers above confirm
+pattern matching is not a bottleneck.

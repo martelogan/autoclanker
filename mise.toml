@@ -41,6 +41,10 @@ run = "uv run pytest --cov-fail-under=90"
 description = "Run unit tests only"
 run = "uv run pytest --cov-fail-under=90 -m 'not integration and not live'"
 
+[tasks."test-rust"]
+description = "Run the Rust clankerprof-core lane (skips when cargo is absent)"
+run = "bash scripts/test-rust.sh"
+
 [tasks."test-integration"]
 description = "Run integration tests if any exist"
 run = "bash scripts/test-integration.sh"

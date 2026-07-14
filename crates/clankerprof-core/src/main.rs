@@ -44,6 +44,8 @@ enum Command {
     /// Run scope/cost-kind/rollup/owner decomposition over a profile.
     #[command(alias = "boundaries")]
     Scopes(ScopesArgs),
+    /// Decode once and emit multiple projections in a single run.
+    Report(ReportArgs),
 }
 
 #[derive(Args)]
@@ -190,6 +192,43 @@ struct ScopesArgs {
 }
 
 #[derive(Args)]
+struct ReportArgs {
+    /// Raw or gzipped pprof profile path.
+    #[arg(long)]
+    profile: Option<PathBuf>,
+    /// Read versioned sample-facts JSON instead of a pprof profile.
+    #[arg(long)]
+    facts: Option<PathBuf>,
+    /// JSON target config; enables the targets section.
+    #[arg(long)]
+    config: Option<PathBuf>,
+    /// Slice definitions YAML; enables the slices section.
+    #[arg(long)]
+    slices: Option<PathBuf>,
+    /// Scope config (TOML or YAML); enables the scopes section.
+    #[arg(long)]
+    scopes_config: Option<PathBuf>,
+    /// Include the sample-facts payload as a facts section.
+    #[arg(long)]
+    include_facts: bool,
+    /// Limit ranked scope rows per section.
+    #[arg(long)]
+    top: Option<usize>,
+    /// Runtime rule pack to apply (generic or ruby).
+    #[arg(long, default_value = "generic")]
+    runtime: String,
+    /// External runtime rule pack YAML (overrides --runtime).
+    #[arg(long)]
+    runtime_rules: Option<PathBuf>,
+    /// Core classes CSV override for the ruby runtime.
+    #[arg(long)]
+    core_classes: Option<PathBuf>,
+    /// Write the report to this path instead of stdout.
+    #[arg(long)]
+    output: Option<PathBuf>,
+}
+
+#[derive(Args)]
 struct CompareArgs {
     /// Baseline report JSON path.
     #[arg(long)]
@@ -238,7 +277,70 @@ fn run(cli: Cli) -> Result<i32, String> {
         Command::Slices(args) => run_slices(args).map(|()| 0),
         Command::Compare(args) => run_compare(args),
         Command::Scopes(args) => run_scopes(args).map(|()| 0),
+        Command::Report(args) => run_report(args).map(|()| 0),
     }
+}
+
+fn run_report(args: ReportArgs) -> Result<(), String> {
+    if args.config.is_none() && args.slices.is_none() && args.scopes_config.is_none() {
+        return Err(
+            "report requires at least one of --config, --slices, or --scopes-config.".to_string(),
+        );
+    }
+    let runtime_rules = resolve_runtime_rules(
+        &args.runtime,
+        args.runtime_rules.as_ref(),
+        args.core_classes.as_ref(),
+    )?;
+    // The whole point: decode a single facts model and feed every projection.
+    let facts = load_projection_input(args.profile.as_ref(), args.facts.as_ref())?;
+    let mut payload = serde_json::Map::new();
+    payload.insert(
+        "tool".to_string(),
+        serde_json::Value::String("clankerprof_report".to_string()),
+    );
+    if args.include_facts {
+        payload.insert(
+            "facts".to_string(),
+            clankerprof_core::sample_facts_to_json_value(&facts),
+        );
+    }
+    if let Some(config_path) = &args.config {
+        let config_payload =
+            std::fs::read_to_string(config_path).map_err(|error| error.to_string())?;
+        let config = parse_target_config_json(&config_payload)?;
+        let options = TargetAnalysisOptions {
+            runtime_rules: runtime_rules.clone(),
+            ..TargetAnalysisOptions::default()
+        };
+        payload.insert(
+            "targets".to_string(),
+            render_target_json(&analyze_target_facts_with_options(
+                &facts, &config, &options,
+            )),
+        );
+    }
+    if let Some(slices_path) = &args.slices {
+        let options = SliceAnalysisOptions {
+            slices: load_slices_file(slices_path)?,
+            runtime_rules: runtime_rules.clone(),
+            ..SliceAnalysisOptions::default()
+        };
+        payload.insert(
+            "slices".to_string(),
+            render_slice_json(&analyze_slice_facts(&facts, &options), &options),
+        );
+    }
+    if let Some(scopes_config_path) = &args.scopes_config {
+        let options = load_boundary_options(scopes_config_path, runtime_rules)?;
+        payload.insert(
+            "scopes".to_string(),
+            render_boundary_json(&analyze_boundary_facts(&facts, &options)?, args.top),
+        );
+    }
+    let rendered = serde_json::to_string_pretty(&serde_json::Value::Object(payload))
+        .map_err(|error| error.to_string())?;
+    emit(&rendered, args.output.as_ref())
 }
 
 fn load_projection_input(
