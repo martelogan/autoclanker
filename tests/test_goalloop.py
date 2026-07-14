@@ -191,13 +191,21 @@ def test_goal_passes_only_when_rows_finish_and_gates_succeed(
         charter_path.read_text(encoding="utf-8").replace("exit 3", "true"),
         encoding="utf-8",
     )
+    # Changing the gates changes the contract: goal refuses until re-locked.
+    assert goalloop_main(["goal", "--root", str(tmp_path)]) == 1
+    assert _last_json(capsys)["reason"] == "contract drifted"
+    assert goalloop_main(["lock", "--root", str(tmp_path)]) == 0
+    assert _last_json(capsys)["changed"] is True
+
     assert goalloop_main(["goal", "--root", str(tmp_path)]) == 0
     assert _last_json(capsys)["reason"] == "goal met"
     events = [
         json.loads(line)
         for line in (tmp_path / HISTORY_FILENAME).read_text().splitlines()
     ]
-    assert events[-1] == {"event": "goal", "ok": True, "pending": 0, "rounds": 0}
+    assert events[-1]["event"] == "goal"
+    assert events[-1]["ok"] is True
+    assert events[-1]["contract_digest"] == events[-2]["contract_digest"]
 
 
 @covers("M10-003")
@@ -272,7 +280,9 @@ def test_audit_ingest_appends_confirmed_waves_and_refutation_log(
         encoding="utf-8",
     )
     capsys.readouterr()
-    assert goalloop_main(["audit", "ingest", str(findings), "--root", str(tmp_path)]) == 0
+    assert (
+        goalloop_main(["audit", "ingest", str(findings), "--root", str(tmp_path)]) == 0
+    )
     payload = _last_json(capsys)
     assert payload == {
         "ok": True,
@@ -313,7 +323,9 @@ def test_audit_converges_on_an_empty_round_and_unblocks_goal(
 
     findings = tmp_path / "findings.json"
     findings.write_text("[]", encoding="utf-8")
-    assert goalloop_main(["audit", "ingest", str(findings), "--root", str(tmp_path)]) == 0
+    assert (
+        goalloop_main(["audit", "ingest", str(findings), "--root", str(tmp_path)]) == 0
+    )
     assert _last_json(capsys)["converged"] is True
     assert goalloop_main(["goal", "--root", str(tmp_path)]) == 0
     assert _last_json(capsys)["reason"] == "goal met"
@@ -333,17 +345,25 @@ def test_audit_ingest_enforces_the_round_budget_and_finding_shape(
     findings = tmp_path / "findings.json"
 
     findings.write_text(json.dumps({"not": "a list"}), encoding="utf-8")
-    assert goalloop_main(["audit", "ingest", str(findings), "--root", str(tmp_path)]) == 2
+    assert (
+        goalloop_main(["audit", "ingest", str(findings), "--root", str(tmp_path)]) == 2
+    )
 
     findings.write_text(
         json.dumps([{"title": "no verdict", "evidence": "x"}]), encoding="utf-8"
     )
-    assert goalloop_main(["audit", "ingest", str(findings), "--root", str(tmp_path)]) == 2
+    assert (
+        goalloop_main(["audit", "ingest", str(findings), "--root", str(tmp_path)]) == 2
+    )
 
     findings.write_text("[]", encoding="utf-8")
-    assert goalloop_main(["audit", "ingest", str(findings), "--root", str(tmp_path)]) == 0
+    assert (
+        goalloop_main(["audit", "ingest", str(findings), "--root", str(tmp_path)]) == 0
+    )
     capsys.readouterr()
-    assert goalloop_main(["audit", "ingest", str(findings), "--root", str(tmp_path)]) == 2
+    assert (
+        goalloop_main(["audit", "ingest", str(findings), "--root", str(tmp_path)]) == 2
+    )
     error = capsys.readouterr().err
     assert "escalate to a human" in error
 
@@ -433,6 +453,63 @@ def test_model_helpers_round_trip_rows_and_convergence(tmp_path: Path) -> None:
     assert audit_converged(charter, []) is True  # audit disabled -> converged
 
 
+@covers("M10-004")
+def test_contract_lock_tracks_semantic_charter_changes_only(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _init_loop(tmp_path, auditor="codex exec")
+    capsys.readouterr()
+    assert goalloop_main(["status", "--root", str(tmp_path)]) == 0
+    contract = _last_json(capsys)["contract"]
+    assert contract["locked"] is True
+    assert contract["drifted"] is False
+    assert contract["digest"] == contract["locked_digest"]
+
+    # Editing the prose body does not move the contract.
+    charter_path = tmp_path / "goalloop.charter.md"
+    charter_path.write_text(
+        charter_path.read_text(encoding="utf-8").replace(
+            "<what will exist when this loop is done>", "A shipped adapter."
+        ),
+        encoding="utf-8",
+    )
+    assert goalloop_main(["status", "--root", str(tmp_path)]) == 0
+    assert _last_json(capsys)["contract"]["drifted"] is False
+
+    # Editing the audit policy does.
+    charter_path.write_text(
+        charter_path.read_text(encoding="utf-8").replace(
+            "max_rounds: 3", "max_rounds: 9"
+        ),
+        encoding="utf-8",
+    )
+    assert goalloop_main(["status", "--root", str(tmp_path)]) == 0
+    assert _last_json(capsys)["contract"]["drifted"] is True
+    assert goalloop_main(["gate", "--root", str(tmp_path)]) == 0
+    assert _last_json(capsys)["contract"]["drifted"] is True
+
+    assert goalloop_main(["lock", "--root", str(tmp_path)]) == 0
+    payload = _last_json(capsys)
+    assert payload["changed"] is True
+    assert goalloop_main(["status", "--root", str(tmp_path)]) == 0
+    assert _last_json(capsys)["contract"]["drifted"] is False
+
+
+@covers("M10-004")
+def test_loops_without_a_recorded_lock_are_never_drifted(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _init_loop(tmp_path)
+    (tmp_path / HISTORY_FILENAME).unlink()
+    _write_tracker(tmp_path, ["| A-01 | first | check | done | |"])
+    capsys.readouterr()
+    assert goalloop_main(["status", "--root", str(tmp_path)]) == 0
+    contract = _last_json(capsys)["contract"]
+    assert contract["locked"] is False
+    assert contract["drifted"] is False
+    assert goalloop_main(["goal", "--root", str(tmp_path)]) == 0
+
+
 @covers("M10-003")
 def test_umbrella_alias_dispatches_goalloop_with_the_real_exit_code(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -463,6 +540,7 @@ def test_goal_loop_skill_documents_the_portable_workflow() -> None:
         "goalloop init",
         "goalloop handoff",
         "goalloop goal",
+        "goalloop lock",
         "goalloop audit prompt",
         "goalloop audit ingest",
         "docs/GOALLOOP.md",

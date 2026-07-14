@@ -186,6 +186,12 @@
     "status": "active"
   },
   {
+    "requirement_id": "M4-008",
+    "gate": "required",
+    "description": "The goalloop adapter kind treats a goal loop's charter gates as the locked benchmark surface: candidate genotypes reach gates as GOALLOOP_GENE_* environment variables, gate exit codes and optional GOALLOOP_METRICS output become eval results carrying the loop's contract digest, and evaluation is refused when the loop contract has drifted from its lock.",
+    "status": "active"
+  },
+  {
     "requirement_id": "M5-001",
     "gate": "required",
     "description": "The first-party autoresearch adapter uses a real contract target when present.",
@@ -387,6 +393,12 @@
     "requirement_id": "M10-003",
     "gate": "required",
     "description": "goalloop is usable standalone and through the autoclanker goalloop alias, emits harness-portable handoff prompts so any agent harness or human can continue a loop, and ships an operator skill documenting the Claude, Codex, and pi drivers.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M10-004",
+    "gate": "required",
+    "description": "goalloop locks the charter's semantic contract (name, gates, audit policy) behind a recorded digest: prose edits stay free, but a drifted contract blocks the goal check until it is re-locked as an explicit, history-recorded act, mirroring the bayes-layer rule that eval results with a mismatched contract are rejected.",
     "status": "active"
   }
 ]

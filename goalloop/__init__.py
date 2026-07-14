@@ -10,9 +10,11 @@ from goalloop.model import (
     LoopPaths,
     Requirement,
     audit_converged,
+    contract_digest,
     load_audit_rounds,
     load_charter,
     load_requirements,
+    locked_contract_digest,
     waves_summary,
 )
 
@@ -26,8 +28,10 @@ __all__ = [
     "LoopPaths",
     "Requirement",
     "audit_converged",
+    "contract_digest",
     "load_audit_rounds",
     "load_charter",
     "load_requirements",
+    "locked_contract_digest",
     "waves_summary",
 ]

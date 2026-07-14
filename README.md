@@ -299,6 +299,7 @@ agent harness (Claude Code, Codex, pi) or a human can continue the same loop:
 
 ```bash
 goalloop init --name my-effort --gate './bin/dev check' --auditor 'codex exec'
+goalloop lock           # re-lock after intentional charter contract edits
 goalloop handoff        # the next-iteration prompt for any harness
 goalloop status         # per-wave progress JSON
 goalloop goal           # the deterministic completion check
@@ -308,7 +309,10 @@ goalloop audit ingest triaged-findings.json
 
 Confirmed audit findings become new tracker waves; refutations enter a log the
 auditor must not re-litigate; a round confirming nothing new converges the
-loop. The full contract is in [`docs/GOALLOOP.md`](docs/GOALLOOP.md), and
+loop. Goal loops also plug into the Bayesian layer: the `goalloop` adapter
+kind lets a session evaluate suggested candidates against the loop's own
+locked gates (see `docs/INTEGRATIONS.md`). The full contract is in
+[`docs/GOALLOOP.md`](docs/GOALLOOP.md), and
 [`skills/goal-loop`](skills/goal-loop) packages the operator workflow.
 
 ## Quickstart

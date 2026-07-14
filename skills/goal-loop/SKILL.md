@@ -21,7 +21,10 @@ Run it standalone (`goalloop …`) or via the umbrella (`autoclanker goalloop �
    (repeat `--gate` for each required check; add `--auditor '<command>'` to
    enable adversarial audit). Then edit `goalloop.charter.md` to a real goal
    definition: concrete Outcome, the Evidence that proves it, explicit Scope
-   bounds, and Stop conditions that escalate instead of iterating.
+   bounds, and Stop conditions that escalate instead of iterating. If you
+   changed the gates or audit policy while editing, run `goalloop lock` — the
+   contract digest is locked at init, and a drifted contract blocks
+   `goalloop goal` until re-locked.
 2. **Enumerate requirements.** Replace the skeleton in `goalloop.tracker.md`
    with wave-grouped rows (`A-01`, `A-02`, … `B-01`): one checkable
    requirement per row, each with a deterministic Verify command. The tracker
@@ -50,9 +53,21 @@ Run it standalone (`goalloop …`) or via the umbrella (`autoclanker goalloop �
    the log so the auditor cannot re-raise them without new evidence. Loop
    until a round confirms nothing new; past `max_rounds`, escalate to a human.
 
+## Bayesian guidance (optional)
+
+When iterations are parameterized (tuning knobs, competing approaches), wire
+the loop into an autoclanker session via the `goalloop` adapter kind: the
+loop's gates become the session's locked eval surface, candidates arrive as
+`GOALLOOP_GENE_*` environment variables, and gates report measurements with a
+`GOALLOOP_METRICS={...}` JSON line. See docs/GOALLOOP.md and
+`examples/adapters/goalloop.local.yaml`.
+
 ## Rules
 
 - Never pipe a gate into `tail`/`head` — that masks the exit code. Capture it.
+- Never weaken gates or audit policy to make `goal` pass — that is contract
+  drift; if a change is genuinely warranted, make it and `goalloop lock` it
+  as a visible, deliberate act.
 - Flip tracker rows and land the code in the SAME commit.
 - `dropped` requires a reason in Notes; duplicate IDs are rejected.
 - Stop conditions from the charter override everything else.

@@ -10,6 +10,7 @@ the history is an append-only JSONL event stream.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 
@@ -223,6 +224,39 @@ def load_audit_rounds(paths: LoopPaths) -> list[AuditRound]:
         if refuted:
             current.refuted_titles.append(refuted.group(1))
     return rounds
+
+
+def contract_digest(charter: Charter) -> str:
+    """Digest of the charter's semantic contract (name, gates, audit policy).
+
+    The prose body is deliberately excluded: it may evolve freely, but changing
+    the definition of green mid-loop must be an explicit, recorded act.
+    """
+    payload: dict[str, Any] = {
+        "audit": (
+            {"auditor": charter.auditor, "max_rounds": charter.max_audit_rounds}
+            if charter.audit_enabled
+            else None
+        ),
+        "gates": list(charter.gates),
+        "name": charter.name,
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def locked_contract_digest(paths: LoopPaths) -> str | None:
+    """The most recently locked contract digest (init or explicit lock event)."""
+    if not paths.history.exists():
+        return None
+    locked: str | None = None
+    for line in paths.history.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        event = cast(dict[str, Any], json.loads(line))
+        if event.get("event") in {"init", "lock"} and "contract_digest" in event:
+            locked = str(event["contract_digest"])
+    return locked
 
 
 def audit_converged(charter: Charter, rounds: list[AuditRound]) -> bool:

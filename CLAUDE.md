@@ -80,7 +80,7 @@ with deterministic optimistic fallback) → query_policy → commit_policy
 
 Invariants from `docs/SPEC.md`: preview-then-apply is mandatory; canonicalization must work without any model provider; fallbacks are recorded in artifacts, never silent; eval results with a mismatched contract are rejected.
 
-Adapters (`bayes_layer/adapters/`): `EvalLoopAdapter` protocol dispatched by `config.kind` — `fixture` (deterministic, keeps the repo self-contained), `autoresearch`/`cevolve` (real upstreams via `live_upstreams.py`, falling back to fixtures), `python_module`/`subprocess` (external). Upstream loops are adapters, never vendored source.
+Adapters (`bayes_layer/adapters/`): `EvalLoopAdapter` protocol dispatched by `config.kind` — `fixture` (deterministic, keeps the repo self-contained), `autoresearch`/`cevolve` (real upstreams via `live_upstreams.py`, falling back to fixtures), `python_module`/`subprocess` (external), `goalloop` (a goal loop's charter gates as the eval surface; genotypes via `GOALLOOP_GENE_*` env vars, refuses drifted loop contracts). Upstream loops are adapters, never vendored source.
 
 `schemas/*.schema.json` are the payload contracts, loaded and enforced at runtime with jsonschema (Draft 2020-12) via `validate_payload_against_schema` in `bayes_layer/belief_io.py`, layered with additional hand-written semantic validation (clankergraph validation alone is fully hand-rolled in `autoclanker/clankergraph.py`; keep it in sync with `schemas/clankergraph.schema.json`). `bayes_layer/config.py` locates defaults by requiring both `configs/` and `schemas/` dirs to exist.
 

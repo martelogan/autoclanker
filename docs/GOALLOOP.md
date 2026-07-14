@@ -36,9 +36,17 @@ artifact), and use exit codes: 0 success, 1 not-met/gate-failure
   finished; for wiring partial milestones into scripts.
 - `goalloop gate` — run the charter gates in order, capturing each real exit
   code and output tail; stops at the first failure and propagates its code.
-- `goalloop goal` — the completion check. Exit 0 only when: every tracker row
-  is `done` or `dropped`-with-reason, AND (if an auditor is configured) the
-  audit has converged, AND every gate passes.
+- `goalloop lock` — record the current charter contract digest (sha256 over
+  name, gates, and audit policy — the prose body is excluded) as the locked
+  definition of done. `init` locks automatically; after any intentional
+  contract edit, re-lock. This mirrors the bayes-layer eval contract: eval
+  results with a mismatched contract are rejected, and here a drifted
+  contract blocks `goal` until re-locked — moving the goalposts mid-loop is
+  always an explicit, history-recorded act.
+- `goalloop goal` — the completion check. Exit 0 only when: the charter
+  contract has not drifted from its lock, AND every tracker row is `done` or
+  `dropped`-with-reason, AND (if an auditor is configured) the audit has
+  converged, AND every gate passes.
 - `goalloop handoff [--json]` — the next-iteration prompt: the loop protocol
   (small clusters, real exit codes, tracker-flip-in-same-commit, stop
   conditions), current progress, pending rows, and the charter body. Feed this
@@ -101,6 +109,22 @@ The audit phase pits two independent agents against each other:
    log and cannot re-raise dead findings without new evidence.
 5. A round with zero confirmed findings converges the audit; `goalloop goal`
    can now pass. Past `max_rounds`, the loop refuses to continue and escalates.
+
+## Bayesian guidance over a goal loop (autoclanker adapter)
+
+The synthesis with autoclanker's core engine runs through the `goalloop`
+adapter kind (`docs/INTEGRATIONS.md` §2): an autoclanker session can treat a
+goal loop's charter gates as its locked eval surface. Configure
+`kind: goalloop, mode: local_repo_path` with `repo_path` at the loop root and
+`metadata.genes` declaring the tunable knobs; suggested candidates reach the
+gates as `GOALLOOP_GENE_*` environment variables, gates report measurements
+with a `GOALLOOP_METRICS={...}` JSON line, and results carry the loop's
+contract digest. The two lock systems compose: the session's eval contract
+rejects results from a changed adapter surface, and the adapter refuses to
+evaluate at all while the loop's own charter contract is drifted from its
+lock. Beliefs about which approaches are risky or promising flow through the
+ordinary belief → posterior → suggest pipeline; the loop supplies the durable
+definition of green. See `examples/adapters/goalloop.local.yaml`.
 
 ## Operator skill
 

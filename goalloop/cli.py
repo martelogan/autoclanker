@@ -25,9 +25,11 @@ from goalloop.model import (
     append_history,
     audit_converged,
     charter_template,
+    contract_digest,
     load_audit_rounds,
     load_charter,
     load_requirements,
+    locked_contract_digest,
     tracker_template,
     waves_summary,
 )
@@ -56,14 +58,52 @@ def run_init(args: argparse.Namespace) -> int:
         encoding="utf-8",
     )
     paths.tracker.write_text(tracker_template(args.name), encoding="utf-8")
-    append_history(paths, {"event": "init", "name": args.name, "gates": gates})
+    digest = contract_digest(load_charter(paths))
+    append_history(
+        paths,
+        {
+            "event": "init",
+            "name": args.name,
+            "gates": gates,
+            "contract_digest": digest,
+        },
+    )
     _emit(
         {
             "ok": True,
             "charter": str(paths.charter),
             "tracker": str(paths.tracker),
-            "next": "Edit the charter and tracker, then drive the loop with "
-            "goalloop handoff / status / goal.",
+            "contract_digest": digest,
+            "next": "Edit the charter and tracker, re-lock the contract with "
+            "goalloop lock, then drive the loop with goalloop handoff / "
+            "status / goal.",
+        }
+    )
+    return 0
+
+
+def _contract_state(charter: Charter, paths: LoopPaths) -> dict[str, Any]:
+    digest = contract_digest(charter)
+    locked = locked_contract_digest(paths)
+    return {
+        "digest": digest,
+        "locked_digest": locked,
+        "locked": locked is not None,
+        "drifted": locked is not None and locked != digest,
+    }
+
+
+def run_lock(args: argparse.Namespace) -> int:
+    paths = _paths(args)
+    digest = contract_digest(load_charter(paths))
+    previous = locked_contract_digest(paths)
+    append_history(paths, {"event": "lock", "contract_digest": digest})
+    _emit(
+        {
+            "ok": True,
+            "contract_digest": digest,
+            "previous": previous,
+            "changed": previous != digest,
         }
     )
     return 0
@@ -81,6 +121,7 @@ def _status_payload(
         "done": sum(1 for row in rows if row.finished),
         "total": len(rows),
         "gates": list(charter.gates),
+        "contract": _contract_state(charter, paths),
         "audit": {
             "enabled": charter.audit_enabled,
             "rounds": len(rounds),
@@ -144,13 +185,31 @@ def run_gate(args: argparse.Namespace) -> int:
     paths = _paths(args)
     charter = load_charter(paths)
     exit_code, results = _run_gates(charter, paths)
-    _emit({"ok": exit_code == 0, "results": results})
+    _emit(
+        {
+            "ok": exit_code == 0,
+            "results": results,
+            "contract": _contract_state(charter, paths),
+        }
+    )
     return exit_code
 
 
 def run_goal(args: argparse.Namespace) -> int:
     paths = _paths(args)
     charter = load_charter(paths)
+    contract = _contract_state(charter, paths)
+    if contract["drifted"]:
+        _emit(
+            {
+                "ok": False,
+                "reason": "contract drifted",
+                "contract": contract,
+                "next": "The charter's name/gates/audit policy changed after the "
+                "last lock. Re-lock intentionally with goalloop lock.",
+            }
+        )
+        return 1
     rows = load_requirements(paths)
     pending = [row.requirement_id for row in rows if not row.finished]
     rounds = load_audit_rounds(paths)
@@ -176,7 +235,13 @@ def run_goal(args: argparse.Namespace) -> int:
     _emit(payload)
     append_history(
         paths,
-        {"event": "goal", "ok": exit_code == 0, "pending": 0, "rounds": len(rounds)},
+        {
+            "event": "goal",
+            "ok": exit_code == 0,
+            "pending": 0,
+            "rounds": len(rounds),
+            "contract_digest": contract["digest"],
+        },
     )
     return exit_code
 
@@ -374,6 +439,14 @@ def register_goalloop_commands(
     gate = subparsers.add_parser("gate", help="Run the charter gates.")
     _add_root(gate)
     _set(gate, run_gate)
+
+    lock = subparsers.add_parser(
+        "lock",
+        help="Record the current charter contract (name/gates/audit policy) "
+        "digest as the locked definition of done.",
+    )
+    _add_root(lock)
+    _set(lock, run_lock)
 
     goal = subparsers.add_parser(
         "goal",
