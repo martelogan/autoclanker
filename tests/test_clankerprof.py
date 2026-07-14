@@ -918,6 +918,21 @@ def test_clankerprof_no_enhanced_generic_runtime_keeps_generic_rules() -> None:
         )
 
 
+def test_clankerprof_cli_rejects_malformed_flags(tmp_path: Path) -> None:
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(_target_profile_bytes())
+    cases: list[list[str]] = [
+        ["targets", "--profile", str(profile_path), "--bogus-flag"],
+        ["targets", "--profile"],
+        ["slices", "--profile", str(profile_path), "--top", "not-an-int"],
+        ["unknown-subcommand"],
+    ]
+    for argv in cases:
+        with pytest.raises(SystemExit) as excinfo:
+            clankerprof_main(argv)
+        assert excinfo.value.code == 2, argv
+
+
 def test_clankerprof_decoder_rejects_truncated_and_overlong_fields() -> None:
     overlong_varint = bytes([0x48]) + b"\xff" * 10 + b"\x01"
     with pytest.raises(PprofDecodeError, match="Invalid protobuf varint"):

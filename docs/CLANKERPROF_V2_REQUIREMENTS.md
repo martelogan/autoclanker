@@ -48,7 +48,7 @@ file — it is the single source of execution state.
 | A2-05 | `--target-csv-layout=compat` with `--format json` explicitly rejected (item 17) | test_clankerprof_csv_layout_compat_rejected_with_json_format | done | validated before analysis |
 | A2-06 | Decoder robustness in both languages: truncated fixed32/64 rejected; varint >10 bytes rejected before shift overflow (items 18, 20) | test_clankerprof_decoder_rejects_truncated_and_overlong_fields; parity malformed-profiles test | done | varint bits past 63 drop in both languages |
 | A2-07 | Rule packs strict: unknown keys rejected, `runtime_rules.v1` version field required-or-defaulted (item 32) | test_clankerprof_rule_packs_reject_unknown_keys_and_versions | done | packaged packs carry schema_version; Rust loader in B1 |
-| A2-08 | Rust CLI parses arguments strictly via clap, rejecting what Python rejects (item 23) | parity malformed-flags test | todo | |
+| A2-08 | Rust CLI parses arguments strictly via clap, rejecting what Python rejects (item 23) | test_clankerprof_rust_cli_rejects_malformed_flags; test_clankerprof_cli_rejects_malformed_flags | done | clap derive; --by-slice no longer absorbs option-like tokens |
 
 ## Wave A3 — architecture
 
@@ -85,8 +85,8 @@ file — it is the single source of execution state.
 | --- | --- | --- | --- | --- |
 | B0-01 | Insertion-ordered maps replace BTreeMap where order-sensitive (item 19) | alias of A1-18 | done | flipped with A1-18 |
 | B0-02 | Varint shift-overflow guard before the shift (item 20) | alias of A2-06 | done | guard now >= 70 before 11th byte; wrapping_shl |
-| B0-03 | clap argument parsing (item 23) | alias of A2-08 | todo | flips with A2-08 |
-| B0-04 | No `Regex::new` in per-frame hot loops; rules precompiled once (item 22) | cargo test + code gate | todo | |
+| B0-03 | clap argument parsing (item 23) | alias of A2-08 | done | flipped with A2-08 |
+| B0-04 | No `Regex::new` in per-frame hot loops; rules precompiled once (item 22) | grep gate: compiled_regex is the only Regex::new caller | done | memoized cache; RegexSet upgrade tracked in B5-01 |
 | B0-05 | Compare dispatches on `tool` + finite-JSON contract (items 24, 10) | alias of A1-14/A1-16 | done | Rust compare_json + compare_boundary_json landed |
 
 ## Wave B1 — Rust rule system

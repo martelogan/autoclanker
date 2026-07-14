@@ -4,7 +4,8 @@ use indexmap::IndexMap;
 use regex::Regex;
 use serde_json::value::RawValue;
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::{Mutex, OnceLock};
 
 // Category precedence is first-match-wins in config order, and ranked arrays
 // break ties by first-seen order, matching the Python reference; both need
@@ -309,7 +310,7 @@ pub fn extract_library_path(
     for pattern in patterns {
         match pattern {
             LibraryPattern::Regex(pattern) => {
-                let regex = Regex::new(pattern).ok()?;
+                let regex = compiled_regex(pattern)?;
                 let Some(captures) = regex.captures(&normalized) else {
                     continue;
                 };
@@ -388,6 +389,22 @@ fn normalize_profile_path(path: &str) -> String {
     path.replace('\\', "/")
 }
 
+/// Memoized regex compilation: rule-pack and config patterns are evaluated
+/// once per unique frame path across hot per-frame loops, so compiling on
+/// every call dominated runtime. Patterns come from configs, so the cache is
+/// small and bounded per process.
+fn compiled_regex(pattern: &str) -> Option<Regex> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<Regex>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = cache.lock().expect("regex cache poisoned");
+    if let Some(entry) = guard.get(pattern) {
+        return entry.clone();
+    }
+    let compiled = Regex::new(pattern).ok();
+    guard.insert(pattern.to_string(), compiled.clone());
+    compiled
+}
+
 fn has_glob_token(pattern: &str) -> bool {
     pattern.contains('*') || pattern.contains('?') || pattern.contains('[')
 }
@@ -400,7 +417,7 @@ fn looks_like_path_pattern(pattern: &str) -> bool {
 }
 
 fn match_regex(pattern: &str, path: &str) -> bool {
-    Regex::new(pattern)
+    compiled_regex(pattern)
         .map(|regex| regex.is_match(&normalize_profile_path(path)))
         .unwrap_or(false)
 }
@@ -430,7 +447,7 @@ fn glob_to_regex(pattern: &str) -> String {
 fn normalize_library_component(component: &str, rules: &RuntimeRuleSet) -> String {
     let normalized = component.trim_matches('/');
     for pattern in &rules.library_name_suffix_patterns {
-        let Ok(regex) = Regex::new(pattern) else {
+        let Some(regex) = compiled_regex(pattern) else {
             continue;
         };
         if let Some(found) = regex.find(normalized) {

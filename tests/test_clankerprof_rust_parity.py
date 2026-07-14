@@ -571,6 +571,48 @@ def test_clankerprof_rust_compare_matches_python_boundary_compare(
 
 
 @pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_cli_rejects_malformed_flags(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(_profile_bytes(gzipped=False))
+    cases: list[list[str]] = [
+        ["targets", "--profile", str(profile_path), "--bogus-flag"],
+        ["targets", "--profile"],
+        ["slices", "--profile", str(profile_path), "--top", "not-an-int"],
+        [
+            "compare",
+            "--before",
+            str(profile_path),
+            "--after",
+            str(profile_path),
+            "--threshold-abs",
+            "not-a-number",
+        ],
+        ["unknown-subcommand"],
+    ]
+    for argv in cases:
+        completed = subprocess.run(
+            [
+                "cargo",
+                "run",
+                "--quiet",
+                "-p",
+                "clankerprof-core",
+                "--bin",
+                "clankerprof-rs",
+                "--",
+                *argv,
+            ],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 2, argv
+        assert completed.stdout == "", argv
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
 def test_clankerprof_rust_decoder_rejects_malformed_profiles(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     cases = {
