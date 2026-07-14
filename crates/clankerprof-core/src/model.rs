@@ -135,18 +135,20 @@ pub struct CallerMetrics {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SemanticCallerMetrics {
     pub count: usize,
-    pub caller_names: BTreeMap<String, usize>,
-    pub caller_files: BTreeMap<String, usize>,
+    // First-max-wins summaries need Python's insertion order.
+    pub caller_names: IndexMap<String, usize>,
+    pub caller_files: IndexMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CategoryStats {
     pub cpu_time: TimeNs,
     pub sample_count: usize,
-    pub functions: BTreeMap<String, FunctionMetrics>,
+    // Ranked CSV/text summaries break ties first-seen, like Python dicts.
+    pub functions: IndexMap<String, FunctionMetrics>,
     pub files: BTreeSet<String>,
-    pub folded_from: BTreeMap<String, TimeNs>,
-    pub semantic_callers: BTreeMap<String, SemanticCallerMetrics>,
+    pub folded_from: IndexMap<String, TimeNs>,
+    pub semantic_callers: IndexMap<String, SemanticCallerMetrics>,
     // Rendered as a ranked array in scope output; ties break first-seen.
     pub caller_leaf_pairs: IndexMap<String, CallerMetrics>,
 }

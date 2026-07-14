@@ -1028,3 +1028,290 @@ def test_clankerprof_rust_scopes_replay_facts_identically(tmp_path: Path) -> Non
         profile_bytes, _SCOPES_PREFERRED_CONFIG, tmp_path
     )
     assert from_facts == python_payload
+
+
+def _run_python_cli(argv: list[str]) -> None:
+    from clankerprof.cli import main as clankerprof_main
+
+    assert clankerprof_main(argv) == 0, argv
+
+
+def _run_rust_cli(argv: list[str]) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    completed = subprocess.run(
+        [
+            "cargo",
+            "run",
+            "--quiet",
+            "-p",
+            "clankerprof-core",
+            "--bin",
+            "clankerprof-rs",
+            "--",
+            *argv,
+        ],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, (argv, completed.stderr)
+
+
+def _flag_matrix_cases(tmp_path: Path) -> list[tuple[str, list[str], str]]:
+    """(case name, shared argv after subcommand, compare mode)."""
+    profile_path = tmp_path / "matrix.pb"
+    profile_path.write_bytes(_ruby_runtime_profile_bytes())
+    config_path = tmp_path / "matrix-targets.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "Example::HtmlResponder#render_template": {
+                    "Components": "path:app/components",
+                    "Application": "path:app/**",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    attributables_path = tmp_path / "attributables.json"
+    attributables_path.write_text(
+        json.dumps(
+            {"db_queries": {"Example::HtmlResponder#render_template": 40.0}}
+        ),
+        encoding="utf-8",
+    )
+    slices_path = tmp_path / "matrix-slices.yml"
+    slices_path.write_text(
+        """
+slices:
+  - name: components
+    paths:
+      - app/components
+    owner: web-platform
+  - name: default
+    default: true
+""",
+        encoding="utf-8",
+    )
+    gc_profile_path = tmp_path / "gc.pb"
+    gc_builder = PprofFixtureBuilder.create()
+    gc_target = gc_builder.location(
+        gc_builder.function("Target#render", "/app/target.rb")
+    )
+    gc_leaf = gc_builder.location(gc_builder.function("(marking)", "<gc>"))
+    app_leaf = gc_builder.location(gc_builder.function("Card#render", "/app/card.rb"))
+    gc_builder.sample((gc_leaf, gc_target), 4_000_000)
+    gc_builder.sample((app_leaf, gc_target), 6_000_000)
+    gc_profile_path.write_bytes(gc_builder.encode())
+
+    target_base = [
+        "targets",
+        "--profile",
+        str(profile_path),
+        "--config",
+        str(config_path),
+        "--runtime",
+        "ruby",
+    ]
+    return [
+        (
+            "targets-fold-json",
+            [*target_base, "--fold-runtime-internals"],
+            "json",
+        ),
+        (
+            "targets-fold-track-csv",
+            [
+                *target_base,
+                "--fold-runtime-internals",
+                "--track-semantic-callers",
+                "--format",
+                "csv",
+            ],
+            "bytes",
+        ),
+        (
+            "targets-simple-csv-attributables",
+            [
+                *target_base,
+                "--cpu-attributables",
+                str(attributables_path),
+                "--format",
+                "simple-csv",
+            ],
+            "bytes",
+        ),
+        (
+            "targets-text-fold-track",
+            [
+                *target_base,
+                "--fold-runtime-internals",
+                "--track-semantic-callers",
+                "--format",
+                "text",
+            ],
+            "bytes",
+        ),
+        (
+            "targets-no-enhanced",
+            [*target_base, "--no-enhanced"],
+            "json",
+        ),
+        (
+            "targets-minimal-target-mode",
+            [
+                "targets",
+                "--profile",
+                str(profile_path),
+                "--target",
+                "Example::HtmlResponder#render_template",
+                "--runtime",
+                "ruby",
+            ],
+            "json",
+        ),
+        (
+            "slices-attribute-metadata-byslice",
+            [
+                "slices",
+                "--profile",
+                str(profile_path),
+                "--slices",
+                str(slices_path),
+                "--attribute",
+                "name:StatsD,to:components",
+                "--by-slice",
+                "5",
+                "--unattributed-libraries",
+                "1",
+                "--runtime",
+                "ruby",
+            ],
+            "json",
+        ),
+        (
+            "slices-gc-pseudo",
+            [
+                "slices",
+                "--profile",
+                str(gc_profile_path),
+                "--slices",
+                str(slices_path),
+            ],
+            "json",
+        ),
+    ]
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_cli_flag_matrix_matches_python(tmp_path: Path) -> None:
+    for name, argv, mode in _flag_matrix_cases(tmp_path):
+        python_out = tmp_path / f"{name}-python.out"
+        rust_out = tmp_path / f"{name}-rust.out"
+        _run_python_cli([*argv, "--output", str(python_out)])
+        _run_rust_cli([*argv, "--output", str(rust_out)])
+        python_text = python_out.read_text(encoding="utf-8")
+        rust_text = rust_out.read_text(encoding="utf-8")
+        if mode == "json":
+            assert json.loads(rust_text) == json.loads(python_text), name
+        else:
+            assert rust_text == python_text, name
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_semantic_callers_csv_matches_python(tmp_path: Path) -> None:
+    profile_path = tmp_path / "sem.pb"
+    profile_path.write_bytes(_ruby_runtime_profile_bytes())
+    config_path = tmp_path / "sem-targets.json"
+    config_path.write_text(
+        json.dumps({"Example::HtmlResponder#render_template": {"App": "path:app/**"}}),
+        encoding="utf-8",
+    )
+    base = [
+        "targets",
+        "--profile",
+        str(profile_path),
+        "--config",
+        str(config_path),
+        "--runtime",
+        "ruby",
+        "--track-semantic-callers",
+    ]
+    python_csv = tmp_path / "sem-python.csv"
+    rust_csv = tmp_path / "sem-rust.csv"
+    python_json = tmp_path / "sem-python.json"
+    rust_json = tmp_path / "sem-rust.json"
+    _run_python_cli(
+        [*base, "--semantic-callers-csv", str(python_csv), "--output", str(python_json)]
+    )
+    _run_rust_cli(
+        [*base, "--semantic-callers-csv", str(rust_csv), "--output", str(rust_json)]
+    )
+    assert rust_csv.read_text(encoding="utf-8") == python_csv.read_text(
+        encoding="utf-8"
+    )
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_compat_csv_artifacts_match_python(tmp_path: Path) -> None:
+    import os
+
+    profile_path = tmp_path / "compat.pb"
+    profile_path.write_bytes(_ruby_runtime_profile_bytes())
+    config_path = tmp_path / "compat-targets.json"
+    config_path.write_text(
+        json.dumps({"Example::HtmlResponder#render_template": {"App": "path:app/**"}}),
+        encoding="utf-8",
+    )
+    base = [
+        "targets",
+        "--profile",
+        str(profile_path),
+        "--config",
+        str(config_path),
+        "--runtime",
+        "ruby",
+        "--format",
+        "csv",
+        "--target-csv-layout",
+        "compat",
+    ]
+    previous_cwd = Path.cwd()
+    python_dir = tmp_path / "python-compat"
+    rust_dir = tmp_path / "rust-compat"
+    python_dir.mkdir()
+    rust_dir.mkdir()
+    try:
+        os.chdir(python_dir)
+        _run_python_cli([*base, "--output", "report.csv"])
+    finally:
+        os.chdir(previous_cwd)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    completed = subprocess.run(
+        [
+            "cargo",
+            "run",
+            "--quiet",
+            "--manifest-path",
+            str(repo_root / "crates" / "clankerprof-core" / "Cargo.toml"),
+            "--bin",
+            "clankerprof-rs",
+            "--",
+            *base,
+            "--output",
+            "report.csv",
+        ],
+        cwd=rust_dir,
+        env={**os.environ, "CARGO_TARGET_DIR": str(repo_root / "target")},
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0
+
+    for relative in ("output/report.csv", "output/verbose/report.csv"):
+        python_text = (python_dir / relative).read_text(encoding="utf-8")
+        rust_text = (rust_dir / relative).read_text(encoding="utf-8")
+        assert rust_text == python_text, relative

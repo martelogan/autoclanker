@@ -204,7 +204,7 @@ pub fn assert_sample_facts_schema(payload: &Value) -> Result<(), String> {
     Ok(())
 }
 
-fn render_function_metrics(functions: &BTreeMap<String, FunctionMetrics>) -> Value {
+fn render_function_metrics(functions: &IndexMap<String, FunctionMetrics>) -> Value {
     let mut ordered: Vec<_> = functions.iter().collect();
     ordered.sort_by(|left, right| right.1.cpu_time.cmp(&left.1.cpu_time));
     let mut payload = serde_json::Map::new();

@@ -112,11 +112,11 @@ file — it is the single source of execution state.
 
 | ID | Requirement | Verify | Status | Notes |
 | --- | --- | --- | --- | --- |
-| B3-01 | `--fold-runtime-internals` + folded-from accounting | parity tests | todo | |
-| B3-02 | `--track-semantic-callers` + semantic-caller CSV; caller-to-leaf pairs; callsite stdlib-skipping | parity tests | todo | |
-| B3-03 | `--no-enhanced` / caller-fallback prefixes; `--cpu-attributables`; minimal `--target` mode | parity tests | todo | |
-| B3-04 | Output formats: csv / simple-csv / text; `--target-csv-layout compat` | byte-level parity tests | todo | |
-| B3-05 | Slice config files + `./slices.yml` discovery; `--by-slice` grammar; attribute/virtual-slice validation; GC/uncollapsible pseudo-slices; unattributed libraries | parity tests | todo | |
+| B3-01 | `--fold-runtime-internals` + folded-from accounting | flag matrix: targets-fold-json / targets-fold-track-csv / targets-text-fold-track | done | engine landed in B1; flag wired |
+| B3-02 | `--track-semantic-callers` + semantic-caller CSV; caller-to-leaf pairs; callsite stdlib-skipping | test_clankerprof_rust_semantic_callers_csv_matches_python (byte-identical); first-max-wins tie semantics via IndexMap | done | render.rs |
+| B3-03 | `--no-enhanced` / caller-fallback prefixes; `--cpu-attributables`; minimal `--target` mode | flag matrix: targets-no-enhanced / targets-simple-csv-attributables / targets-minimal-target-mode | done | |
+| B3-04 | Output formats: csv / simple-csv / text; `--target-csv-layout compat` | byte-identical CSV/simple-csv/text in the flag matrix; test_clankerprof_rust_compat_csv_artifacts_match_python (two-file pair byte-identical) | done | render.rs mirrors Python csv.writer quoting + format_time |
+| B3-05 | Slice config files + `./slices.yml` discovery; `--by-slice` grammar; attribute/virtual-slice validation; GC/uncollapsible pseudo-slices; unattributed libraries | flag matrix: slices-attribute-metadata-byslice / slices-gc-pseudo; validate_slice_options + parse_attribute ports; slice metadata round-trips | done | --config file merging deferred to the slices YAML path (slice files carry metadata) |
 
 ## Wave B4 — parity harness v2
 

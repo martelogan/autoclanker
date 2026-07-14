@@ -144,11 +144,32 @@ pub fn load_slices_file(path: impl AsRef<Path>) -> Result<Vec<SliceDefinition>, 
             .get(serde_yaml::Value::String("default".to_string()))
             .and_then(serde_yaml::Value::as_bool)
             .unwrap_or(false);
+        let mut metadata: BTreeMap<String, Value> = BTreeMap::new();
+        for (raw_key, raw_value) in mapping {
+            let Some(key) = raw_key.as_str() else {
+                continue;
+            };
+            if matches!(key, "name" | "paths" | "default") {
+                continue;
+            }
+            let converted = serde_json::to_value(raw_value).map_err(|error| error.to_string())?;
+            if key == "metadata" {
+                if let Value::Object(nested) = converted {
+                    for (nested_key, nested_value) in nested {
+                        metadata.insert(nested_key, nested_value);
+                    }
+                    continue;
+                }
+                metadata.insert(key.to_string(), converted);
+                continue;
+            }
+            metadata.insert(key.to_string(), converted);
+        }
         slices.push(SliceDefinition {
             name: name.to_string(),
             path_patterns: paths,
             is_default,
-            metadata: BTreeMap::new(),
+            metadata,
         });
     }
     let default_names: Vec<&str> = slices
@@ -316,7 +337,7 @@ fn add_optional_slice_payloads(
 
 fn slice_payload(slice: &SliceStats, total: TimeNs, options: &SliceAnalysisOptions) -> Value {
     let library_limit = options.unattributed_libraries;
-    json!({
+    let mut payload = json!({
         "frames": rendered_frames(slice, total, options.top),
         "is_default": slice.is_default,
         "name": slice.name,
@@ -324,7 +345,19 @@ fn slice_payload(slice: &SliceStats, total: TimeNs, options: &SliceAnalysisOptio
         "time_ns": slice.time_ns,
         "unattributed_gems": rendered_libraries(slice, total, library_limit),
         "unattributed_libraries": rendered_libraries(slice, total, library_limit),
-    })
+    });
+    let metadata = options
+        .slices
+        .iter()
+        .find(|definition| definition.name == slice.name && !definition.metadata.is_empty())
+        .map(|definition| definition.metadata.clone());
+    if let (Some(metadata), Some(object)) = (metadata, payload.as_object_mut()) {
+        object.insert(
+            "metadata".to_string(),
+            Value::Object(metadata.into_iter().collect()),
+        );
+    }
+    payload
 }
 
 fn rendered_frames(slice: &SliceStats, total: TimeNs, top: Option<usize>) -> Vec<Value> {

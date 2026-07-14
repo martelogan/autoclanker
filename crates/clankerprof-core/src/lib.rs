@@ -8,6 +8,7 @@ pub mod compare;
 pub mod facts;
 pub mod model;
 pub mod proto;
+pub mod render;
 pub mod rules;
 pub mod scopes;
 pub mod slices;
