@@ -35,7 +35,7 @@ file — it is the single source of execution state.
 | A1-15 | `compare_boundary_json` orders top_improvements correctly, never drops the largest (item 11) | test_clankerprof_boundary_compare_orders_top_improvements_by_magnitude | done | most-negative first |
 | A1-16 | Compare validates payload types; mismatched/wrong `tool` → exit 2 envelope in both languages (items 12, 24) | test_clankerprof_compare_rejects_wrong_payload_types; parity tool-mismatch test | done | Rust gained compare_json dispatch + boundary compare + --focus-boundaries |
 | A1-17 | Python decodes signed int64 protobuf fields as two's-complement, matching Rust (item 21) | test_clankerprof_decodes_signed_int64_fields_as_twos_complement | done | line/value = -1 decode as -1 |
-| A1-18 | Rust uses insertion-ordered maps wherever Python relies on insertion order: rule/category precedence, ranked-array tie order (item 19) | parity category-precedence + tie-order test | todo | indexmap |
+| A1-18 | Rust uses insertion-ordered maps wherever Python relies on insertion order: rule/category precedence, ranked-array tie order (item 19) | test_clankerprof_target_category_precedence_and_tie_order; parity precedence_ties case | done | indexmap for TargetConfig/results/slice stats; JSON objects stay key-sorted |
 
 ## Wave A2 — CLI / error contract
 
@@ -83,7 +83,7 @@ file — it is the single source of execution state.
 
 | ID | Requirement | Verify | Status | Notes |
 | --- | --- | --- | --- | --- |
-| B0-01 | Insertion-ordered maps replace BTreeMap where order-sensitive (item 19) | alias of A1-18 | todo | flips with A1-18 |
+| B0-01 | Insertion-ordered maps replace BTreeMap where order-sensitive (item 19) | alias of A1-18 | done | flipped with A1-18 |
 | B0-02 | Varint shift-overflow guard before the shift (item 20) | alias of A2-06 | todo | flips with A2-06 |
 | B0-03 | clap argument parsing (item 23) | alias of A2-08 | todo | flips with A2-08 |
 | B0-04 | No `Regex::new` in per-frame hot loops; rules precompiled once (item 22) | cargo test + code gate | todo | |

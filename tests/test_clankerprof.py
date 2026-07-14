@@ -644,6 +644,37 @@ def test_clankerprof_targets_recursive_frames_count_once_per_sample() -> None:
     assert parents["Target#render"]["total_time_ns"] == 10_000_000
 
 
+def test_clankerprof_target_category_precedence_and_tie_order() -> None:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("Target#render", "/srv/app/target.py"))
+    zebra = builder.location(builder.function("ZebraWork#run", "/srv/app/zone/z.py"))
+    alpha = builder.location(builder.function("AlphaWork#run", "/srv/app/azone/a.py"))
+    shared = builder.location(builder.function("BothWork#run", "/srv/app/shared/b.py"))
+    builder.sample((zebra, target), 5_000_000)
+    builder.sample((alpha, target), 5_000_000)
+    builder.sample((shared, target), 2_000_000)
+
+    config = {
+        "Target#render": {
+            "Zebra": "path:srv/app/zone",
+            "Alpha": "path:srv/app/azone",
+            "Shared Z": "path:srv/app/shared",
+            "Shared A": "path:srv/app/shared",
+        }
+    }
+    profile = decode_profile_bytes(builder.encode())
+    rendered = render_target_json(analyze_targets(profile, config))
+    parent = cast(
+        dict[str, Any],
+        cast(dict[str, Any], rendered["parents"])["Target#render"],
+    )
+    names = [
+        cast(str, category["name"])
+        for category in cast(list[dict[str, Any]], parent["categories"])
+    ]
+    assert names == ["Zebra", "Alpha", "Shared Z"]
+
+
 def test_clankerprof_primary_value_defaults_to_last_value_type() -> None:
     profile = decode_profile_bytes(_multi_value_profile_bytes())
     assert profile.sample_types == (

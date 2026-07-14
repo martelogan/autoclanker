@@ -154,6 +154,28 @@ def _recursive_profile_bytes() -> bytes:
     return builder.encode()
 
 
+def _precedence_ties_profile_bytes() -> bytes:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("Target#render", "/srv/app/target.py"))
+    zebra = builder.location(builder.function("ZebraWork#run", "/srv/app/zone/z.py"))
+    alpha = builder.location(builder.function("AlphaWork#run", "/srv/app/azone/a.py"))
+    shared = builder.location(builder.function("BothWork#run", "/srv/app/shared/b.py"))
+    builder.sample((zebra, target), 5_000_000)
+    builder.sample((alpha, target), 5_000_000)
+    builder.sample((shared, target), 2_000_000)
+    return builder.encode()
+
+
+_PRECEDENCE_TIES_CONFIG = {
+    "Target#render": {
+        "Zebra": "path:srv/app/zone",
+        "Alpha": "path:srv/app/azone",
+        "Shared Z": "path:srv/app/shared",
+        "Shared A": "path:srv/app/shared",
+    }
+}
+
+
 @pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
 def test_clankerprof_rust_targets_match_python_generic_projection(
     tmp_path: Path,
@@ -172,6 +194,10 @@ def test_clankerprof_rust_targets_match_python_generic_projection(
         "recursive": (
             _recursive_profile_bytes(),
             {"Target#render": {"App": "path:srv/app"}},
+        ),
+        "precedence_ties": (
+            _precedence_ties_profile_bytes(),
+            _PRECEDENCE_TIES_CONFIG,
         ),
     }
     for name, (profile_bytes, config) in cases.items():

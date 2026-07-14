@@ -1,5 +1,6 @@
 use crate::model::{Frame, ProfileFacts, TimeNs};
 use crate::targets::{extract_library_name, match_path_pattern, RuntimeRuleSet};
+use indexmap::IndexMap;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fs;
@@ -63,12 +64,14 @@ pub struct SliceFrameStats {
     pub time_ns: TimeNs,
 }
 
+// Ranked frame/library arrays break ties by first-seen order, matching the
+// Python reference; the accumulation maps must preserve insertion order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SliceStats {
     pub name: String,
     pub time_ns: TimeNs,
-    pub frames: BTreeMap<String, SliceFrameStats>,
-    pub unattributed_libraries: BTreeMap<String, TimeNs>,
+    pub frames: IndexMap<String, SliceFrameStats>,
+    pub unattributed_libraries: IndexMap<String, TimeNs>,
     pub is_default: bool,
 }
 
@@ -77,8 +80,8 @@ impl SliceStats {
         Self {
             name: name.into(),
             time_ns: 0,
-            frames: BTreeMap::new(),
-            unattributed_libraries: BTreeMap::new(),
+            frames: IndexMap::new(),
+            unattributed_libraries: IndexMap::new(),
             is_default: false,
         }
     }
@@ -161,7 +164,7 @@ pub fn analyze_slice_facts(
     let mut total_time = 0;
     let mut matching_time = 0;
     let mut gc_time = 0;
-    let mut stats_by_slice: BTreeMap<String, SliceStats> = BTreeMap::new();
+    let mut stats_by_slice: IndexMap<String, SliceStats> = IndexMap::new();
     let mut uncollapsible_stats = SliceStats::new(UNCOLLAPSIBLE_PSEUDO_SLICE);
     let default_slice = options
         .slices

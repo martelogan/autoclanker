@@ -1,11 +1,16 @@
 use crate::facts::{sample_facts_to_json_value, SAMPLE_FACTS_SCHEMA_VERSION};
 use crate::model::{CategoryStats, Frame, FunctionMetrics, ProfileFacts, TimeNs};
+use indexmap::IndexMap;
 use regex::Regex;
+use serde_json::value::RawValue;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub type TargetConfig = BTreeMap<String, BTreeMap<String, String>>;
-pub type TargetResults = BTreeMap<String, BTreeMap<String, CategoryStats>>;
+// Category precedence is first-match-wins in config order, and ranked arrays
+// break ties by first-seen order, matching the Python reference; both need
+// insertion-ordered maps, never BTreeMap.
+pub type TargetConfig = IndexMap<String, IndexMap<String, String>>;
+pub type TargetResults = BTreeMap<String, IndexMap<String, CategoryStats>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeRuleSet {
@@ -73,17 +78,14 @@ enum PatternMode {
 }
 
 pub fn parse_target_config_json(payload: &str) -> Result<TargetConfig, String> {
-    let value: Value = serde_json::from_str(payload).map_err(|error| error.to_string())?;
-    let Value::Object(parents) = value else {
-        return Err("Target config must be a JSON object.".to_string());
-    };
+    let parents: IndexMap<String, Box<RawValue>> = serde_json::from_str(payload)
+        .map_err(|_| "Target config must be a JSON object.".to_string())?;
     let mut result = TargetConfig::new();
-    for (parent, categories) in parents {
-        let Value::Object(raw_categories) = categories else {
-            return Err(format!("Target config for {parent} must be an object."));
-        };
-        let mut category_map = BTreeMap::new();
-        for (category, pattern) in raw_categories {
+    for (parent, raw_categories) in parents {
+        let categories: IndexMap<String, Value> = serde_json::from_str(raw_categories.get())
+            .map_err(|_| format!("Target config for {parent} must be an object."))?;
+        let mut category_map = IndexMap::new();
+        for (category, pattern) in categories {
             let Some(pattern_text) = pattern.as_str() else {
                 return Err(format!(
                     "Target config pattern for {category} must be a string."
@@ -209,7 +211,7 @@ fn render_function_metrics(functions: &BTreeMap<String, FunctionMetrics>) -> Val
 
 fn target_category(
     leaf: &Frame,
-    parent_config: &BTreeMap<String, String>,
+    parent_config: &IndexMap<String, String>,
     options: &TargetAnalysisOptions,
 ) -> String {
     for (category, pattern) in parent_config {
