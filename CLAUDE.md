@@ -24,7 +24,8 @@ Library-first, CLI-first: every CLI is non-interactive, emits JSON to stdout by 
 ./bin/dev pylint       # pylint --errors-only autoclanker  (autoclanker package only)
 ./bin/dev test         # default lane: pytest --cov-fail-under=90
 ./bin/dev test-full    # integration lane + default lane
-./bin/dev check        # required gate = what CI runs: lint → typecheck → pylint → test-full → build → strict-env validate
+./bin/dev test-rust    # cargo fmt-check + build + test (self-skips when cargo is absent)
+./bin/dev check        # required gate = what CI runs: lint → typecheck → pylint → test-full → rust lane → build → strict-env validate
 ```
 
 Test lanes (pytest markers in `pyproject.toml`):
@@ -45,14 +46,14 @@ uv run pytest -m integration tests/test_cli_integration.py  # marker-excluded te
 
 `xfail_strict = true` is on. Note the trap: `tests/test_live_upstreams_unit.py` has no marker and runs in the default lane despite its name.
 
-Rust (not wired into `bin/dev`):
+Rust (also runnable directly):
 
 ```bash
-cargo test                                                    # clankerprof-core
-cargo run -p clankerprof-core --bin clankerprof-rs -- facts … # facts|targets|slices|compare
+cargo test                                                            # clankerprof-core
+cargo run -p clankerprof-core --bin clankerprof-rs -- facts …         # facts|targets|slices|scopes|compare|report
 ```
 
-Python↔Rust parity tests (`tests/test_clankerprof_rust_parity.py`) run in the default pytest lane but skip silently when `cargo` is absent.
+Python↔Rust parity tests (`tests/test_clankerprof_rust_parity.py`) run in the default pytest lane but skip silently when `cargo` is absent; `./bin/dev test-rust` (part of `check`) runs the native cargo lane and also self-skips without cargo.
 
 ## Architecture
 
@@ -85,9 +86,9 @@ Adapters (`bayes_layer/adapters/`): `EvalLoopAdapter` protocol dispatched by `co
 ### clankerprof (sample-facts architecture)
 
 One durable fact layer; projections never walk raw profiles ad hoc:
-`proto.py` (hand-rolled pprof protobuf decoder) → `model.py` (`Profile.to_sample_facts()`) → `facts.py` (versioned `clankerprof.sample_facts.v2` export/replay contract with strict import validation; legacy v1 imports still accepted) → `analysis.py` projections (targets / slices / scopes-boundaries) → `render.py` / `compare.py` (regression gates). On the Python side, runtime semantics (Ruby, generic) live in YAML rule packs under `clankerprof/runtime_rules/`, never hardcoded; Ruby is opt-in via `--runtime ruby`. The projection commands (targets/slices/scopes/boundaries) accept `--profile` or previously exported facts JSON (mutually exclusive) with identical output guaranteed by tests; `facts` requires `--profile`, and `compare` consumes two slice reports.
+`proto.py` (hand-rolled pprof protobuf decoder; strict about malformed input, signed int64s, value types) → `model.py` (`Profile.to_sample_facts()` with per-profile frame interning and memoized facts) → `facts.py` (versioned `clankerprof.sample_facts.v2` compact interned export/replay contract with strict import validation; legacy v1 imports still accepted) → projections in `targets.py`, `slices.py` (typed filter DSL with frame-identity memoization), and `scopes.py` (boundary decomposition), all built on `patterns.py` (path/regex/library matching), `categorize.py` (the shared categorization engine), and `stats.py` (projection accumulators); `analysis.py` is a compatibility shim re-exporting the historical surface → `render.py` / `compare.py` (strict-JSON regression gates dispatching on the report `tool` field). Runtime semantics (Ruby, generic) live in strict, versioned YAML rule packs under `clankerprof/runtime_rules/` (`clankerprof.runtime_rules.v1`), never hardcoded; Ruby is opt-in via `--runtime ruby`. The projection commands (targets/slices/scopes/boundaries) accept `--profile` or previously exported facts JSON (mutually exclusive) with identical output guaranteed by tests; `facts` requires `--profile` (compact by default, `--pretty` opt-in), and `compare` consumes two slice or scope reports.
 
-The Rust crate mirrors proto/model/facts/targets/slices/compare only — no scopes, no `--runtime ruby`, no YAML rule-pack loading (its generic runtime rules are hardcoded as `RuntimeRuleSet::generic()` in `targets.rs`); Python is the reference implementation. Any clankerprof behavior change must land in Python and Rust together, keep `SAMPLE_FACTS_SCHEMA_VERSION` symmetric in `facts.py` and `facts.rs`, and update the capability matrix in `docs/CLANKERPROF_PARITY.md`.
+The Rust crate (`crates/clankerprof-core`, binary `clankerprof-rs`) is capabilities-complete: facts export/replay, targets (all formats incl. the compat CSV pair), slices, scopes/boundaries with TOML/YAML configs, compare gates, and a single-pass `report` mode. It loads the same packaged rule packs via `include_str!` (drift is impossible by construction) and supports `--runtime ruby`, external packs, and core-class overrides. Python remains the reference implementation; the parity suite pins artifacts byte-for-byte across a per-subcommand flag matrix, and a test enforces `SAMPLE_FACTS_SCHEMA_VERSION` symmetry between `facts.py` and `facts.rs`. Any clankerprof behavior change must land in Python and Rust together and update the capability matrix in `docs/CLANKERPROF_PARITY.md`.
 
 ### bigbets
 

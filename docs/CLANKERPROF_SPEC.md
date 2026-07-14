@@ -364,7 +364,10 @@ threshold gates. `top_regressions` orders rows by descending absolute delta;
 `top_improvements` orders rows by ascending (most negative first) delta.
 
 A slice is a regression only when it exceeds both the configured absolute and
-relative thresholds and is within the focus set when one is provided.
+relative thresholds and is within the focus set when one is provided. Focus
+sets come from `--focus-slices` for slice reports and `--focus-boundaries`
+(alias `--focus-scopes`) for scope reports; both take comma-delimited names
+and gate only the named rows while still reporting every row.
 
 ## CLI stream and error contract
 
@@ -412,18 +415,21 @@ Python for the same caller-provided local inputs.
 ## Rust core parity
 
 `crates/clankerprof-core` is the Rust compatibility implementation for this
-spec. The crate must treat Python `clankerprof` as the reference until the Rust
-core has equivalent coverage for every public projection. Its stable surfaces
-currently include `clankerprof-rs facts`, generic `targets`, generic `slices`,
-and `compare`; Python scope decomposition is not yet a Rust parity surface.
-The facts command emits the same `clankerprof.sample_facts.v2` payload as
-Python for raw profiles, gzipped profiles, inline frames, folded locations,
-sparse pprof IDs, multi-value samples, and packed sample encoding.
+spec, with Python `clankerprof` as the reference implementation. Its parity
+surfaces cover every public projection: `facts` (export and v1/v2 replay),
+`targets` (all formats and runtime flags), `slices` (filters, collapse,
+attributes, pseudo-slices), `scopes`/`boundaries` (full decomposition with
+TOML/YAML configs), `compare` (slice and boundary gates), and the single-pass
+`report` mode. Runtime rule packs load from the same packaged YAML files via
+`include_str!`, so the vocabularies cannot drift. The facts command emits the
+same `clankerprof.sample_facts.v2` payload byte-for-byte as Python for raw
+profiles, gzipped profiles, inline frames, folded locations, sparse pprof
+IDs, multi-value samples, and packed sample encoding.
 
 Projection work must build on the same Rust fact model rather than introducing
-separate tree or opportunity accounting. Any future Rust target, slice, compare,
-tree, or opportunity command must prove parity against Python fixtures before
-being used as an integration boundary by downstream tools. Runtime-specific
+separate ad hoc accounting. Any future Rust projection or comparison command
+must prove parity against Python fixtures before being used as an integration
+boundary by downstream tools. Runtime-specific
 rule-pack parity remains the expansion point after the generic projection
 surface; downstream integrations should keep calling this out explicitly when
 they depend on runtime-specific folding or semantic categorization.

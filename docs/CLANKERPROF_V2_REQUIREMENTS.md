@@ -139,8 +139,8 @@ file — it is the single source of execution state.
 
 | ID | Requirement | Verify | Status | Notes |
 | --- | --- | --- | --- | --- |
-| G-01 | SPEC.md records every spec decision (recursion, value-type selection, compare contract, int64, rule matching, fold window, csv/text stream contract); item-35 drift resolved | doc review + doc-sync tests | todo | |
-| G-02 | docs/CLANKERPROF_PARITY.md matrix: every capability row has an explicit Rust column ("covered"+fixture or "not claimed") | doc review | todo | |
-| G-03 | skills/clankerprof-operator updated to final CLI surface | skill-sync tests pass | todo | |
-| G-04 | SAMPLE_FACTS_SCHEMA_VERSION symmetric Python↔Rust, enforced by a test | parity version test | todo | |
-| G-05 | README / docs / CLAUDE.md updated where behavior descriptions changed (Rust no longer "lightweight subset") | doc-sync tests + review | todo | |
+| G-01 | SPEC.md records every spec decision (recursion, value-type selection, compare contract, int64, rule matching, fold window, csv/text stream contract); item-35 drift resolved | spec sections landed with each wave; focus flags documented; tree/opportunity refs removed; Rust-parity section rewritten | done | |
+| G-02 | docs/CLANKERPROF_PARITY.md matrix: every capability row has an explicit Rust column ("covered"+fixture or "not claimed") | 'Rust parity status' section states blanket byte-level coverage with the flag-matrix inventory; scope-decomposition row flipped to covered with test names | done | |
+| G-03 | skills/clankerprof-operator updated to final CLI surface | SKILL.md documents --pretty, capabilities-complete Rust core, report mode, ./bin/dev test-rust; pinned-phrase test green | done | |
+| G-04 | SAMPLE_FACTS_SCHEMA_VERSION symmetric Python↔Rust, enforced by a test | test_clankerprof_sample_facts_schema_version_is_symmetric (runs without cargo) | done | |
+| G-05 | README / docs / CLAUDE.md updated where behavior descriptions changed (Rust no longer "lightweight subset") | README notes the capabilities-complete Rust core; CLAUDE.md rewritten for the module split, facts v2, rule-pack versioning, test-rust lane, and complete Rust crate | done | |

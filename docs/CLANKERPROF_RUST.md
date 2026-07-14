@@ -9,9 +9,8 @@ clankerprof.sample_facts.v2
 ```
 
 The crate intentionally builds every projection from the durable fact layer.
-That keeps tree, slice, target, boundary, opportunity, and comparison views
-tied to one decoded stack accounting model instead of separate ad hoc profile
-walkers.
+That keeps target, slice, scope/boundary, and comparison views tied to one
+decoded stack accounting model instead of separate ad hoc profile walkers.
 
 ## Run
 

@@ -1444,3 +1444,26 @@ def test_clankerprof_rust_report_sections_match_individual_subcommands(
         _run_rust_cli([*argv, "--output", str(individual_out)])
         individual = json.loads(individual_out.read_text(encoding="utf-8"))
         assert report[section] == individual, section
+
+
+def test_clankerprof_sample_facts_schema_version_is_symmetric() -> None:
+    from clankerprof.facts import (
+        SAMPLE_FACTS_SCHEMA_VERSION,
+        SAMPLE_FACTS_SCHEMA_VERSION_V1,
+    )
+
+    rust_source = (
+        Path(__file__).resolve().parents[1]
+        / "crates"
+        / "clankerprof-core"
+        / "src"
+        / "facts.rs"
+    ).read_text(encoding="utf-8")
+    assert (
+        f'pub const SAMPLE_FACTS_SCHEMA_VERSION: &str = "{SAMPLE_FACTS_SCHEMA_VERSION}";'
+        in rust_source
+    )
+    assert (
+        f'pub const SAMPLE_FACTS_SCHEMA_VERSION_V1: &str = "{SAMPLE_FACTS_SCHEMA_VERSION_V1}";'
+        in rust_source
+    )

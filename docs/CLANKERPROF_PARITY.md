@@ -13,6 +13,19 @@ behavior must not define or override target-attribution semantics.
   preserving a useful `clankerprof` extension.
 - `not claimed`: not proven by the current self-contained suite.
 
+## Rust parity status
+
+`crates/clankerprof-core` reaches parity with every capability below through
+`tests/test_clankerprof_rust_parity.py`: byte-level artifact comparison across
+a per-subcommand flag matrix (facts compact/pretty, targets
+json/csv/simple-csv/text with runtime/fold/track/attributable/no-enhanced
+flags and the compat CSV pair, slices with filters/collapse/attributes/
+metadata/pseudo-slices, scopes with preferred and legacy configs and facts
+replay, compare gates, malformed-input rejection). Rows marked `not claimed`
+below are not claimed by either implementation (legacy prose formats). Any
+capability added to Python must land in the Rust core and this parity suite
+in the same change.
+
 ## Target attribution
 
 | Capability | Status | Test coverage |
@@ -67,7 +80,7 @@ existing boundary JSON payloads, or slice ownership semantics.
 | Predicate expressions with `any`, `all`, and `not`, configured `cost_kind:<label>`/`category:<label>` selectors, runtime `runtime_label:<label>`/`runtime_category:<label>` selectors, and recursive cost-kind guardrails | covered | `test_clankerprof_boundary_config_supports_predicate_expressions_and_category_refs`, `test_clankerprof_scope_config_aliases_preserve_boundary_output`, `test_clankerprof_boundary_config_rejects_recursive_category_predicates` |
 | Nested predicate expressions remain cached by unique frame identity across repeated samples | covered | `test_clankerprof_boundary_expression_matching_stays_frame_cached` |
 | Configured category selectors remain cached by unique frame identity when used as owner-domain predicates | covered | `test_clankerprof_boundary_category_predicates_stay_frame_cached` |
-| Rust parity for scope decomposition | not claimed | Python is the reference implementation until `clankerprof-core` adds equivalent coverage. |
+| Rust parity for scope decomposition | covered | `test_clankerprof_rust_scopes_match_python_boundary_decomposition`, `test_clankerprof_rust_scopes_legacy_aliases_and_boundaries_subcommand`, `test_clankerprof_rust_scopes_replay_facts_identically` |
 
 ## Runtime rules
 

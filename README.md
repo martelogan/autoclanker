@@ -263,6 +263,11 @@ clankerprof targets \
 autoclanker pprof compare --before before.json --after after.json
 ```
 
+`crates/clankerprof-core` ships `clankerprof-rs`, a capabilities-complete Rust
+implementation of the same engine (facts, targets, slices, scopes, compare,
+and a single-pass `report` mode) whose artifacts are pinned byte-for-byte
+against Python by the parity suite; run its lane with `./bin/dev test-rust`.
+
 Use `targets` when you are explaining one request/rendering boundary, RPC
 method, background job, or other parent frame. Use `slices` when you need
 ownership-style path attribution, collapse rules, config-file replay, generic
