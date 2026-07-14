@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "properties": {
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {"type": "string"},
+          "severity": {"type": "string", "enum": ["critical", "major", "minor"]},
+          "claim": {"type": "string"},
+          "reproduction": {"type": "string"},
+          "files": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["title", "severity", "claim", "reproduction", "files"],
+        "additionalProperties": false
+      }
+    },
+    "summary": {"type": "string"}
+  },
+  "required": ["findings", "summary"],
+  "additionalProperties": false
+}
