@@ -110,12 +110,12 @@ GC_PSEUDO_SLICE = "(gc)"
 UNCOLLAPSIBLE_PSEUDO_SLICE = "(uncollapsible)"
 
 
-def _matches_frame_filter(
+def _match_frame_predicate(
     frame: Frame,
-    raw_filter: str,
-    rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES,
+    key: str,
+    value: str,
+    rules: RuntimeRuleSet,
 ) -> bool:
-    key, _, value = raw_filter.partition(":")
     if key == "name":
         return value in frame.name
     if key == "path":
@@ -140,173 +140,182 @@ def _parse_filter_prefixes(raw_filter: str) -> tuple[bool, bool, str]:
     return inverted, descendant, body
 
 
-def _filter_matches_stack(
-    raw_filter: str,
-    stack: Sequence[Frame],
-    options: SliceAnalysisOptions,
-    bottom: Frame | None = None,
-) -> bool:
+@dataclass(frozen=True, slots=True)
+class _SliceFilter:
+    inverted: bool
+    descendant: bool
+    key: str
+    value: str
+
+
+def _parse_slice_filter(raw_filter: str) -> _SliceFilter:
     inverted, descendant, body = _parse_filter_prefixes(raw_filter)
     key, _, value = body.partition(":")
-    frames = stack if descendant else (bottom or stack[0],)
-    if key == "slice" and not descendant:
-        matched = any(
-            _slice_for_frame(
-                frame,
-                stack,
-                options,
-                options.slices,
-                options.attributes,
-                include_descendant_attributes=False,
-            )
-            == value
-            for frame in frames
-        )
-        if (
-            not matched
-            and bottom is not None
-            and _sample_has_descendant_attribute_for_slice(
-                stack,
-                options,
-                options.attributes,
-                value,
-            )
-        ):
-            matched = True
-        return not matched if inverted else matched
-    if key == "slice":
-        matches = (
-            _slice_for_frame(
-                frame,
-                stack,
-                options,
-                options.slices,
-                options.attributes,
-                include_descendant_attributes=False,
-            )
-            == value
-            for frame in frames
-        )
-    else:
-        matches = (
-            _matches_frame_filter(frame, body, options.runtime_rules)
-            for frame in frames
-        )
-    if inverted:
-        return any(not matched for matched in matches)
-    return any(matches)
+    return _SliceFilter(inverted=inverted, descendant=descendant, key=key, value=value)
 
 
-def _filters_match_sample(
-    filters: Sequence[str],
-    stack: Sequence[Frame],
-    options: SliceAnalysisOptions,
-    bottom: Frame,
-) -> bool:
-    bottom_filters: list[str] = []
-    descendant_filters: list[str] = []
-    for raw_filter in filters:
-        _, descendant, _ = _parse_filter_prefixes(raw_filter)
-        if descendant:
-            descendant_filters.append(raw_filter)
-        else:
-            bottom_filters.append(raw_filter)
-    return all(
-        _filter_matches_stack(raw_filter, stack, options, bottom)
-        for raw_filter in bottom_filters
-    ) and (
-        not descendant_filters
-        or any(
-            _filter_matches_stack(raw_filter, stack, options, bottom)
-            for raw_filter in descendant_filters
-        )
-    )
-
-
-def _collapse_matches_frame(
-    raw_filter: str,
-    frame: Frame,
-    stack: Sequence[Frame],
-    options: SliceAnalysisOptions,
-) -> bool:
+def _parse_collapse_rule(raw_filter: str) -> _SliceFilter:
+    # Collapse rules take no ! / < prefixes; the raw string partitions as-is
+    # so an unvalidated prefixed rule still fails as an unsupported key.
     key, _, value = raw_filter.partition(":")
-    if key == "slice":
-        return (
-            _slice_for_frame(
-                frame,
-                stack,
-                options,
-                options.slices,
-                options.attributes,
-                include_descendant_attributes=False,
-            )
-            == value
+    return _SliceFilter(inverted=False, descendant=False, key=key, value=value)
+
+
+class _SliceMatcher:
+    """Per-analysis slice evaluation state.
+
+    The filter/collapse DSL is parsed once up front and every frame-level
+    decision (predicate matches and descendant-free slice attribution) is
+    memoized by frame identity, so rules evaluate once per unique frame
+    instead of once per stack occurrence.
+    """
+
+    def __init__(self, options: SliceAnalysisOptions) -> None:
+        self._options = options
+        parsed = tuple(_parse_slice_filter(item) for item in options.filters)
+        self._bottom_filters = tuple(item for item in parsed if not item.descendant)
+        self._descendant_filters = tuple(item for item in parsed if item.descendant)
+        self._collapse = tuple(_parse_collapse_rule(item) for item in options.collapse)
+        self._has_descendant_attributes = any(
+            rule.descendant for rule in options.attributes
         )
-    return _matches_frame_filter(frame, raw_filter, options.runtime_rules)
+        self._predicate_cache: dict[tuple[str, str, str, str], bool] = {}
+        self._slice_cache: dict[tuple[str, str], str] = {}
+        self._native_cache: dict[str, bool] = {}
+        self._default_slice = "(all)"
+        for definition in options.slices:
+            if definition.is_default:
+                self._default_slice = definition.name
 
-
-def _is_collapsed_frame(
-    frame: Frame,
-    stack: Sequence[Frame],
-    options: SliceAnalysisOptions,
-) -> bool:
-    return any(
-        _collapse_matches_frame(collapse_filter, frame, stack, options)
-        for collapse_filter in options.collapse
-    )
-
-
-def _slice_for_frame(
-    frame: Frame,
-    stack: Sequence[Frame],
-    options: SliceAnalysisOptions,
-    slices: Sequence[SliceDefinition],
-    attributes: Sequence[AttributionRule],
-    *,
-    include_descendant_attributes: bool = True,
-) -> str:
-    for rule in attributes:
-        if rule.descendant and not include_descendant_attributes:
-            continue
-        frames = stack if rule.descendant else (frame,)
-        if any(
-            _matches_frame_filter(
-                candidate,
-                f"{rule.key}:{rule.value}",
-                options.runtime_rules,
+    def matches_predicate(self, frame: Frame, key: str, value: str) -> bool:
+        cache_key = (frame.name, frame.filename, key, value)
+        cached = self._predicate_cache.get(cache_key)
+        if cached is None:
+            cached = _match_frame_predicate(
+                frame,
+                key,
+                value,
+                self._options.runtime_rules,
             )
-            for candidate in frames
-        ):
-            return rule.target_slice
-    default = "(all)"
-    for slice_definition in slices:
-        if slice_definition.is_default:
-            default = slice_definition.name
-            continue
-        if slice_definition.matches_frame(frame, options.runtime_rules):
-            return slice_definition.name
-    return default
+            self._predicate_cache[cache_key] = cached
+        return cached
 
+    def slice_without_descendant_attributes(self, frame: Frame) -> str:
+        cache_key = (frame.name, frame.filename)
+        cached = self._slice_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        resolved = self._resolve_frame_slice(frame)
+        self._slice_cache[cache_key] = resolved
+        return resolved
 
-def _sample_has_descendant_attribute_for_slice(
-    stack: Sequence[Frame],
-    options: SliceAnalysisOptions,
-    attributes: Sequence[AttributionRule],
-    slice_name: str,
-) -> bool:
-    for rule in attributes:
-        if not rule.descendant or rule.target_slice != slice_name:
-            continue
-        if any(
-            _matches_frame_filter(
-                candidate,
-                f"{rule.key}:{rule.value}",
-                options.runtime_rules,
-            )
-            for candidate in stack
-        ):
+    def _resolve_frame_slice(self, frame: Frame) -> str:
+        options = self._options
+        for rule in options.attributes:
+            if rule.descendant:
+                continue
+            if self.matches_predicate(frame, rule.key, rule.value):
+                return rule.target_slice
+        for definition in options.slices:
+            if definition.is_default:
+                continue
+            if definition.matches_frame(frame, options.runtime_rules):
+                return definition.name
+        return self._default_slice
+
+    def is_eligible_bottom(self, frame: Frame) -> bool:
+        if self._options.no_collapse_native:
             return True
-    return False
+        cached = self._native_cache.get(frame.filename)
+        if cached is None:
+            cached = is_native_path(frame.filename, self._options.runtime_rules)
+            self._native_cache[frame.filename] = cached
+        return not cached
+
+    def slice_for_sample(self, frame: Frame, stack: Sequence[Frame]) -> str:
+        """Full attribution: descendant and bottom rules in declaration order."""
+        if not self._has_descendant_attributes:
+            return self.slice_without_descendant_attributes(frame)
+        options = self._options
+        for rule in options.attributes:
+            frames = stack if rule.descendant else (frame,)
+            if any(
+                self.matches_predicate(candidate, rule.key, rule.value)
+                for candidate in frames
+            ):
+                return rule.target_slice
+        for definition in options.slices:
+            if definition.is_default:
+                continue
+            if definition.matches_frame(frame, options.runtime_rules):
+                return definition.name
+        return self._default_slice
+
+    def _sample_has_descendant_attribute_for_slice(
+        self,
+        stack: Sequence[Frame],
+        slice_name: str,
+    ) -> bool:
+        for rule in self._options.attributes:
+            if not rule.descendant or rule.target_slice != slice_name:
+                continue
+            if any(
+                self.matches_predicate(candidate, rule.key, rule.value)
+                for candidate in stack
+            ):
+                return True
+        return False
+
+    def _filter_matches(
+        self,
+        item: _SliceFilter,
+        stack: Sequence[Frame],
+        bottom: Frame,
+    ) -> bool:
+        frames = stack if item.descendant else (bottom,)
+        if item.key == "slice" and not item.descendant:
+            matched = any(
+                self.slice_without_descendant_attributes(frame) == item.value
+                for frame in frames
+            )
+            if not matched and self._sample_has_descendant_attribute_for_slice(
+                stack,
+                item.value,
+            ):
+                matched = True
+            return not matched if item.inverted else matched
+        if item.key == "slice":
+            matches = (
+                self.slice_without_descendant_attributes(frame) == item.value
+                for frame in frames
+            )
+        else:
+            matches = (
+                self.matches_predicate(frame, item.key, item.value) for frame in frames
+            )
+        if item.inverted:
+            return any(not matched for matched in matches)
+        return any(matches)
+
+    def filters_match_sample(self, stack: Sequence[Frame], bottom: Frame) -> bool:
+        return all(
+            self._filter_matches(item, stack, bottom) for item in self._bottom_filters
+        ) and (
+            not self._descendant_filters
+            or any(
+                self._filter_matches(item, stack, bottom)
+                for item in self._descendant_filters
+            )
+        )
+
+    def is_collapsed(self, frame: Frame) -> bool:
+        for item in self._collapse:
+            if item.key == "slice":
+                if self.slice_without_descendant_attributes(frame) == item.value:
+                    return True
+            elif self.matches_predicate(frame, item.key, item.value):
+                return True
+        return False
 
 
 def analyze_slices(
@@ -332,6 +341,7 @@ def analyze_slice_facts(
             f"{', '.join(default_names)}. Exactly one slice may set default."
         )
     default_slice = default_names[0] if default_names else "(all)"
+    matcher = _SliceMatcher(options)
     index = ProfileFactIndex.from_input(sample_facts)
 
     for fact in index.samples():
@@ -342,30 +352,17 @@ def analyze_slice_facts(
             continue
         leaf = stack[0]
 
-        def is_collapsed_for_sample(
-            frame: Frame, sample_stack: Sequence[Frame] = stack
-        ) -> bool:
-            return _is_collapsed_frame(frame, sample_stack, options)
-
         selection = index.select_bottom_frame(
             fact,
-            is_eligible=lambda frame: (
-                options.no_collapse_native
-                or not is_native_path(frame.filename, options.runtime_rules)
-            ),
-            is_collapsed=is_collapsed_for_sample,
+            is_eligible=matcher.is_eligible_bottom,
+            is_collapsed=matcher.is_collapsed,
         )
         if selection is None:
             continue
         bottom = selection.bottom
         bottom_is_collapsed = selection.bottom_is_collapsed
         uncollapsible_frame = selection.root_eligible
-        if options.filters and not _filters_match_sample(
-            options.filters,
-            stack,
-            options,
-            bottom,
-        ):
+        if options.filters and not matcher.filters_match_sample(stack, bottom):
             continue
         matching_time += value
 
@@ -388,13 +385,7 @@ def analyze_slice_facts(
             frame_stats.time_ns += value
             continue
 
-        slice_name = _slice_for_frame(
-            bottom,
-            stack,
-            options,
-            options.slices,
-            options.attributes,
-        )
+        slice_name = matcher.slice_for_sample(bottom, stack)
         slice_stats = stats_by_slice.setdefault(
             slice_name,
             SliceStats(name=slice_name, is_default=slice_name == default_slice),
