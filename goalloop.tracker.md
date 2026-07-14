@@ -19,4 +19,4 @@ and this loop's real work.
 | ID | Requirement | Verify | Status | Notes |
 | --- | --- | --- | --- | --- |
 | V-01 | All 71 clankerprof v2 requirements implemented and gate-green on this branch | `python3 scripts/clankerprof_v2_goal.py --goal` exits 0 | done | 21 commits `b23528d^..e9a1c2c`; each landed behind a green `./bin/dev check` |
-| V-02 | Baseline gates green in this audit worktree before round 1 | `goalloop gate` exits 0 | doing | fresh worktree: cold cargo target dir on first run |
+| V-02 | Baseline gates green in this audit worktree before round 1 | `goalloop gate` exits 0 | done | first run hit a transient sdist Errno 2 (worktree startup contention); standalone build + full gate rerun green |
