@@ -478,9 +478,7 @@ def test_clankerprof_rust_compare_matches_python_for_new_and_removed_rows(
         CompareOptions(threshold_abs=1000.0, threshold_rel=1000.0),
     )
     assert rust_payload == python_payload
-    added_row = next(
-        row for row in rust_payload["slices"] if row["name"] == "added"
-    )
+    added_row = next(row for row in rust_payload["slices"] if row["name"] == "added")
     assert added_row["delta_rel"] is None
 
 
@@ -732,12 +730,18 @@ def _ruby_runtime_profile_bytes() -> bytes:
     trilogy = builder.location(builder.function("Trilogy#query", "<cfunc>"))
     statsd = builder.location(builder.function("StatsD.increment", "<cfunc>"))
     otel = builder.location(
-        builder.function("OpenTelemetry::Trace#span", "/gems/opentelemetry/lib/trace.rb")
+        builder.function(
+            "OpenTelemetry::Trace#span", "/gems/opentelemetry/lib/trace.rb"
+        )
     )
-    i18n = builder.location(builder.function("I18n.translate", "/gems/i18n/lib/i18n.rb"))
+    i18n = builder.location(
+        builder.function("I18n.translate", "/gems/i18n/lib/i18n.rb")
+    )
     array_map = builder.location(builder.function("Array#map", "<cfunc>"))
     zlib_bare = builder.location(builder.function("Zlib.inflate", "<cfunc>"))
-    app_leaf = builder.location(builder.function("Card#render", "/app/components/card.rb"))
+    app_leaf = builder.location(
+        builder.function("Card#render", "/app/components/card.rb")
+    )
 
     builder.sample((marshal_load, target), 2_000_000_000)
     builder.sample((io_read, target), 1_500_000_000)
@@ -806,9 +810,221 @@ def test_clankerprof_rust_targets_match_python_ruby_runtime(tmp_path: Path) -> N
     assert rust_payload == python_payload
     categories = {
         item["name"]
-        for item in rust_payload["parents"][
-            "Example::HtmlResponder#render_template"
-        ]["categories"]
+        for item in rust_payload["parents"]["Example::HtmlResponder#render_template"][
+            "categories"
+        ]
     }
     assert "Serialization Overhead" in categories
     assert "Instrumentation Overhead" in categories
+
+
+def _scopes_decomposition_profile_bytes() -> bytes:
+    builder = PprofFixtureBuilder.create()
+    request = builder.location(
+        builder.function("RequestHandler#render_response", "/app/http/request.rb")
+    )
+    middleware = builder.location(
+        builder.function("MiddlewareStack#call", "/app/http/middleware.rb")
+    )
+    template = builder.location(
+        builder.function("TemplateRenderer#render", "/app/rendering/template.rb")
+    )
+    component = builder.location(
+        builder.function("ComponentRenderer#render", "/app/components/card.rb")
+    )
+    view_model = builder.location(
+        builder.function("ReportView#build", "/app/view_models/report_view.rb")
+    )
+    cache = builder.location(
+        builder.function(
+            "CacheClient#get_multi",
+            "/srv/vendor/cache-client-1.2.3/lib/client.rb",
+        )
+    )
+    json_generate = builder.location(
+        builder.function("JSON.generate", "/runtime/json/encoder.rb")
+    )
+    worker = builder.location(
+        builder.function("BackgroundJob#perform", "/app/jobs/background_job.rb")
+    )
+    builder.sample((view_model, template, request, middleware), 10_000_000)
+    builder.sample((component, template, request, middleware), 20_000_000)
+    builder.sample((cache, component, template, request, middleware), 30_000_000)
+    builder.sample(
+        (json_generate, view_model, template, request, middleware),
+        40_000_000,
+    )
+    builder.sample((worker,), 50_000_000)
+    # recursion into the boundary for once_per_sample coverage
+    builder.sample((component, request, template, request, middleware), 12_000_000)
+    return builder.encode()
+
+
+_SCOPES_PREFERRED_CONFIG = """
+[cost_kind]
+"View Models" = "path:app/view_models/**"
+"Components" = "path:app/components/**"
+"Cache" = "library:cache-client"
+
+[owner]
+"Rendering" = "path:app/rendering/**"
+"HTTP" = { match = "path:app/http/**", fallback = true }
+
+[[scope]]
+label = "Request render"
+match = "name_eq:RequestHandler#render_response"
+
+[scope.rollup]
+"Application code" = ["View Models", "Components"]
+"Dependencies" = ["Cache"]
+
+[scope.attributables]
+db_queries = 12.0
+
+[[scope]]
+label = "Request once"
+match = "name_eq:RequestHandler#render_response"
+count = "once_per_sample"
+
+[[scope]]
+label = "Render outside components"
+match = "name_eq:TemplateRenderer#render"
+exclude_descendants = "name_eq:ComponentRenderer#render"
+"""
+
+_SCOPES_LEGACY_CONFIG = (
+    _SCOPES_PREFERRED_CONFIG.replace("[cost_kind]", "[category]")
+    .replace("[owner]", "[domain]")
+    .replace("[[scope]]", "[[boundary]]")
+    .replace("[scope.rollup]", "[boundary.bucket]")
+    .replace("[scope.attributables]", "[boundary.attributables]")
+)
+
+
+def _python_scopes_payload(
+    profile_bytes: bytes, config_text: str, tmp_path: Path
+) -> Any:
+    import clankerprof.cli as clankerprof_cli_module
+
+    from clankerprof.render import render_boundary_json
+    from clankerprof.scopes import analyze_boundary_facts
+
+    config_path = tmp_path / "scopes-ref.toml"
+    config_path.write_text(config_text, encoding="utf-8")
+    options = clankerprof_cli_module._load_boundary_options(  # pyright: ignore[reportPrivateUsage]
+        config_path,
+        runtime_rules=clankerprof_cli_module.DEFAULT_RUNTIME_RULES,
+    )
+    return render_boundary_json(
+        analyze_boundary_facts(
+            decode_profile_bytes(profile_bytes).to_sample_facts(), options
+        ),
+        top=None,
+    )
+
+
+def _run_rust_scopes(
+    tmp_path: Path,
+    profile_args: list[str],
+    config_text: str,
+    subcommand: str = "scopes",
+) -> Any:
+    repo_root = Path(__file__).resolve().parents[1]
+    config_path = tmp_path / f"scopes-{subcommand}.toml"
+    config_path.write_text(config_text, encoding="utf-8")
+    completed = subprocess.run(
+        [
+            "cargo",
+            "run",
+            "--quiet",
+            "-p",
+            "clankerprof-core",
+            "--bin",
+            "clankerprof-rs",
+            "--",
+            subcommand,
+            *profile_args,
+            "--config",
+            str(config_path),
+        ],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(completed.stdout)
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_scopes_match_python_boundary_decomposition(
+    tmp_path: Path,
+) -> None:
+    profile_bytes = _scopes_decomposition_profile_bytes()
+    profile_path = tmp_path / "scopes.pb"
+    profile_path.write_bytes(profile_bytes)
+
+    python_payload = _python_scopes_payload(
+        profile_bytes, _SCOPES_PREFERRED_CONFIG, tmp_path
+    )
+    rust_payload = _run_rust_scopes(
+        tmp_path, ["--profile", str(profile_path)], _SCOPES_PREFERRED_CONFIG
+    )
+    assert rust_payload == python_payload
+
+    boundaries = {item["name"]: item for item in rust_payload["boundaries"]}
+    assert boundaries["Request render"]["total_time_ns"] == 112_000_000 + 12_000_000
+    assert (
+        boundaries["Request once"]["total_time_ns"]
+        < (boundaries["Request render"]["total_time_ns"])
+    )
+    assert (
+        boundaries["Render outside components"]["total_time_ns"]
+        < boundaries["Request render"]["total_time_ns"]
+    )
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_scopes_legacy_aliases_and_boundaries_subcommand(
+    tmp_path: Path,
+) -> None:
+    profile_bytes = _scopes_decomposition_profile_bytes()
+    profile_path = tmp_path / "scopes.pb"
+    profile_path.write_bytes(profile_bytes)
+
+    python_payload = _python_scopes_payload(
+        profile_bytes, _SCOPES_LEGACY_CONFIG, tmp_path
+    )
+    rust_payload = _run_rust_scopes(
+        tmp_path,
+        ["--profile", str(profile_path)],
+        _SCOPES_LEGACY_CONFIG,
+        subcommand="boundaries",
+    )
+    assert rust_payload == python_payload
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_scopes_replay_facts_identically(tmp_path: Path) -> None:
+    from clankerprof.facts import dumps_sample_facts
+
+    profile_bytes = _scopes_decomposition_profile_bytes()
+    profile_path = tmp_path / "scopes.pb"
+    profile_path.write_bytes(profile_bytes)
+    facts_path = tmp_path / "scopes-facts.json"
+    facts_path.write_text(
+        dumps_sample_facts(decode_profile_bytes(profile_bytes).to_sample_facts())
+        + "\n",
+        encoding="utf-8",
+    )
+
+    from_profile = _run_rust_scopes(
+        tmp_path, ["--profile", str(profile_path)], _SCOPES_PREFERRED_CONFIG
+    )
+    from_facts = _run_rust_scopes(
+        tmp_path, ["--facts", str(facts_path)], _SCOPES_PREFERRED_CONFIG
+    )
+    assert from_facts == from_profile
+    python_payload = _python_scopes_payload(
+        profile_bytes, _SCOPES_PREFERRED_CONFIG, tmp_path
+    )
+    assert from_facts == python_payload

@@ -9,6 +9,7 @@ pub mod facts;
 pub mod model;
 pub mod proto;
 pub mod rules;
+pub mod scopes;
 pub mod slices;
 pub mod targets;
 

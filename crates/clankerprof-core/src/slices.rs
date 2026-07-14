@@ -17,6 +17,14 @@ pub struct SliceDefinition {
     pub metadata: BTreeMap<String, Value>,
 }
 
+impl SliceDefinition {
+    pub fn matches_frame(&self, frame: &Frame, rules: &RuntimeRuleSet) -> bool {
+        self.path_patterns
+            .iter()
+            .any(|pattern| match_path_pattern(pattern, &frame.filename, rules))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttributionRule {
     pub key: String,

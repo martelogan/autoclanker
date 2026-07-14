@@ -1,3 +1,4 @@
+use indexmap::IndexMap;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -146,7 +147,8 @@ pub struct CategoryStats {
     pub files: BTreeSet<String>,
     pub folded_from: BTreeMap<String, TimeNs>,
     pub semantic_callers: BTreeMap<String, SemanticCallerMetrics>,
-    pub caller_leaf_pairs: BTreeMap<String, CallerMetrics>,
+    // Rendered as a ranked array in scope output; ties break first-seen.
+    pub caller_leaf_pairs: IndexMap<String, CallerMetrics>,
 }
 
 impl CategoryStats {
@@ -173,6 +175,71 @@ impl CategoryStats {
             .caller_files
             .entry(caller.filename.clone())
             .or_insert(0) += 1;
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DomainFileStats {
+    pub filename: String,
+    pub cpu_time: TimeNs,
+    pub sample_count: usize,
+    pub functions: BTreeMap<String, FunctionMetrics>,
+    // Ranked arrays in scope output; ties break first-seen.
+    pub cost_kinds: IndexMap<String, CallerMetrics>,
+    pub caller_leaf_pairs: IndexMap<(String, String), CallerMetrics>,
+}
+
+impl DomainFileStats {
+    pub fn add(
+        &mut self,
+        owner_function: &str,
+        leaf_function: &str,
+        cost_kind: &str,
+        value: TimeNs,
+    ) {
+        self.cpu_time += value;
+        self.sample_count += 1;
+        let function_metrics = self
+            .functions
+            .entry(owner_function.to_string())
+            .or_default();
+        function_metrics.count += 1;
+        function_metrics.cpu_time += value;
+        let cost_metrics = self.cost_kinds.entry(cost_kind.to_string()).or_default();
+        cost_metrics.count += 1;
+        cost_metrics.cpu_time += value;
+        let pair_metrics = self
+            .caller_leaf_pairs
+            .entry((owner_function.to_string(), leaf_function.to_string()))
+            .or_default();
+        pair_metrics.count += 1;
+        pair_metrics.cpu_time += value;
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DomainStats {
+    pub cpu_time: TimeNs,
+    pub sample_count: usize,
+    pub cost_kinds: IndexMap<String, CallerMetrics>,
+    pub files: IndexMap<String, DomainFileStats>,
+}
+
+impl DomainStats {
+    pub fn add(&mut self, owner: &Frame, leaf: &Frame, cost_kind: &str, value: TimeNs) {
+        self.cpu_time += value;
+        self.sample_count += 1;
+        let cost_metrics = self.cost_kinds.entry(cost_kind.to_string()).or_default();
+        cost_metrics.count += 1;
+        cost_metrics.cpu_time += value;
+        let file_stats =
+            self.files
+                .entry(owner.filename.clone())
+                .or_insert_with(|| DomainFileStats {
+                    filename: owner.filename.clone(),
+                    ..DomainFileStats::default()
+                });
+        file_stats.add(&owner.name, &leaf.name, cost_kind, value);
     }
 }
 

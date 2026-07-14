@@ -16,6 +16,9 @@ pub type TargetResults = BTreeMap<String, IndexMap<String, CategoryStats>>;
 
 pub use crate::rules::{LibraryPattern, RuntimeRuleSet};
 
+pub const DEFAULT_LIBRARY_SELECTORS: &[&str] =
+    &["dependency", "gem", "library", "package", "vendor"];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryPath {
     pub name: String,

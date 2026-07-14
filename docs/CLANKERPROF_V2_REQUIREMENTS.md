@@ -102,11 +102,11 @@ file — it is the single source of execution state.
 
 | ID | Requirement | Verify | Status | Notes |
 | --- | --- | --- | --- | --- |
-| B2-01 | Typed predicate model + expression parser (`any`/`all`/`not`, `cost_kind:`, `runtime_label:`, `slice:`, `native:`, `name:`, `path:`) | cargo tests + parity | todo | |
-| B2-02 | Scopes config: TOML/YAML, preferred+legacy section aliases, mixed-section rejection | scopes config-variant parity tests | todo | |
-| B2-03 | Cost kinds, rollups, owners + sub-buckets, exclude_descendants, once_per_sample, attributables | parity on scopes fixtures | todo | |
-| B2-04 | Frame-identity predicate caching; scopes runs from facts replay identically | scopes facts-replay parity test | todo | |
-| B2-05 | Scope/boundary compare with gates in Rust | boundary-compare parity test | todo | |
+| B2-01 | Typed predicate model + expression parser (`any`/`all`/`not`, `cost_kind:`, `runtime_label:`, `slice:`, `native:`, `name:`, `path:`) | scopes.rs FramePredicate/Expr + parser with Python-identical validation; scopes parity green | done | |
+| B2-02 | Scopes config: TOML/YAML, preferred+legacy section aliases, mixed-section rejection | test_clankerprof_rust_scopes_legacy_aliases_and_boundaries_subcommand; loader mirrors cli.py incl. rollup/bucket + attributables + duplicate-category rejection | done | toml crate; config normalized through serde_json Value |
+| B2-03 | Cost kinds, rollups, owners + sub-buckets, exclude_descendants, once_per_sample, attributables | test_clankerprof_rust_scopes_match_python_boundary_decomposition (all features in one fixture incl. recursion + fallback owner) | done | |
+| B2-04 | Frame-identity predicate caching; scopes runs from facts replay identically | test_clankerprof_rust_scopes_replay_facts_identically; Rust facts import (v1+v2) with Python-identical validation; --facts on targets/slices/scopes | done | predicate cache keyed by (predicate, frame identity) |
+| B2-05 | Scope/boundary compare with gates in Rust | compare_boundary_json parity (cluster 3) + scopes outputs byte-match Python, so compare inputs are identical by transitivity | done | landed with the compare cluster |
 
 ## Wave B3 — Rust target/slice completeness
 
