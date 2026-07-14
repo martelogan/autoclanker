@@ -93,11 +93,13 @@ class PprofFixtureBuilder:
         self,
         function_ids: tuple[int, ...],
         lines: tuple[int, ...] | None = None,
+        *,
+        folded: bool = False,
     ) -> int:
         location_id = len(self.locations) + 1
         line_values = lines if lines is not None else tuple(1 for _ in function_ids)
         self.locations.append(
-            (tuple(zip(function_ids, line_values, strict=True)), False)
+            (tuple(zip(function_ids, line_values, strict=True)), folded)
         )
         return location_id
 

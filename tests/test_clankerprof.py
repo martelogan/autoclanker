@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -821,9 +822,7 @@ def _compare_boundary_report(boundaries: list[dict[str, object]]) -> dict[str, A
 
 
 def test_clankerprof_compare_new_rows_emit_finite_json() -> None:
-    before = _compare_slice_report(
-        [{"name": "existing", "pct": 50.0, "frames": []}]
-    )
+    before = _compare_slice_report([{"name": "existing", "pct": 50.0, "frames": []}])
     after = _compare_slice_report(
         [
             {"name": "existing", "pct": 40.0, "frames": []},
@@ -1440,9 +1439,7 @@ def test_clankerprof_semantic_rules_do_not_claim_app_frames_by_substring() -> No
 
     assert category("MyStatsDHelper#emit", "/srv/app/lib/my_statsd_helper.rb") is None
     assert category("ShopI18nAudit#run", "/app/services/shop_i18n_audit.rb") is None
-    assert (
-        category("ActiveRecordish::Auditor#call", "/app/models/auditor.rb") is None
-    )
+    assert category("ActiveRecordish::Auditor#call", "/app/models/auditor.rb") is None
 
     assert (
         category(
@@ -1469,8 +1466,7 @@ def test_clankerprof_special_namespace_guard_covers_bare_module_names() -> None:
 
     assert category("Zlib.inflate", "<cfunc>") == "Compression (Native)"
     assert (
-        category("OpenSSL.fixed_length_secure_compare", "<cfunc>")
-        == "OpenSSL (Native)"
+        category("OpenSSL.fixed_length_secure_compare", "<cfunc>") == "OpenSSL (Native)"
     )
     assert category("Zlib::Deflate.deflate", "<cfunc>") == "Compression (Native)"
     assert category("OpenSSL::Cipher#encrypt", "<cfunc>") == "OpenSSL (Native)"
@@ -4344,3 +4340,329 @@ p90_ms = 200.0
     )
     payload = json.loads(capsys.readouterr().out)
     assert payload == {"checked": ["boundaries"], "ok": True}
+
+
+def test_clankerprof_unicode_names_flow_through_decode_facts_and_projections() -> None:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(
+        builder.function("Обработчик#render", "/srv/приложение/handler.py")
+    )
+    leaf = builder.location(builder.function("渲染器#draw", "/srv/приложение/绘制.py"))
+    builder.sample((leaf, target), 7_000_000)
+
+    profile = decode_profile_bytes(builder.encode())
+    facts = profile.to_sample_facts()
+    assert facts.samples[0].stack[0].name == "渲染器#draw"
+
+    round_tripped = loads_sample_facts(dumps_sample_facts(facts))
+    assert round_tripped == facts
+
+    config = {"Обработчик#render": {"App": "path:srv/приложение"}}
+    categories = analyze_target_facts(facts, config)["Обработчик#render"]
+    assert sum(stats.cpu_time for stats in categories.values()) == 7_000_000
+
+    options = SliceAnalysisOptions(
+        slices=(
+            SliceDefinition("приложение", ("srv/приложение/**",)),
+            SliceDefinition("default", is_default=True),
+        ),
+    )
+    result = analyze_slice_facts(facts, options)
+    assert result.matching_time_ns == 7_000_000
+    assert result.slices[0].name == "приложение"
+
+
+def test_clankerprof_deep_stacks_decode_and_project() -> None:
+    builder = PprofFixtureBuilder.create()
+    locations = tuple(
+        builder.location(
+            builder.function(f"Layer{depth:03d}#call", f"/srv/app/layer_{depth}.py")
+        )
+        for depth in range(120)
+    )
+    builder.sample(locations, 5_000_000)
+
+    profile = decode_profile_bytes(builder.encode())
+    facts = profile.to_sample_facts()
+    assert len(facts.samples[0].stack) == 120
+    assert loads_sample_facts(dumps_sample_facts(facts)) == facts
+
+    root_parent = "Layer119#call"
+    categories = analyze_target_facts(facts, {root_parent: {"App": "path:srv/app"}})[
+        root_parent
+    ]
+    assert sum(stats.cpu_time for stats in categories.values()) == 5_000_000
+
+
+def test_clankerprof_combined_inline_and_folded_location() -> None:
+    builder = PprofFixtureBuilder.create()
+    leaf_fn = builder.function("InlineLeaf#work", "/srv/app/inline_leaf.py")
+    parent_fn = builder.function("InlineParent#call", "/srv/app/inline_parent.py")
+    root = builder.location(builder.function("Root#main", "/srv/app/root.py"))
+    combined = builder.inline_location((leaf_fn, parent_fn), folded=True)
+    builder.sample((combined, root), 3_000_000)
+
+    profile = decode_profile_bytes(builder.encode())
+    stack = profile.to_sample_facts().samples[0].stack
+    assert [frame.name for frame in stack] == [
+        "InlineLeaf#work",
+        "InlineParent#call",
+        "Root#main",
+    ]
+    assert stack[0].location_is_folded and stack[1].location_is_folded
+    assert not stack[2].location_is_folded
+    assert stack[0].location_id == stack[1].location_id
+
+    round_tripped = loads_sample_facts(dumps_sample_facts(profile.to_sample_facts()))
+    assert round_tripped == profile.to_sample_facts()
+
+
+def _random_profile_bytes(seed: int) -> bytes:
+    import random as random_module
+
+    rng = random_module.Random(seed)
+    multi_value = seed % 2 == 0
+    builder = (
+        PprofFixtureBuilder.create(
+            sample_types=(("samples", "count"), ("cpu", "nanoseconds")),
+        )
+        if multi_value
+        else PprofFixtureBuilder.create()
+    )
+    locations = [
+        builder.location(
+            builder.function(
+                f"Fn{index:02d}#call_{seed}",
+                f"/srv/app/pkg{index % 5}/mod{index}.py",
+            )
+        )
+        for index in range(30)
+    ]
+    for _ in range(rng.randint(20, 60)):
+        depth = rng.randint(1, 12)
+        stack = tuple(rng.choice(locations) for _ in range(depth))
+        if rng.random() < 0.1:
+            stack = (999,)  # unknown location -> empty decoded stack
+        primary = rng.randint(1, 40) * 1_000_000
+        builder.sample(
+            stack,
+            (rng.randint(1, 9), primary) if multi_value else primary,
+        )
+    return builder.encode(packed_samples=seed % 3 == 0)
+
+
+def test_clankerprof_slice_totals_reconcile_across_random_profiles() -> None:
+    for seed in range(6):
+        facts = decode_profile_bytes(_random_profile_bytes(seed)).to_sample_facts()
+        options = SliceAnalysisOptions(
+            slices=(
+                SliceDefinition("pkg0", ("srv/app/pkg0/**",)),
+                SliceDefinition("pkg1", ("srv/app/pkg1/**",)),
+                SliceDefinition("default", is_default=True),
+            ),
+        )
+        result = analyze_slice_facts(facts, options)
+        assert result.total_time_ns == facts.total_primary_value, seed
+        empty_value = sum(fact.primary_value for fact in facts.samples if fact.is_empty)
+        assert result.matching_time_ns == result.total_time_ns - empty_value, seed
+        assert sum(item.time_ns for item in result.slices) == result.matching_time_ns, (
+            seed
+        )
+
+
+def test_clankerprof_target_category_sums_reconcile_across_random_profiles() -> None:
+    for seed in range(6):
+        facts = decode_profile_bytes(_random_profile_bytes(seed)).to_sample_facts()
+        parents = {f"Fn{index:02d}#call_{seed}" for index in (0, 7, 19)}
+        config = {parent: {"App": "path:srv/app"} for parent in parents}
+        rendered = render_target_json(analyze_target_facts(facts, config))
+        for parent, payload in cast(
+            dict[str, dict[str, Any]], rendered["parents"]
+        ).items():
+            assert parent in parents
+            categories = cast(list[dict[str, Any]], payload["categories"])
+            assert (
+                sum(cast(int, item["time_ns"]) for item in categories)
+                == payload["total_time_ns"]
+            ), (seed, parent)
+            assert cast(int, payload["total_time_ns"]) <= facts.total_primary_value, (
+                seed,
+                parent,
+            )
+
+
+def test_clankerprof_facts_round_trip_identity_across_random_profiles() -> None:
+    for seed in range(6):
+        facts = decode_profile_bytes(_random_profile_bytes(seed)).to_sample_facts()
+        assert loads_sample_facts(dumps_sample_facts(facts)) == facts, seed
+
+
+def _valid_facts_export() -> dict[str, Any]:
+    return cast(
+        dict[str, Any],
+        json.loads(
+            dumps_sample_facts(
+                decode_profile_bytes(_multi_value_profile_bytes()).to_sample_facts()
+            )
+        ),
+    )
+
+
+_INVALID_V2_CASES: list[tuple[Callable[[dict[str, Any]], object], str]] = [
+    (lambda p: p.__setitem__("profile", None), "must contain a profile object"),
+    (
+        lambda p: p["profile"].__setitem__("value_types", {}),
+        "value_types must be an array",
+    ),
+    (
+        lambda p: p["profile"].__setitem__("value_types", ["cpu"]),
+        "value type must be an object",
+    ),
+    (
+        lambda p: p["profile"].__setitem__("period_type", "cpu"),
+        "value type must be an object",
+    ),
+    (
+        lambda p: p["profile"].__setitem__("primary_value_index", True),
+        "primary_value_index must be an integer",
+    ),
+    (
+        lambda p: p["profile"].__setitem__("primary_value_index", -1),
+        "primary_value_index must be non-negative",
+    ),
+    (lambda p: p.__setitem__("strings", None), "must contain a strings array"),
+    (
+        lambda p: p["strings"].__setitem__(0, 42),
+        "strings entries must be strings",
+    ),
+    (lambda p: p.__setitem__("frames", {}), "must contain a frames array"),
+    (
+        lambda p: p["frames"].__setitem__(0, p["frames"][0][:5] + ["extra", 1]),
+        "six-element array",
+    ),
+    (
+        lambda p: p["frames"][0].__setitem__(0, "loc"),
+        "location_id must be an integer",
+    ),
+    (
+        lambda p: p["frames"][0].__setitem__(4, True),
+        "line must be an integer",
+    ),
+    (
+        lambda p: p["frames"][0].__setitem__(5, "yes"),
+        "folded flag must be a boolean",
+    ),
+    (
+        lambda p: p["frames"][0].__setitem__(2, 10_000),
+        "string index 10000 is out of range",
+    ),
+    (lambda p: p.__setitem__("samples", {}), "must contain a samples array"),
+    (
+        lambda p: p["samples"].__setitem__(0, "sample"),
+        "entry must be an object",
+    ),
+    (
+        lambda p: p["samples"][0].__setitem__("stack", {}),
+        "stack must be an array",
+    ),
+    (
+        lambda p: p["samples"][0].__setitem__("stack", [True]),
+        "entries must be frame indexes",
+    ),
+    (
+        lambda p: p["samples"][0].__setitem__("values", "nope"),
+        "values must be an array",
+    ),
+    (
+        lambda p: p["summary"].__setitem__("sample_count", 99),
+        "sample count does not match",
+    ),
+    (
+        lambda p: p["summary"].__setitem__("empty_sample_count", 99),
+        "empty count does not match",
+    ),
+    (
+        lambda p: p["summary"].__setitem__("non_empty_sample_count", 99),
+        "non-empty count does not match",
+    ),
+    (
+        lambda p: p["samples"][0].__delitem__("sample_index"),
+        "missing required key",
+    ),
+]
+
+
+@pytest.mark.parametrize(("mutate", "match"), _INVALID_V2_CASES)
+def test_clankerprof_facts_import_rejects_each_invalid_v2_shape(
+    mutate: Callable[[dict[str, Any]], object],
+    match: str,
+) -> None:
+    payload = _valid_facts_export()
+    mutate(payload)
+    with pytest.raises(ValueError, match=match):
+        loads_sample_facts(json.dumps(payload))
+
+
+def test_clankerprof_facts_import_rejects_invalid_v1_shapes() -> None:
+    with pytest.raises(ValueError, match="JSON must be an object"):
+        loads_sample_facts("[]")
+
+    base: dict[str, Any] = {
+        "schema_version": "clankerprof.sample_facts.v1",
+        "samples": [
+            {
+                "sample_index": 0,
+                "values": [5],
+                "location_ids": [1],
+                "stack": [],
+            }
+        ],
+    }
+
+    broken = json.loads(json.dumps(base))
+    broken["samples"] = {}
+    with pytest.raises(ValueError, match="must contain a samples array"):
+        loads_sample_facts(json.dumps(broken))
+
+    broken = json.loads(json.dumps(base))
+    broken["samples"][0]["stack"] = "frames"
+    with pytest.raises(ValueError, match="stack must be an array"):
+        loads_sample_facts(json.dumps(broken))
+
+    broken = json.loads(json.dumps(base))
+    broken["samples"][0]["is_empty"] = False
+    with pytest.raises(ValueError, match="is_empty does not match"):
+        loads_sample_facts(json.dumps(broken))
+
+    broken = json.loads(json.dumps(base))
+    broken["samples"][0]["primary_value"] = 999
+    with pytest.raises(ValueError, match="primary value does not match"):
+        loads_sample_facts(json.dumps(broken))
+
+
+def test_clankerprof_facts_import_edge_branches() -> None:
+    v1_bad_sample: dict[str, Any] = {
+        "schema_version": "clankerprof.sample_facts.v1",
+        "samples": ["not-an-object"],
+    }
+    with pytest.raises(ValueError, match="entry must be an object"):
+        loads_sample_facts(json.dumps(v1_bad_sample))
+
+    v1_bad_frame: dict[str, Any] = {
+        "schema_version": "clankerprof.sample_facts.v1",
+        "samples": [
+            {
+                "sample_index": 0,
+                "values": [1],
+                "location_ids": [1],
+                "stack": ["not-a-frame-object"],
+            }
+        ],
+    }
+    with pytest.raises(ValueError, match="frame must be an object"):
+        loads_sample_facts(json.dumps(v1_bad_frame))
+
+    tolerated = _valid_facts_export()
+    tolerated["summary"] = "free-form"
+    imported = loads_sample_facts(json.dumps(tolerated))
+    assert imported.total_primary_value == 50_000_000

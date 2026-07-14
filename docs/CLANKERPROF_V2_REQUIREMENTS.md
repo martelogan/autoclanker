@@ -74,9 +74,9 @@ file — it is the single source of execution state.
 
 | ID | Requirement | Verify | Status | Notes |
 | --- | --- | --- | --- | --- |
-| A5-01 | Fixture builder covers: packed varints, recursion, multi-value samples, unicode names, deep stacks, inline+folded combos, truncated/corrupt inputs (items 36, 38) | new fixture tests in default lane | todo | packed varints = critical gap |
-| A5-02 | Property/invariant tests: slice totals == profile total; category sums == parent totals; facts round-trip identity (item 38) | invariant tests in test_clankerprof.py | todo | |
-| A5-03 | Every strict-validation branch in facts import covered, incl. unknown schema version (item 38) | coverage of facts.py import paths | todo | |
+| A5-01 | Fixture builder covers: packed varints, recursion, multi-value samples, unicode names, deep stacks, inline+folded combos, truncated/corrupt inputs (items 36, 38) | packed/recursion/multi-value/corrupt covered in A1/A2 clusters; unicode/deep-stack/inline+folded added: test_clankerprof_{unicode_names_flow_through_decode_facts_and_projections,deep_stacks_decode_and_project,combined_inline_and_folded_location} | done | builder gained inline_location(folded=) |
+| A5-02 | Property/invariant tests: slice totals == profile total; category sums == parent totals; facts round-trip identity (item 38) | test_clankerprof_{slice_totals,target_category_sums,facts_round_trip_identity}*_across_random_profiles (6 seeded profiles incl. multi-value, packed, empty stacks) | done | |
+| A5-03 | Every strict-validation branch in facts import covered, incl. unknown schema version (item 38) | 23-case parametrized v2 corruption matrix + v1 shapes + edge branches; facts.py import validation at 100% (file 99%) | done | |
 | A5-04 | `generic.yml` ↔ Rust generic rules equivalence test (item 38) | parity equivalence test | todo | trivially true after B1 include_str! |
 
 ## Wave B0 — Rust defect fixes
