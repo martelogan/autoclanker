@@ -48,7 +48,6 @@ from clankerprof.facts import (
     sample_facts_to_jsonable,
     write_sample_facts,
 )
-from clankerprof.model import CategoryStats
 from clankerprof.proto import load_profile
 from clankerprof.render import (
     render_boundary_json,
@@ -59,6 +58,7 @@ from clankerprof.render import (
     render_target_json,
     render_target_text,
 )
+from clankerprof.stats import CategoryStats
 
 
 def _contracted(
@@ -1293,8 +1293,8 @@ def register_commands(subparsers: Any) -> None:
         )
         parser.set_defaults(handler=_contracted(run_boundaries))
 
-    add_boundary_like_command("boundaries")
     add_boundary_like_command("scopes")
+    add_boundary_like_command("boundaries")
 
     slices = subparsers.add_parser(
         "slices",

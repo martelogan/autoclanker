@@ -11,13 +11,14 @@ from typing import Literal, cast
 
 from clankerprof.categorize import RuntimeCategoryCache, categorize_stack
 from clankerprof.facts import ProfileFactIndex, SampleFactsInput
-from clankerprof.model import CategoryStats, Frame, Profile
+from clankerprof.model import Frame, Profile
 from clankerprof.patterns import (
     DEFAULT_RUNTIME_RULES,
     is_runtime_stdlib_path,
     match_category_pattern,
 )
 from clankerprof.rules import RuntimeRuleSet
+from clankerprof.stats import CategoryStats
 
 OutputMode = Literal["text", "csv", "json", "simple-csv"]
 

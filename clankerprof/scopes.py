@@ -13,7 +13,7 @@ from clankerprof.categorize import (
     simplify_category,
 )
 from clankerprof.facts import ProfileFactIndex, SampleFactsInput
-from clankerprof.model import CategoryStats, DomainStats, Frame, Profile, TimeNs
+from clankerprof.model import Frame, Profile, TimeNs
 from clankerprof.patterns import (
     DEFAULT_LIBRARY_SELECTORS,
     DEFAULT_RUNTIME_RULES,
@@ -25,6 +25,7 @@ from clankerprof.patterns import (
 )
 from clankerprof.rules import RuntimeRuleSet
 from clankerprof.slices import SliceDefinition
+from clankerprof.stats import CategoryStats, DomainStats
 
 BoundaryCountMode: TypeAlias = Literal["occurrence", "once_per_sample"]
 

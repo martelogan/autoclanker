@@ -918,6 +918,25 @@ def test_clankerprof_no_enhanced_generic_runtime_keeps_generic_rules() -> None:
         )
 
 
+def test_clankerprof_public_api_exports() -> None:
+    import clankerprof
+
+    for name in clankerprof.__all__:
+        assert getattr(clankerprof, name, None) is not None, name
+
+    profile = clankerprof.decode_profile_bytes(_target_profile_bytes())
+    facts = profile.to_sample_facts()
+    round_tripped = clankerprof.loads_sample_facts(
+        clankerprof.dumps_sample_facts(facts)
+    )
+    assert round_tripped == facts
+    results = clankerprof.analyze_targets(
+        profile,
+        {"Target#render": {"Application": "path:app/**"}},
+    )
+    assert "Target#render" in results
+
+
 def test_clankerprof_cli_rejects_malformed_flags(tmp_path: Path) -> None:
     profile_path = tmp_path / "profile.pb"
     profile_path.write_bytes(_target_profile_bytes())

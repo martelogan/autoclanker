@@ -19,7 +19,8 @@ from clankerprof.analysis import (
     extract_library_path,
     format_time,
 )
-from clankerprof.model import CategoryStats, TimeNs
+from clankerprof.model import TimeNs
+from clankerprof.stats import CategoryStats
 
 
 def render_target_json(
