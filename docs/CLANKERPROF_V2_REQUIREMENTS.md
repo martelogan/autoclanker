@@ -41,11 +41,11 @@ file — it is the single source of execution state.
 
 | ID | Requirement | Verify | Status | Notes |
 | --- | --- | --- | --- | --- |
-| A2-01 | Typed error boundary: gzip/EOF/zlib, missing file, YAML, facts-KeyError/validation → exit 2 JSON envelope (item 14) | test_error_envelope_{truncated_gzip,missing_file,bad_yaml,bad_facts} | todo | no tracebacks on contracted errors |
-| A2-02 | `--format csv/text` without `--output`: raw payload only on stdout, never mixed with the JSON envelope (item 13) | test_csv_format_stdout_not_mixed_with_envelope | todo | contract goes in SPEC.md |
-| A2-03 | Standalone `clankerprof --output` before subcommand honored like the umbrella CLI (item 15) | test_standalone_global_output_normalized | todo | |
-| A2-04 | Filter/collapse shape validation always on, even with no slices config (item 16) | test_filter_validation_without_slices_config | todo | empty `name:` rejected |
-| A2-05 | `--target-csv-layout=compat` with `--format json` explicitly rejected (item 17) | test_csv_layout_compat_requires_csv_format | todo | |
+| A2-01 | Typed error boundary: gzip/EOF/zlib, missing file, YAML, facts-KeyError/validation → exit 2 JSON envelope (item 14) | test_clankerprof_error_envelope_for_{truncated_gzip,missing_file,malformed_yaml,facts_missing_keys} | done | _contracted handler wrapper; proto/facts raise ValueError |
+| A2-02 | `--format csv/text` without `--output`: raw payload only on stdout, never mixed with the JSON envelope (item 13) | test_clankerprof_csv_format_stdout_is_not_mixed_with_envelope | done | raw_output convention in both emitters |
+| A2-03 | Standalone `clankerprof --output` before subcommand honored like the umbrella CLI (item 15) | test_clankerprof_standalone_global_output_is_honored | done | _hoist_global_output |
+| A2-04 | Filter/collapse shape validation always on, even with no slices config (item 16) | test_clankerprof_filter_validation_applies_without_slices_config | done | empty `name:` and bogus keys rejected |
+| A2-05 | `--target-csv-layout=compat` with `--format json` explicitly rejected (item 17) | test_clankerprof_csv_layout_compat_rejected_with_json_format | done | validated before analysis |
 | A2-06 | Decoder robustness in both languages: truncated fixed32/64 rejected; varint >10 bytes rejected before shift overflow (items 18, 20) | test_decoder_rejects_truncated_and_overlong; cargo proto tests | todo | |
 | A2-07 | Rule packs strict: unknown keys rejected, `runtime_rules.v1` version field required-or-defaulted (item 32) | test_rule_pack_strict_keys_and_version | todo | Python now; Rust in B1 |
 | A2-08 | Rust CLI parses arguments strictly via clap, rejecting what Python rejects (item 23) | parity malformed-flags test | todo | |

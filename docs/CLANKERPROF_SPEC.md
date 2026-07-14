@@ -356,6 +356,24 @@ threshold gates. `top_regressions` orders rows by descending absolute delta;
 A slice is a regression only when it exceeds both the configured absolute and
 relative thresholds and is within the focus set when one is provided.
 
+## CLI stream and error contract
+
+Successful JSON commands print exactly one JSON document to stdout (the
+payload, or an `{"ok": true, "output": ...}` receipt when `--output` wrote the
+artifact). Non-JSON formats (`csv`, `simple-csv`, `text`) without `--output`
+print exactly the raw rendered payload to stdout — never mixed with a JSON
+envelope; with `--output` they write the artifact and print the JSON receipt.
+A global `--output` before the subcommand is equivalent to the subcommand's
+own `--output` through both the standalone and umbrella CLIs.
+
+Every contracted failure — decode errors (including truncated or corrupt
+gzip), missing or unreadable input files, malformed YAML/JSON/TOML configs and
+rule packs, invalid facts payloads (wrong schema version, missing keys, index
+or summary mismatches), and option validation — exits `2` and prints a single
+`{"ok": false, "error": ...}` JSON envelope to stderr, never a traceback.
+Filter and collapse shape validation always runs, with or without a slices
+config.
+
 ## Compatibility and validation
 
 Public tests must cover:

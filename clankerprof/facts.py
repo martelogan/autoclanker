@@ -220,10 +220,15 @@ def sample_facts_to_jsonable(facts: ProfileFacts) -> dict[str, JsonValue]:
 
 def sample_facts_from_jsonable(payload: JsonObject) -> ProfileFacts:
     schema_version = payload.get("schema_version")
-    if schema_version == SAMPLE_FACTS_SCHEMA_VERSION:
-        return _sample_facts_from_v2(payload)
-    if schema_version == SAMPLE_FACTS_SCHEMA_VERSION_V1:
-        return _sample_facts_from_v1(payload)
+    try:
+        if schema_version == SAMPLE_FACTS_SCHEMA_VERSION:
+            return _sample_facts_from_v2(payload)
+        if schema_version == SAMPLE_FACTS_SCHEMA_VERSION_V1:
+            return _sample_facts_from_v1(payload)
+    except KeyError as exc:
+        raise ValueError(
+            f"Sample facts payload missing required key: {exc.args[0]!r}."
+        ) from exc
     raise ValueError(
         "Unsupported sample facts schema version: "
         f"{schema_version!r}; expected {SAMPLE_FACTS_SCHEMA_VERSION!r} "

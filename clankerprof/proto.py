@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gzip
+import zlib
 
 from dataclasses import dataclass, field, replace
 
@@ -234,6 +235,8 @@ def decode_profile_bytes(data: bytes) -> Profile:
     """Decode raw or gzipped pprof protobuf bytes into the typed profile model."""
     try:
         payload = gzip.decompress(data)
+    except (EOFError, zlib.error) as exc:
+        raise PprofDecodeError(f"Truncated or corrupt gzip profile: {exc}") from exc
     except OSError:
         payload = data
 

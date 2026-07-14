@@ -918,6 +918,216 @@ def test_clankerprof_no_enhanced_generic_runtime_keeps_generic_rules() -> None:
         )
 
 
+def _error_envelope(capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    envelope = json.loads(captured.err)
+    assert envelope["ok"] is False
+    return cast(dict[str, Any], envelope)
+
+
+def test_clankerprof_error_envelope_for_truncated_gzip(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import gzip as gzip_module
+
+    profile_path = tmp_path / "profile.pb.gz"
+    profile_path.write_bytes(gzip_module.compress(_target_profile_bytes())[:-5])
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"Target#render": {}}), encoding="utf-8")
+
+    exit_code = clankerprof_main(
+        ["targets", "--profile", str(profile_path), "--config", str(config_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert "Truncated or corrupt gzip" in cast(str, envelope["error"])
+
+
+def test_clankerprof_error_envelope_for_missing_file(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"Target#render": {}}), encoding="utf-8")
+
+    exit_code = clankerprof_main(
+        [
+            "targets",
+            "--profile",
+            str(tmp_path / "does-not-exist.pb"),
+            "--config",
+            str(config_path),
+        ]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert "does-not-exist.pb" in cast(str, envelope["error"])
+
+
+def test_clankerprof_error_envelope_for_malformed_yaml(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(_slice_semantics_profile_bytes())
+    slices_path = tmp_path / "slices.yml"
+    slices_path.write_text("slices: [unclosed\n  - broken", encoding="utf-8")
+
+    exit_code = clankerprof_main(
+        ["slices", "--profile", str(profile_path), "--slices", str(slices_path)]
+    )
+    assert exit_code == 2
+    _error_envelope(capsys)
+
+
+def test_clankerprof_error_envelope_for_facts_missing_keys(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "clankerprof.sample_facts.v1",
+                "samples": [{"values": [1], "location_ids": [1], "stack": []}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"Target#render": {}}), encoding="utf-8")
+
+    exit_code = clankerprof_main(
+        ["targets", "--facts", str(facts_path), "--config", str(config_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert "missing required key" in cast(str, envelope["error"])
+
+
+def test_clankerprof_csv_format_stdout_is_not_mixed_with_envelope(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    config_path = tmp_path / "config.json"
+    profile_path.write_bytes(_target_profile_bytes())
+    config_path.write_text(
+        json.dumps({"Target#render": {"Application": "path:app/**"}}),
+        encoding="utf-8",
+    )
+
+    exit_code = clankerprof_main(
+        [
+            "targets",
+            "--profile",
+            str(profile_path),
+            "--config",
+            str(config_path),
+            "--format",
+            "csv",
+        ]
+    )
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert captured.out.startswith("Parent Function,")
+    assert "{" not in captured.out
+
+    exit_code = autoclanker_main(
+        [
+            "pprof",
+            "targets",
+            "--profile",
+            str(profile_path),
+            "--config",
+            str(config_path),
+            "--format",
+            "text",
+        ]
+    )
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "{" not in captured.out
+    assert captured.out.strip()
+
+
+def test_clankerprof_standalone_global_output_is_honored(tmp_path: Path) -> None:
+    profile_path = tmp_path / "profile.pb"
+    config_path = tmp_path / "config.json"
+    output_path = tmp_path / "targets.json"
+    profile_path.write_bytes(_target_profile_bytes())
+    config_path.write_text(
+        json.dumps({"Target#render": {"Application": "path:app/**"}}),
+        encoding="utf-8",
+    )
+
+    exit_code = clankerprof_main(
+        [
+            "--output",
+            str(output_path),
+            "targets",
+            "--profile",
+            str(profile_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+    assert exit_code == 0
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["tool"] == "clankerprof_targets"
+
+
+def test_clankerprof_filter_validation_applies_without_slices_config(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(_slice_semantics_profile_bytes())
+
+    exit_code = clankerprof_main(
+        ["slices", "--profile", str(profile_path), "--filter", "name:"]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert "Filter must be" in cast(str, envelope["error"])
+
+    exit_code = clankerprof_main(
+        ["slices", "--profile", str(profile_path), "--filter", "bogus:value"]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert "Unsupported filter key" in cast(str, envelope["error"])
+
+
+def test_clankerprof_csv_layout_compat_rejected_with_json_format(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    config_path = tmp_path / "config.json"
+    profile_path.write_bytes(_target_profile_bytes())
+    config_path.write_text(json.dumps({"Target#render": {}}), encoding="utf-8")
+
+    exit_code = clankerprof_main(
+        [
+            "targets",
+            "--profile",
+            str(profile_path),
+            "--config",
+            str(config_path),
+            "--target-csv-layout",
+            "compat",
+            "--format",
+            "json",
+        ]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert "requires --format csv" in cast(str, envelope["error"])
+
+
 def test_clankerprof_slice_filter_negation_respects_descendant_attribution() -> None:
     builder = PprofFixtureBuilder.create()
     request = builder.location(
