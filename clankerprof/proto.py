@@ -51,9 +51,11 @@ class _Reader:
             byte = self.read_byte()
             result |= (byte & 0x7F) << shift
             if byte < 0x80:
-                return result
+                # Varints are 64-bit: bits past 63 from the 10th byte drop,
+                # matching protobuf semantics (and the Rust port exactly).
+                return result & _U64_MASK
             shift += 7
-            if shift > 70:
+            if shift >= 70:
                 raise PprofDecodeError("Invalid protobuf varint.")
 
     def read_key(self) -> tuple[int, int]:
@@ -74,15 +76,21 @@ class _Reader:
             self.read_varint()
             return
         if wire_type == 1:
-            self.pos += 8
+            self._advance(8)
             return
         if wire_type == 2:
             self.read_length_delimited()
             return
         if wire_type == 5:
-            self.pos += 4
+            self._advance(4)
             return
         raise PprofDecodeError(f"Unsupported protobuf wire type: {wire_type}")
+
+    def _advance(self, count: int) -> None:
+        end = self.pos + count
+        if end > len(self.data):
+            raise PprofDecodeError("Skip extends beyond stream.")
+        self.pos = end
 
 
 def _decode_text_index(strings: list[str], index: int) -> str:

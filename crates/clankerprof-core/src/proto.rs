@@ -57,16 +57,19 @@ impl<'a> Reader<'a> {
     }
 
     fn read_varint(&mut self) -> DecodeResult<u64> {
-        let mut shift = 0;
+        let mut shift = 0u32;
         let mut result = 0u64;
         loop {
             let byte = self.read_byte()?;
-            result |= u64::from(byte & 0x7f) << shift;
+            // Bits past 63 are dropped, matching protobuf's 64-bit varint
+            // wrap; the shift guard below caps varints at 10 bytes so this
+            // can never overflow-shift.
+            result |= u64::from(byte & 0x7f).wrapping_shl(shift);
             if byte < 0x80 {
                 return Ok(result);
             }
             shift += 7;
-            if shift > 70 {
+            if shift >= 70 {
                 return Err(PprofDecodeError::InvalidProtobuf(
                     "Invalid protobuf varint.".to_string(),
                 ));

@@ -571,6 +571,40 @@ def test_clankerprof_rust_compare_matches_python_boundary_compare(
 
 
 @pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_decoder_rejects_malformed_profiles(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cases = {
+        "overlong-varint.pb": bytes([0x48]) + b"\xff" * 10 + b"\x01",
+        "truncated-fixed64.pb": bytes([0x79, 0x01, 0x02]),
+        "truncated-fixed32.pb": bytes([0x7D, 0x01]),
+    }
+    for name, data in cases.items():
+        profile_path = tmp_path / name
+        profile_path.write_bytes(data)
+        completed = subprocess.run(
+            [
+                "cargo",
+                "run",
+                "--quiet",
+                "-p",
+                "clankerprof-core",
+                "--bin",
+                "clankerprof-rs",
+                "--",
+                "facts",
+                "--profile",
+                str(profile_path),
+            ],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 2, name
+        assert completed.stdout == "", name
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
 def test_clankerprof_rust_compare_rejects_mismatched_tools(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     before_path = tmp_path / "before.json"

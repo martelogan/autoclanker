@@ -56,7 +56,7 @@ from clankerprof.facts import (
     sample_facts_to_jsonable,
 )
 from clankerprof.model import Frame, ValueType
-from clankerprof.proto import decode_profile_bytes, load_profile
+from clankerprof.proto import PprofDecodeError, decode_profile_bytes, load_profile
 from clankerprof.render import (
     render_boundary_json,
     render_json_payload,
@@ -916,6 +916,59 @@ def test_clankerprof_no_enhanced_generic_runtime_keeps_generic_rules() -> None:
         clankerprof_cli._runtime_rules(  # pyright: ignore[reportPrivateUsage]
             _runtime_args(runtime="python")
         )
+
+
+def test_clankerprof_decoder_rejects_truncated_and_overlong_fields() -> None:
+    overlong_varint = bytes([0x48]) + b"\xff" * 10 + b"\x01"
+    with pytest.raises(PprofDecodeError, match="Invalid protobuf varint"):
+        decode_profile_bytes(overlong_varint)
+
+    truncated_fixed64 = bytes([0x79, 0x01, 0x02])
+    with pytest.raises(PprofDecodeError, match="Skip extends beyond stream"):
+        decode_profile_bytes(truncated_fixed64)
+
+    truncated_fixed32 = bytes([0x7D, 0x01])
+    with pytest.raises(PprofDecodeError, match="Skip extends beyond stream"):
+        decode_profile_bytes(truncated_fixed32)
+
+    ten_byte_varint = bytes([0x48]) + b"\xff" * 9 + b"\x01"
+    decode_profile_bytes(ten_byte_varint)
+
+
+def test_clankerprof_rule_packs_reject_unknown_keys_and_versions(
+    tmp_path: Path,
+) -> None:
+    bad_key = tmp_path / "bad-key.yml"
+    bad_key.write_text("name: x\nsurprise_key: 1\n", encoding="utf-8")
+    with pytest.raises(
+        ValueError, match="Unknown runtime rule pack keys: surprise_key"
+    ):
+        load_runtime_rules_file(bad_key)
+
+    bad_version = tmp_path / "bad-version.yml"
+    bad_version.write_text(
+        "schema_version: clankerprof.runtime_rules.v9\nname: x\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Unsupported runtime rules schema version"):
+        load_runtime_rules_file(bad_version)
+
+    bad_rule = tmp_path / "bad-rule.yml"
+    bad_rule.write_text(
+        "name: x\nsemantic_rules:\n  - category: A\n    name_glob: '*'\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        ValueError, match="Unknown semantic_rules entry keys: name_glob"
+    ):
+        load_runtime_rules_file(bad_rule)
+
+    versioned = tmp_path / "ok.yml"
+    versioned.write_text(
+        "schema_version: clankerprof.runtime_rules.v1\nname: ok\n",
+        encoding="utf-8",
+    )
+    assert load_runtime_rules_file(versioned).name == "ok"
 
 
 def _error_envelope(capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:

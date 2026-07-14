@@ -1,3 +1,4 @@
+schema_version: clankerprof.runtime_rules.v1
 name: ruby
 core_native_default_category: Ruby Core (Native)
 stdlib_category: Ruby Stdlib

@@ -34,6 +34,11 @@ Signed pprof `int64` fields (sample values, line numbers, start lines,
 `period`) decode as two's-complement 64-bit integers; a varint encoding of
 `-1` must decode as `-1`, never as `2^64 - 1`.
 
+The decoder is strict about malformed input: varints longer than 10 bytes,
+length-delimited fields extending past the stream, and truncated fixed32/64
+fields (even in skipped unknown fields) are decode errors, never silently
+accepted. Varint bits past 63 drop, per protobuf 64-bit semantics.
+
 ### Primary-value selection
 
 Projections aggregate exactly one value per sample, the *primary value*,
@@ -180,6 +185,11 @@ Rule-pack schema keys are intentionally declarative. Prefer
 and `library_selector_path_patterns` for selector-specific dependency paths.
 Older alias keys may remain accepted for migration, but aliases must normalize
 to the same `RuntimeRuleSet` fields before analysis begins.
+
+Rule packs are strict and versioned: unknown top-level keys and unknown
+match-rule entry keys are validation errors (typos never silently disable a
+rule), and the optional `schema_version` field must be
+`clankerprof.runtime_rules.v1` when present (absent means v1).
 
 ### Rule matching semantics
 
