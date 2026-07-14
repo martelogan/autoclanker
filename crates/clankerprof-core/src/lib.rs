@@ -3,10 +3,12 @@
 //! The public compatibility target is the `clankerprof.sample_facts.v2` JSON
 //! schema documented in `docs/CLANKERPROF_SPEC.md`.
 
+pub mod categorize;
 pub mod compare;
 pub mod facts;
 pub mod model;
 pub mod proto;
+pub mod rules;
 pub mod slices;
 pub mod targets;
 

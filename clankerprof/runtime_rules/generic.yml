@@ -2,7 +2,7 @@ schema_version: clankerprof.runtime_rules.v1
 name: generic
 native_path_markers:
   - <cfunc>
-  - <internal:
+  - "<internal:"
 library_path_patterns:
   - regex:/vendor/([^/]+)/
   - regex:/third_party/([^/]+)/

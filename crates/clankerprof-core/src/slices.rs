@@ -51,7 +51,7 @@ impl Default for SliceAnalysisOptions {
             show_paths: false,
             no_collapse_native: false,
             unattributed_libraries: None,
-            runtime_rules: RuntimeRuleSet::generic(),
+            runtime_rules: RuntimeRuleSet::generic().clone(),
         }
     }
 }
@@ -575,14 +575,7 @@ fn slice_for_frame(
     default.to_string()
 }
 
-fn is_native_path(path: &str, rules: &RuntimeRuleSet) -> bool {
-    path.is_empty()
-        || path.starts_with('<')
-        || rules
-            .stdlib_path_markers
-            .iter()
-            .any(|marker| path.contains(marker))
-}
+use crate::categorize::is_native_path;
 
 fn is_gc_function(name: &str) -> bool {
     name == "(marking)" || name == "(sweeping)"

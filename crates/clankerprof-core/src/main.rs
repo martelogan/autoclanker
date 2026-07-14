@@ -3,7 +3,8 @@ use clankerprof_core::slices::{
     analyze_slice_facts, load_slices_file, render_slice_json, SliceAnalysisOptions,
 };
 use clankerprof_core::targets::{
-    analyze_target_facts, parse_target_config_json, render_target_json,
+    analyze_target_facts_with_options, parse_target_config_json, render_target_json,
+    TargetAnalysisOptions,
 };
 use clankerprof_core::{load_profile, sample_facts_to_compact_json, sample_facts_to_pretty_json};
 use clap::{Args, Parser, Subcommand};
@@ -54,6 +55,15 @@ struct TargetsArgs {
     /// JSON target config mapping parent functions to category patterns.
     #[arg(long)]
     config: PathBuf,
+    /// Runtime rule pack to apply (generic or ruby).
+    #[arg(long, default_value = "generic")]
+    runtime: String,
+    /// External runtime rule pack YAML (overrides --runtime).
+    #[arg(long)]
+    runtime_rules: Option<PathBuf>,
+    /// Core classes CSV override for the ruby runtime.
+    #[arg(long)]
+    core_classes: Option<PathBuf>,
     /// Write the report to this path instead of stdout.
     #[arg(long)]
     output: Option<PathBuf>,
@@ -70,6 +80,15 @@ struct SlicesArgs {
     /// Slice definitions YAML file.
     #[arg(long)]
     slices: Option<PathBuf>,
+    /// Runtime rule pack to apply (generic or ruby).
+    #[arg(long, default_value = "generic")]
+    runtime: String,
+    /// External runtime rule pack YAML (overrides --runtime).
+    #[arg(long)]
+    runtime_rules: Option<PathBuf>,
+    /// Core classes CSV override for the ruby runtime.
+    #[arg(long)]
+    core_classes: Option<PathBuf>,
     /// Bottom-frame filter, repeatable.
     #[arg(long)]
     filter: Vec<String>,
@@ -167,20 +186,59 @@ fn run_facts(args: FactsArgs) -> Result<(), String> {
     emit(&rendered, args.output.as_ref())
 }
 
+fn resolve_runtime_rules(
+    runtime: &str,
+    runtime_rules: Option<&PathBuf>,
+    core_classes: Option<&PathBuf>,
+) -> Result<clankerprof_core::rules::RuntimeRuleSet, String> {
+    use clankerprof_core::rules;
+    let classes = match core_classes {
+        Some(path) => rules::load_ruby_core_classes(path)?,
+        None if runtime == "ruby" => rules::load_default_ruby_core_classes(),
+        None => std::collections::BTreeSet::new(),
+    };
+    if let Some(path) = runtime_rules {
+        return rules::load_runtime_rules_file(path, classes, false);
+    }
+    match runtime {
+        "generic" => Ok(rules::RuntimeRuleSet::generic().clone()),
+        "ruby" => rules::ruby_rules(classes, false),
+        other => Err(format!("Unsupported runtime: {other}")),
+    }
+}
+
 fn run_targets(args: TargetsArgs) -> Result<(), String> {
     if args.format != "json" {
         return Err("clankerprof-rs targets currently supports --format json.".to_string());
     }
+    let runtime_rules = resolve_runtime_rules(
+        &args.runtime,
+        args.runtime_rules.as_ref(),
+        args.core_classes.as_ref(),
+    )?;
     let config_payload =
         std::fs::read_to_string(&args.config).map_err(|error| error.to_string())?;
     let config = parse_target_config_json(&config_payload)?;
     let profile = load_profile(&args.profile).map_err(|error| error.to_string())?;
-    let payload = render_target_json(&analyze_target_facts(&profile.to_sample_facts(), &config));
+    let options = TargetAnalysisOptions {
+        runtime_rules,
+        ..TargetAnalysisOptions::default()
+    };
+    let payload = render_target_json(&analyze_target_facts_with_options(
+        &profile.to_sample_facts(),
+        &config,
+        &options,
+    ));
     let rendered = serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?;
     emit(&rendered, args.output.as_ref())
 }
 
 fn run_slices(args: SlicesArgs) -> Result<(), String> {
+    let runtime_rules = resolve_runtime_rules(
+        &args.runtime,
+        args.runtime_rules.as_ref(),
+        args.core_classes.as_ref(),
+    )?;
     let mut options = SliceAnalysisOptions {
         filters: args.filter,
         collapse: args.collapse,
@@ -189,6 +247,7 @@ fn run_slices(args: SlicesArgs) -> Result<(), String> {
         show_paths: args.show_paths,
         no_collapse_native: args.no_collapse_native,
         unattributed_libraries: args.unattributed_libraries.then_some(usize::MAX),
+        runtime_rules,
         ..SliceAnalysisOptions::default()
     };
     if let Some(slices_path) = args.slices {

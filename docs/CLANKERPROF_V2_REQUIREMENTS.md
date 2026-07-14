@@ -77,7 +77,7 @@ file — it is the single source of execution state.
 | A5-01 | Fixture builder covers: packed varints, recursion, multi-value samples, unicode names, deep stacks, inline+folded combos, truncated/corrupt inputs (items 36, 38) | packed/recursion/multi-value/corrupt covered in A1/A2 clusters; unicode/deep-stack/inline+folded added: test_clankerprof_{unicode_names_flow_through_decode_facts_and_projections,deep_stacks_decode_and_project,combined_inline_and_folded_location} | done | builder gained inline_location(folded=) |
 | A5-02 | Property/invariant tests: slice totals == profile total; category sums == parent totals; facts round-trip identity (item 38) | test_clankerprof_{slice_totals,target_category_sums,facts_round_trip_identity}*_across_random_profiles (6 seeded profiles incl. multi-value, packed, empty stacks) | done | |
 | A5-03 | Every strict-validation branch in facts import covered, incl. unknown schema version (item 38) | 23-case parametrized v2 corruption matrix + v1 shapes + edge branches; facts.py import validation at 100% (file 99%) | done | |
-| A5-04 | `generic.yml` ↔ Rust generic rules equivalence test (item 38) | parity equivalence test | todo | trivially true after B1 include_str! |
+| A5-04 | `generic.yml` ↔ Rust generic rules equivalence test (item 38) | true by construction: Rust parses the same embedded generic.yml; cargo test pins parsed fields | done | include_str! makes drift impossible |
 
 ## Wave B0 — Rust defect fixes
 
@@ -93,10 +93,10 @@ file — it is the single source of execution state.
 
 | ID | Requirement | Verify | Status | Notes |
 | --- | --- | --- | --- | --- |
-| B1-01 | YAML rule-pack loading; packaged `generic.yml`/`ruby.yml` via include_str!; hardcoded `RuntimeRuleSet::generic()` deleted | cargo tests + A5-04 equivalence | todo | drift impossible by construction |
-| B1-02 | Core-classes CSV loading + `--core-classes` override | parity test w/ ruby fixture | todo | |
-| B1-03 | `--runtime ruby` + `--runtime-rules <pack>` flags | parity tests vs Python ruby runtime | todo | |
-| B1-04 | Full rule semantics: semantic labels, simplification maps, foldability categories, ordered native_name_category_rules | parity on ruby fixtures across projections | todo | |
+| B1-01 | YAML rule-pack loading; packaged `generic.yml`/`ruby.yml` via include_str!; hardcoded `RuntimeRuleSet::generic()` deleted | cargo rules tests; generic() now parses embedded generic.yml via OnceLock | done | strict keys + schema_version mirror Python; unquoted `<internal:` YAML mapping bug fixed at the source for both languages |
+| B1-02 | Core-classes CSV loading + `--core-classes` override | packaged CSV via include_str!; --core-classes flag; ruby parity test | done | |
+| B1-03 | `--runtime ruby` + `--runtime-rules <pack>` flags | test_clankerprof_rust_targets_match_python_ruby_runtime; resolver mirrors Python _runtime_rules | done | on targets and slices |
+| B1-04 | Full rule semantics: semantic labels, simplification maps, foldability categories, ordered native_name_category_rules | categorize.rs ports the full engine (ownership constraint, namespace guards, fold window, caller fallback); legacy categorization cases pinned in cargo tests; ruby targets parity green | done | Rust targets now categorize identically to Python |
 
 ## Wave B2 — Rust scopes/boundaries projection
 

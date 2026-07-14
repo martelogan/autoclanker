@@ -717,3 +717,98 @@ def test_clankerprof_rust_compare_rejects_mismatched_tools(tmp_path: Path) -> No
 
     assert completed.returncode == 2
     assert "clankerprof_slices or clankerprof_boundaries" in completed.stderr
+
+
+def _ruby_runtime_profile_bytes() -> bytes:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(
+        builder.function(
+            "Example::HtmlResponder#render_template",
+            "/app/responders/base_html_responder.rb",
+        )
+    )
+    marshal_load = builder.location(builder.function("Marshal.load", "/app/file.rb"))
+    io_read = builder.location(builder.function("IO.read", "<cfunc>"))
+    trilogy = builder.location(builder.function("Trilogy#query", "<cfunc>"))
+    statsd = builder.location(builder.function("StatsD.increment", "<cfunc>"))
+    otel = builder.location(
+        builder.function("OpenTelemetry::Trace#span", "/gems/opentelemetry/lib/trace.rb")
+    )
+    i18n = builder.location(builder.function("I18n.translate", "/gems/i18n/lib/i18n.rb"))
+    array_map = builder.location(builder.function("Array#map", "<cfunc>"))
+    zlib_bare = builder.location(builder.function("Zlib.inflate", "<cfunc>"))
+    app_leaf = builder.location(builder.function("Card#render", "/app/components/card.rb"))
+
+    builder.sample((marshal_load, target), 2_000_000_000)
+    builder.sample((io_read, target), 1_500_000_000)
+    builder.sample((trilogy, target), 1_000_000_000)
+    builder.sample((statsd, target), 800_000_000)
+    builder.sample((otel, target), 700_000_000)
+    builder.sample((i18n, target), 800_000_000)
+    builder.sample((array_map, app_leaf, target), 600_000_000)
+    builder.sample((zlib_bare, target), 400_000_000)
+    builder.sample((app_leaf, target), 900_000_000)
+    return builder.encode()
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_targets_match_python_ruby_runtime(tmp_path: Path) -> None:
+    from clankerprof.categorize import load_default_ruby_core_classes, ruby_rules
+    from clankerprof.targets import TargetAnalysisOptions, analyze_target_facts
+
+    repo_root = Path(__file__).resolve().parents[1]
+    profile_bytes = _ruby_runtime_profile_bytes()
+    profile_path = tmp_path / "ruby.pb"
+    config_path = tmp_path / "targets.json"
+    profile_path.write_bytes(profile_bytes)
+    config = {
+        "Example::HtmlResponder#render_template": {
+            "Components": "path:app/components",
+            "Application": "path:app/**",
+        }
+    }
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    completed = subprocess.run(
+        [
+            "cargo",
+            "run",
+            "--quiet",
+            "-p",
+            "clankerprof-core",
+            "--bin",
+            "clankerprof-rs",
+            "--",
+            "targets",
+            "--profile",
+            str(profile_path),
+            "--config",
+            str(config_path),
+            "--runtime",
+            "ruby",
+        ],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    rust_payload = json.loads(completed.stdout)
+    python_payload = render_target_json(
+        analyze_target_facts(
+            decode_profile_bytes(profile_bytes).to_sample_facts(),
+            config,
+            TargetAnalysisOptions(
+                runtime_rules=ruby_rules(load_default_ruby_core_classes())
+            ),
+        )
+    )
+    assert rust_payload == python_payload
+    categories = {
+        item["name"]
+        for item in rust_payload["parents"][
+            "Example::HtmlResponder#render_template"
+        ]["categories"]
+    }
+    assert "Serialization Overhead" in categories
+    assert "Instrumentation Overhead" in categories

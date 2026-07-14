@@ -164,6 +164,16 @@ impl CategoryStats {
         metrics.count += 1;
         metrics.cpu_time += value;
     }
+
+    pub fn add_semantic_caller(&mut self, leaf: &str, caller: &Frame) {
+        let metrics = self.semantic_callers.entry(leaf.to_string()).or_default();
+        metrics.count += 1;
+        *metrics.caller_names.entry(caller.name.clone()).or_insert(0) += 1;
+        *metrics
+            .caller_files
+            .entry(caller.filename.clone())
+            .or_insert(0) += 1;
+    }
 }
 
 impl Profile {

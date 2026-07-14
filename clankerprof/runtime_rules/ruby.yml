@@ -23,7 +23,7 @@ stdlib_path_markers:
   - /opt/ruby/
 native_path_markers:
   - <cfunc>
-  - <internal:
+  - "<internal:"
 native_path_patterns:
   - regex:/ruby/[0-9][^/]*
 native_path_exclude_markers:
