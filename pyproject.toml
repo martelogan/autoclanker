@@ -55,14 +55,16 @@ dev = [
 autoclanker = "autoclanker.cli:main"
 bigbets = "bigbets.cli:main"
 clankerprof = "clankerprof.cli:main"
+goalloop = "goalloop.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["autoclanker*", "bigbets*", "clankerprof*"]
+include = ["autoclanker*", "bigbets*", "clankerprof*", "goalloop*"]
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.package-data]
+goalloop = ["py.typed"]
 "autoclanker" = ["py.typed"]
 "bigbets" = ["py.typed"]
 "bigbets.assets" = ["*.woff2"]
@@ -93,7 +95,7 @@ include-package-data = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
-addopts = "-q --cov=autoclanker --cov=bigbets --cov-report=term-missing -m 'not integration and not upstream_live and not live'"
+addopts = "-q --cov=autoclanker --cov=bigbets --cov=goalloop --cov-report=term-missing -m 'not integration and not upstream_live and not live'"
 xfail_strict = true
 markers = [
     "integration: slower or end-to-end checks that are excluded from the default test lane",
@@ -114,13 +116,13 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 ignore = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["autoclanker", "bigbets", "clankerprof"]
+known-first-party = ["autoclanker", "bigbets", "clankerprof", "goalloop"]
 combine-as-imports = true
 force-single-line = false
 lines-between-types = 1
 
 [tool.pyright]
-include = ["autoclanker", "bigbets", "clankerprof", "tests"]
+include = ["autoclanker", "bigbets", "clankerprof", "goalloop", "tests"]
 exclude = [".venv", ".mise", ".local", "build", "dist"]
 typeCheckingMode = "strict"
 pythonVersion = "3.11"

@@ -287,6 +287,30 @@ is in [`docs/CLANKERPROF_PARITY.md`](docs/CLANKERPROF_PARITY.md), and the
 slice-tool architecture audit is recorded in
 [`docs/CLANKERPROF_SLICE_AUDIT.md`](docs/CLANKERPROF_SLICE_AUDIT.md).
 
+## Goal Loops
+
+`goalloop` is a sibling CLI and Python package for running long implementation
+efforts as deterministic, resumable goal loops. A charter defines the goal,
+gates, and optional adversarial-audit policy; a tracker of wave-grouped
+requirement rows is the single source of execution state; `goalloop goal`
+exits 0 only when every row is finished, every gate passes, and any configured
+audit has converged. Because the whole loop state lives in plain files, any
+agent harness (Claude Code, Codex, pi) or a human can continue the same loop:
+
+```bash
+goalloop init --name my-effort --gate './bin/dev check' --auditor 'codex exec'
+goalloop handoff        # the next-iteration prompt for any harness
+goalloop status         # per-wave progress JSON
+goalloop goal           # the deterministic completion check
+goalloop audit prompt   # charter for an independent auditor
+goalloop audit ingest triaged-findings.json
+```
+
+Confirmed audit findings become new tracker waves; refutations enter a log the
+auditor must not re-litigate; a round confirming nothing new converges the
+loop. The full contract is in [`docs/GOALLOOP.md`](docs/GOALLOOP.md), and
+[`skills/goal-loop`](skills/goal-loop) packages the operator workflow.
+
 ## Quickstart
 
 Start with the parser-oriented beginner lane.
@@ -626,6 +650,7 @@ Useful validation lanes:
 - [`docs/LOOP_DIAGRAM.md`](docs/LOOP_DIAGRAM.md): compact loop visual
 - [`docs/TOY_EXAMPLES.md`](docs/TOY_EXAMPLES.md): secondary toy examples for code-level intuition
 - [`docs/WHITEPAPER.md`](docs/WHITEPAPER.md): research framing and design rationale
+- [`docs/GOALLOOP.md`](docs/GOALLOOP.md): deterministic goal-loop contract and per-harness drivers
 - [`docs/COMPLIANCE_MATRIX.md`](docs/COMPLIANCE_MATRIX.md): machine-readable acceptance mirror
 
 ## Development

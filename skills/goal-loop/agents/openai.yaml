@@ -1,0 +1,3 @@
+display_name: Goal Loop Operator
+short_description: Run long implementation efforts as deterministic, auditable goal loops.
+default_prompt: Continue this goal loop — read the tracker, implement the next small cluster with verified gates, and drive goalloop goal toward exit 0.

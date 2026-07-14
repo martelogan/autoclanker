@@ -370,5 +370,23 @@
     "gate": "required",
     "description": "clankerprof supports declarative scope decomposition with cost kinds, scope rollups, owner breakdowns, residual exclusions, calibrated attributables, expression selectors, configured cost-kind selectors, runtime-label selectors, legacy boundary/category/domain aliases, and cached frame-selector matching.",
     "status": "active"
+  },
+  {
+    "requirement_id": "M10-001",
+    "gate": "required",
+    "description": "goalloop provides a deterministic, host-neutral goal-loop contract: file-backed charter, tracker, and history state with wave-grouped requirement rows, a strict status vocabulary, charter-defined gates with real exit-code propagation, and a goal check that passes only when every row is finished and every gate succeeds.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M10-002",
+    "gate": "required",
+    "description": "goalloop supports adversarial audit convergence: an auditor charter prompt requiring reproduction, triaged findings ingestion that appends confirmed findings as new tracker waves and refutations to the audit log, a bounded round budget that escalates to a human, and goal blocking until an audit round confirms nothing new.",
+    "status": "active"
+  },
+  {
+    "requirement_id": "M10-003",
+    "gate": "required",
+    "description": "goalloop is usable standalone and through the autoclanker goalloop alias, emits harness-portable handoff prompts so any agent harness or human can continue a loop, and ships an operator skill documenting the Claude, Codex, and pi drivers.",
+    "status": "active"
   }
 ]
