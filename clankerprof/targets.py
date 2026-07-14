@@ -4,18 +4,12 @@ from __future__ import annotations
 
 import json
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
 
-from clankerprof.categorize import (
-    categorize_frame,
-    first_non_runtime_file_caller,
-    is_internal_category_for_rules,
-    should_fold_category,
-    simplify_category,
-)
+from clankerprof.categorize import RuntimeCategoryCache, categorize_stack
 from clankerprof.facts import ProfileFactIndex, SampleFactsInput
 from clankerprof.model import CategoryStats, Frame, Profile
 from clankerprof.patterns import (
@@ -58,82 +52,30 @@ def _target_category(
     stack: Sequence[Frame],
     parent_config: Mapping[str, str],
     options: TargetAnalysisOptions,
+    runtime_category_for: Callable[[Frame], str | None],
 ) -> tuple[str, Frame, bool, str | None]:
-    leaf = stack[0]
-    category = (
-        categorize_frame(leaf, options.runtime_rules)
-        if options.enhanced_runtime_categorization
-        else None
-    )
-    frame_to_categorize = leaf
-    folded = False
-    folded_category: str | None = None
-
-    if should_fold_category(
-        category,
-        stack,
-        options.runtime_rules,
-        options.fold_runtime_internals,
-    ):
-        for caller in stack[1:]:
-            caller_category = categorize_frame(caller, options.runtime_rules)
-            if is_internal_category_for_rules(
-                caller_category,
-                options.runtime_rules,
-            ) or is_runtime_stdlib_path(caller.filename, options.runtime_rules):
-                continue
-            frame_to_categorize = caller
-            folded = True
-            folded_category = category
-            category = caller_category
-            break
-
-    if category is None and (
-        options.caller_fallback_when_uncategorized
-        or options.legacy_no_enhanced_caller_fallback
-    ):
-        should_walk_up = leaf.filename.startswith("<") or (
-            is_runtime_stdlib_path(leaf.filename, options.runtime_rules)
-            and any(
-                leaf.name.startswith(prefix)
-                for prefix in options.runtime_rules.caller_fallback_name_prefixes
-            )
-        )
-        if should_walk_up:
-            caller = first_non_runtime_file_caller(stack, options.runtime_rules)
-            if caller is not None:
-                frame_to_categorize = caller
-
-    if category is None and folded and frame_to_categorize.filename.startswith("<"):
-        for rule in options.runtime_rules.native_name_category_rules:
-            if rule.matches(frame_to_categorize.name, frame_to_categorize.filename):
-                category = rule.category
-                break
-
-    if category is None:
+    def configured_category_for(frame: Frame) -> str | None:
         for configured_category, pattern in parent_config.items():
             if match_category_pattern(
                 pattern,
-                frame_to_categorize.filename,
+                frame.filename,
                 options.runtime_rules,
             ):
-                category = configured_category
-                break
+                return configured_category
+        return None
 
-    if category is None:
-        category = "Other"
-
-    if category not in options.runtime_rules.main_simplified_categories:
-        category = (
-            simplify_category(
-                category,
-                verbose=options.runtime_rules.verbose,
-                rules=options.runtime_rules,
-            )
-            or "Other"
-        )
-
-    return category, frame_to_categorize, folded, folded_category
+    return categorize_stack(
+        stack,
+        rules=options.runtime_rules,
+        enhanced_runtime_categorization=options.enhanced_runtime_categorization,
+        fold_runtime_internals=options.fold_runtime_internals,
+        caller_fallback_when_uncategorized=(
+            options.caller_fallback_when_uncategorized
+            or options.legacy_no_enhanced_caller_fallback
+        ),
+        runtime_category_for=runtime_category_for,
+        configured_category_for=configured_category_for,
+    )
 
 
 def analyze_targets(
@@ -150,6 +92,7 @@ def analyze_target_facts(
     options: TargetAnalysisOptions | None = None,
 ) -> dict[str, dict[str, CategoryStats]]:
     resolved_options = options or TargetAnalysisOptions()
+    runtime_cache = RuntimeCategoryCache(resolved_options.runtime_rules)
     results: dict[str, dict[str, CategoryStats]] = {}
     index = ProfileFactIndex.from_input(sample_facts)
     target_names = frozenset(target_config)
@@ -171,6 +114,7 @@ def analyze_target_facts(
                 stack,
                 target_config[target_frame.name],
                 resolved_options,
+                runtime_cache.category_for,
             )
             stats = parent_results.setdefault(category, CategoryStats())
             stats.cpu_time += value

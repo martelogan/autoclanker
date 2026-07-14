@@ -55,7 +55,7 @@ file — it is the single source of execution state.
 | ID | Requirement | Verify | Status | Notes |
 | --- | --- | --- | --- | --- |
 | A3-01 | `analysis.py` split into `patterns.py`, `categorize.py`, `targets.py`, `slices.py`, `scopes.py`; `analysis.py` stays as re-export shim (item 29) | full suite green through the shim; caching monkeypatches retargeted to clankerprof.scopes and proven live | done | 1684-line module → 5 modules + 137-line shim with __all__ |
-| A3-02 | One categorization engine; `_target_category`/`_boundary_category` duplicates deleted (item 29) | test_categorize_engine_shared | todo | |
+| A3-02 | One categorization engine; `_target_category`/`_boundary_category` duplicates deleted (item 29) | categorize_stack in categorize.py; both projections delegate; full suite green | done | targets gained frame-identity runtime-category caching for free |
 | A3-03 | Slice filter/collapse DSL retyped on FramePredicate, parsed once, memoized per unique frame (items 30, 27) | equivalence tests over existing slice fixtures | todo | kills per-occurrence parsing |
 | A3-04 | Projection accumulators moved out of `model.py` into the projection layer (item 31) | model.py contains model only | todo | |
 | A3-05 | `__init__.py` exports the real public API (decode/facts/projections/compare) (item 33) | test_public_api_exports | todo | |

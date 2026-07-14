@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import io
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from importlib import resources
 from pathlib import Path
 
@@ -293,3 +293,72 @@ def _has_runtime_categories(rules: RuntimeRuleSet) -> bool:
 
 def extract_gem_name(path: str) -> str | None:
     return extract_library_name(path, ruby_rules(()), selector="gem")
+
+
+def categorize_stack(
+    stack: Sequence[Frame],
+    *,
+    rules: RuntimeRuleSet,
+    enhanced_runtime_categorization: bool,
+    fold_runtime_internals: bool,
+    caller_fallback_when_uncategorized: bool,
+    runtime_category_for: Callable[[Frame], str | None],
+    configured_category_for: Callable[[Frame], str | None],
+) -> tuple[str, Frame, bool, str | None]:
+    """The shared categorization engine behind targets and scopes.
+
+    Projections differ only in how they look up runtime categories (cached or
+    direct) and how configured categories match a frame; both strategies are
+    injected. Returns (category, categorized frame, folded, folded category).
+    """
+    leaf = stack[0]
+    category = runtime_category_for(leaf) if enhanced_runtime_categorization else None
+    frame_to_categorize = leaf
+    folded = False
+    folded_category: str | None = None
+
+    if should_fold_category(category, stack, rules, fold_runtime_internals):
+        for caller in stack[1:]:
+            caller_category = runtime_category_for(caller)
+            if is_internal_category_for_rules(
+                caller_category,
+                rules,
+            ) or is_runtime_stdlib_path(caller.filename, rules):
+                continue
+            frame_to_categorize = caller
+            folded = True
+            folded_category = category
+            category = caller_category
+            break
+
+    if category is None and caller_fallback_when_uncategorized:
+        should_walk_up = leaf.filename.startswith("<") or (
+            is_runtime_stdlib_path(leaf.filename, rules)
+            and any(
+                leaf.name.startswith(prefix)
+                for prefix in rules.caller_fallback_name_prefixes
+            )
+        )
+        if should_walk_up:
+            caller = first_non_runtime_file_caller(stack, rules)
+            if caller is not None:
+                frame_to_categorize = caller
+
+    if category is None and folded and frame_to_categorize.filename.startswith("<"):
+        for rule in rules.native_name_category_rules:
+            if rule.matches(frame_to_categorize.name, frame_to_categorize.filename):
+                category = rule.category
+                break
+
+    if category is None:
+        category = configured_category_for(frame_to_categorize)
+
+    if category is None:
+        category = "Other"
+
+    if category not in rules.main_simplified_categories:
+        category = (
+            simplify_category(category, verbose=rules.verbose, rules=rules) or "Other"
+        )
+
+    return category, frame_to_categorize, folded, folded_category

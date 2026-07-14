@@ -8,10 +8,8 @@ from typing import Literal, TypeAlias
 
 from clankerprof.categorize import (
     RuntimeCategoryCache,
-    first_non_runtime_file_caller,
+    categorize_stack,
     frame_cache_key,
-    is_internal_category_for_rules,
-    should_fold_category,
     simplify_category,
 )
 from clankerprof.facts import ProfileFactIndex, SampleFactsInput
@@ -362,74 +360,18 @@ def _boundary_category(
     runtime_cache: RuntimeCategoryCache,
     category_matcher: _BoundaryCategoryMatcher,
 ) -> tuple[str, Frame, bool, str | None]:
-    leaf = stack[0]
-    category = (
-        runtime_cache.category_for(leaf)
-        if options.enhanced_runtime_categorization
-        else None
-    )
-    frame_to_categorize = leaf
-    folded = False
-    folded_category: str | None = None
-
-    if should_fold_category(
-        category,
+    return categorize_stack(
         stack,
-        options.runtime_rules,
-        options.fold_runtime_internals,
-    ):
-        for caller in stack[1:]:
-            caller_category = runtime_cache.category_for(caller)
-            if is_internal_category_for_rules(
-                caller_category,
-                options.runtime_rules,
-            ) or is_runtime_stdlib_path(caller.filename, options.runtime_rules):
-                continue
-            frame_to_categorize = caller
-            folded = True
-            folded_category = category
-            category = caller_category
-            break
-
-    if category is None and (
-        options.caller_fallback_when_uncategorized
-        or options.legacy_no_enhanced_caller_fallback
-    ):
-        should_walk_up = leaf.filename.startswith("<") or (
-            is_runtime_stdlib_path(leaf.filename, options.runtime_rules)
-            and any(
-                leaf.name.startswith(prefix)
-                for prefix in options.runtime_rules.caller_fallback_name_prefixes
-            )
-        )
-        if should_walk_up:
-            caller = first_non_runtime_file_caller(stack, options.runtime_rules)
-            if caller is not None:
-                frame_to_categorize = caller
-
-    if category is None and folded and frame_to_categorize.filename.startswith("<"):
-        for rule in options.runtime_rules.native_name_category_rules:
-            if rule.matches(frame_to_categorize.name, frame_to_categorize.filename):
-                category = rule.category
-                break
-
-    if category is None:
-        category = category_matcher.category_for(frame_to_categorize)
-
-    if category is None:
-        category = "Other"
-
-    if category not in options.runtime_rules.main_simplified_categories:
-        category = (
-            simplify_category(
-                category,
-                verbose=options.runtime_rules.verbose,
-                rules=options.runtime_rules,
-            )
-            or "Other"
-        )
-
-    return category, frame_to_categorize, folded, folded_category
+        rules=options.runtime_rules,
+        enhanced_runtime_categorization=options.enhanced_runtime_categorization,
+        fold_runtime_internals=options.fold_runtime_internals,
+        caller_fallback_when_uncategorized=(
+            options.caller_fallback_when_uncategorized
+            or options.legacy_no_enhanced_caller_fallback
+        ),
+        runtime_category_for=runtime_cache.category_for,
+        configured_category_for=category_matcher.category_for,
+    )
 
 
 def _is_non_runtime_file(frame: Frame, rules: RuntimeRuleSet) -> bool:
