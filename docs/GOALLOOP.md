@@ -16,9 +16,9 @@ are commodity; the contract below is the durable part.
 | File | Role |
 | --- | --- |
 | `goalloop.charter.md` | The goal definition: YAML frontmatter (`name`, `gates`, optional `audit: {auditor, max_rounds}`) plus an Outcome / Evidence / Scope bounds / Stop conditions body. |
-| `goalloop.tracker.md` | Single source of execution state: wave-grouped requirement rows `| ID | Requirement | Verify | Status | Notes |`. Status vocabulary: `todo`, `doing`, `done`, `blocked`, `dropped` (dropped requires a reason in Notes). Duplicate IDs are rejected. |
+| `goalloop.tracker.md` | Single source of execution state: wave-grouped requirement rows `| ID | Requirement | Verify | Status | Notes |`. IDs must match `<WAVE>-<NUMBER>` (uppercase wave token with optional trailing digits, dash, digits — e.g. `A-01`, `B2-03`, `R1-02`); malformed IDs are a hard error, never silently skipped, and `R<N>` waves are reserved for audit ingestion. Status vocabulary: `todo`, `doing`, `done`, `blocked`, `dropped` (dropped requires a reason in Notes). Duplicate IDs are rejected. |
 | `goalloop.audit.md` | Append-only adversarial audit log: `## Round N` sections with `- CONFIRMED [R<N>-XX] …` and `- REFUTED <title>: <proof>` lines. |
-| `goalloop.history.jsonl` | Append-only JSONL event stream (`init`, `goal`, `audit_ingest`). |
+| `goalloop.history.jsonl` | Append-only JSONL event stream (`init`, `lock`, `goal`, `audit_ingest`). |
 
 ## Commands
 
@@ -33,7 +33,9 @@ artifact), and use exit codes: 0 success, 1 not-met/gate-failure
 - `goalloop status` — progress summary: per-wave done/total with pending rows,
   gates, audit state.
 - `goalloop assert ID_OR_WAVE...` — exit 1 unless the named rows/waves are
-  finished; for wiring partial milestones into scripts.
+  finished; selectors matching no row or wave also fail (reported under
+  `unknown`), so typos never pass vacuously. For wiring partial milestones
+  into scripts.
 - `goalloop gate` — run the charter gates in order, capturing each real exit
   code and output tail; stops at the first failure and propagates its code.
 - `goalloop lock` — record the current charter contract digest (sha256 over
@@ -90,8 +92,9 @@ new. With no auditor configured, the audit phase is vacuously converged.
   criterion is `goalloop goal` exiting 0.
 - **pi / pi-autoclanker** — the supervisor pattern: each turn's handoff prompt
   is `goalloop handoff`; the extension's loop continues until `goalloop goal`
-  exits 0. A future `goalloop_*` tool family in pi-autoclanker can wrap these
-  commands exactly as it wraps the `autoclanker` CLI today.
+  exits 0. pi-autoclanker ships a `goalloop_*` tool family (init/status/gate/
+  goal/handoff/audit) wrapping these commands exactly as it wraps the
+  `autoclanker` CLI.
 - **Human** — read the tracker, do a cluster, flip rows, commit.
 
 ## Adversarial audit in practice

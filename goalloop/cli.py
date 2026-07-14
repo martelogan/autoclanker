@@ -141,6 +141,8 @@ def run_assert(args: argparse.Namespace) -> int:
     paths = _paths(args)
     rows = load_requirements(paths)
     selectors = set(cast(list[str], args.selectors))
+    known = {row.requirement_id for row in rows} | {row.wave for row in rows}
+    unknown = sorted(selectors - known)
     failing = [
         row
         for row in rows
@@ -149,13 +151,14 @@ def run_assert(args: argparse.Namespace) -> int:
     ]
     _emit(
         {
-            "ok": not failing,
+            "ok": not failing and not unknown,
             "not_done": [
                 {"id": row.requirement_id, "status": row.status} for row in failing
             ],
+            "unknown": unknown,
         }
     )
-    return 1 if failing else 0
+    return 1 if failing or unknown else 0
 
 
 def _run_gates(charter: Charter, paths: LoopPaths) -> tuple[int, list[dict[str, Any]]]:
@@ -304,7 +307,10 @@ def run_audit_ingest(args: argparse.Namespace) -> int:
             f"Audit round {round_number} exceeds max_rounds "
             f"{charter.max_audit_rounds}; escalate to a human."
         )
-    raw = json.loads(Path(str(args.findings)).read_text(encoding="utf-8"))
+    findings_path = Path(str(args.findings))
+    if not findings_path.exists():
+        raise ValueError(f"Triaged findings file does not exist: {findings_path}")
+    raw = json.loads(findings_path.read_text(encoding="utf-8"))
     if not isinstance(raw, list):
         raise ValueError("Triaged findings must be a JSON array.")
     confirmed: list[dict[str, str]] = []
@@ -321,11 +327,23 @@ def run_audit_ingest(args: argparse.Namespace) -> int:
                 "Each finding needs title, verdict (confirmed|refuted), and "
                 "evidence (the reproduction, or the refutation proof)."
             )
+        for label, value in (("title", title), ("evidence", evidence)):
+            if "|" in value or "\n" in value or "\r" in value:
+                raise ValueError(
+                    f"Finding {label} must not contain '|' or newlines (they "
+                    f"would corrupt the tracker table): {value!r}"
+                )
         (confirmed if verdict == "confirmed" else refuted).append(
             {"title": title, "evidence": evidence}
         )
 
     wave = f"R{round_number}"
+    existing_waves = {row.wave for row in load_requirements(paths)}
+    if confirmed and wave in existing_waves:
+        raise ValueError(
+            f"Tracker already contains wave {wave}; R<N> waves are reserved "
+            "for audit ingestion and each round may only be ingested once."
+        )
     new_rows: list[str] = []
     audit_lines: list[str] = [f"\n## Round {round_number}\n"]
     for index, finding in enumerate(confirmed, start=1):

@@ -28,7 +28,8 @@ HISTORY_FILENAME: Final = "goalloop.history.jsonl"
 
 VALID_STATUSES: Final = frozenset({"todo", "doing", "done", "blocked", "dropped"})
 FINISHED_STATUSES: Final = frozenset({"done", "dropped"})
-_ROW_RE: Final = re.compile(r"^\|\s*([A-Z]+\d*-\d+)\s*\|")
+REQUIREMENT_ID_RE: Final = re.compile(r"^[A-Z]+\d*-\d+$")
+_TRACKER_HEADER_CELLS: Final = ("ID", "Requirement", "Verify", "Status", "Notes")
 _WAVE_RE: Final = re.compile(r"^##\s+Wave\s+(\S+)")
 _FRONTMATTER_RE: Final = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
 _AUDIT_ROUND_RE: Final = re.compile(r"^##\s+Round\s+(\d+)\b")
@@ -109,7 +110,12 @@ def load_charter(paths: LoopPaths) -> Charter:
     match = _FRONTMATTER_RE.match(text)
     if match is None:
         raise ValueError(f"{CHARTER_FILENAME} must start with YAML frontmatter.")
-    raw = yaml.safe_load(match.group(1))
+    try:
+        raw = yaml.safe_load(match.group(1))
+    except yaml.YAMLError as exc:
+        raise ValueError(
+            f"{CHARTER_FILENAME} frontmatter is not valid YAML: {exc}"
+        ) from exc
     if not isinstance(raw, dict):
         raise ValueError(f"{CHARTER_FILENAME} frontmatter must be a mapping.")
     payload = cast(dict[str, object], raw)
@@ -151,11 +157,22 @@ def load_requirements(paths: LoopPaths) -> list[Requirement]:
         )
     rows: list[Requirement] = []
     for line in paths.tracker.read_text(encoding="utf-8").splitlines():
-        if not _ROW_RE.match(line):
+        if not line.lstrip().startswith("|"):
             continue
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if tuple(cells) == _TRACKER_HEADER_CELLS:
+            continue
+        if all(cell and not set(cell) - {"-", ":"} for cell in cells):
+            continue  # markdown alignment separator row
         if len(cells) != 5:
             raise ValueError(f"Tracker row must have 5 cells: {line!r}")
+        if not REQUIREMENT_ID_RE.match(cells[0]):
+            raise ValueError(
+                f"Invalid requirement ID {cells[0]!r}: IDs must match "
+                "<WAVE>-<NUMBER> like A-01 or R1-02 (uppercase wave token with "
+                "optional trailing digits, a dash, then digits). Rows are never "
+                "skipped silently — fix the ID or remove the row."
+            )
         row = Requirement(
             requirement_id=cells[0],
             requirement=cells[1],

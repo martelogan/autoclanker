@@ -27,7 +27,9 @@ Run it standalone (`goalloop …`) or via the umbrella (`autoclanker goalloop �
    `goalloop goal` until re-locked.
 2. **Enumerate requirements.** Replace the skeleton in `goalloop.tracker.md`
    with wave-grouped rows (`A-01`, `A-02`, … `B-01`): one checkable
-   requirement per row, each with a deterministic Verify command. The tracker
+   requirement per row, each with a deterministic Verify command. IDs must
+   match `<WAVE>-<NUMBER>` (uppercase wave token, dash, digits); `R<N>` waves
+   are reserved for audit rounds; cell text must not contain `|`. The tracker
    is the single source of execution state — never track progress anywhere else.
 3. **Iterate in small clusters.** Each iteration: run `goalloop handoff` to
    get the next-iteration prompt (protocol + pending rows + charter), pick one

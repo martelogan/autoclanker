@@ -126,6 +126,11 @@ def _register_goalloop_family(subparsers: Any) -> None:
         handler: Callable[[argparse.Namespace], int],
     ) -> Callable[[argparse.Namespace], int]:
         def wrapped(args: argparse.Namespace) -> int:
+            if getattr(args, "output", None):
+                raise ValueError(
+                    "goalloop commands write JSON directly to stdout and do not "
+                    "support the global --output flag; use shell redirection."
+                )
             raise SystemExit(handler(args))
 
         return wrapped

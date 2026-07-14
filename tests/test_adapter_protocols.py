@@ -363,9 +363,7 @@ def test_goalloop_adapter_runs_gates_with_genotype_environment(
 
     genotype = (GeneStateRef(gene_id="tuning.chunk", state_id="chunk_large"),)
     materialized = adapter.materialize_candidate(genotype)
-    assert materialized["environment"] == {
-        "GOALLOOP_GENE_TUNING_CHUNK": "chunk_large"
-    }
+    assert materialized["environment"] == {"GOALLOOP_GENE_TUNING_CHUNK": "chunk_large"}
 
     result = adapter.evaluate_candidate(
         era_id="era_001",
@@ -464,9 +462,7 @@ def test_goalloop_adapter_enforces_config_and_metrics_contracts(
     with pytest.raises(AdapterFailure, match="metadata.genes"):
         load_adapter(bare).build_registry()
 
-    missing_probe = load_adapter(
-        _goalloop_loop_config(tmp_path / "nowhere")
-    ).probe()
+    missing_probe = load_adapter(_goalloop_loop_config(tmp_path / "nowhere")).probe()
     assert missing_probe.available is False
 
     bad_json_root = tmp_path / "bad-json"
@@ -490,4 +486,67 @@ def test_goalloop_adapter_enforces_config_and_metrics_contracts(
             era_id="era_001",
             candidate_id="cand_bad_type",
             genotype=bad_type_adapter.build_registry().default_genotype(),
+        )
+
+
+@covers("M4-008")
+def test_goalloop_adapter_output_joining_env_collisions_and_nonfinite_metrics(
+    tmp_path: Path,
+) -> None:
+    # A gate that omits its trailing newline must not merge its metrics line
+    # into the next gate's output.
+    no_newline_root = tmp_path / "no-newline"
+    _scaffold_goalloop_loop(
+        no_newline_root,
+        gates=[
+            "printf 'GOALLOOP_METRICS={\"delta_perf\": 0.5}'",
+            "echo trailing-gate",
+        ],
+    )
+    adapter = load_adapter(_goalloop_loop_config(no_newline_root))
+    result = adapter.evaluate_candidate(
+        era_id="era_001",
+        candidate_id="cand_join",
+        genotype=adapter.build_registry().default_genotype(),
+    )
+    assert result.status == "valid"
+    assert result.delta_perf == 0.5
+
+    # Distinct gene ids that mangle to the same env var are rejected.
+    collision = ValidAdapterConfig(
+        kind="goalloop",
+        mode="local_repo_path",
+        session_root=".autoclanker",
+        repo_path=str(no_newline_root),
+        metadata={
+            "genes": cast(
+                JsonValue,
+                {
+                    "tuning.chunk": {
+                        "states": ["a", "b"],
+                        "default_state": "a",
+                    },
+                    "tuning_chunk": {
+                        "states": ["a", "b"],
+                        "default_state": "a",
+                    },
+                },
+            )
+        },
+    )
+    with pytest.raises(AdapterFailure, match="distinct name"):
+        load_adapter(collision).build_registry()
+
+    # Non-finite metric values are a hard error, never a valid result.
+    nan_root = tmp_path / "nan"
+    _scaffold_goalloop_loop(
+        nan_root,
+        gates=["printf 'GOALLOOP_METRICS={\"delta_perf\": NaN}\n'"],
+    )
+    nan_adapter = load_adapter(_goalloop_loop_config(nan_root))
+    with pytest.raises(AdapterFailure, match="must be finite"):
+        nan_adapter.evaluate_candidate(
+            era_id="era_001",
+            candidate_id="cand_nan",
+            genotype=nan_adapter.build_registry().default_genotype(),
         )

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import subprocess
 import time
@@ -65,7 +66,21 @@ def _metric_float(metrics: Mapping[str, JsonValue], key: str, default: float) ->
         raise AdapterFailure(
             f"GOALLOOP_METRICS field {key!r} must be a number, got {value!r}."
         )
-    return float(value)
+    result = float(value)
+    if not math.isfinite(result):
+        raise AdapterFailure(
+            f"GOALLOOP_METRICS field {key!r} must be finite, got {result!r}."
+        )
+    return result
+
+
+def _join_outputs(parts: Sequence[str]) -> str:
+    joined: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        joined.append(part if part.endswith("\n") else part + "\n")
+    return "".join(joined)
 
 
 def _parse_metrics_line(stdout: str) -> dict[str, JsonValue]:
@@ -161,9 +176,18 @@ class GoalloopAdapter:
                 "describing the knobs the loop's gates read from "
                 "GOALLOOP_GENE_* environment variables."
             )
-        self._registry = GeneRegistry.from_serialized_dict(
-            cast(Mapping[str, object], genes)
-        )
+        registry = GeneRegistry.from_serialized_dict(cast(Mapping[str, object], genes))
+        names: dict[str, str] = {}
+        for gene_id in registry.known_gene_ids():
+            name = gene_environment_name(gene_id)
+            if name in names:
+                raise AdapterFailure(
+                    f"Gene ids {names[name]!r} and {gene_id!r} both map to the "
+                    f"environment variable {name}; rename one so every gene "
+                    "reaches the gates under a distinct name."
+                )
+            names[name] = gene_id
+        self._registry = registry
         return self._registry
 
     def capture_eval_contract(self) -> EvalContractSnapshot:
@@ -241,8 +265,8 @@ class GoalloopAdapter:
             gates_passed += 1
         runtime_sec = time.monotonic() - started
 
-        stdout_text = "".join(stdout_parts)
-        stderr_text = "".join(stderr_parts)
+        stdout_text = _join_outputs(stdout_parts)
+        stderr_text = _join_outputs(stderr_parts)
         metrics = _parse_metrics_line(stdout_text)
         delta_perf = _metric_float(metrics, "delta_perf", 0.0)
         utility = _metric_float(metrics, "utility", delta_perf)

@@ -143,7 +143,7 @@ def test_assert_fails_on_unfinished_ids_and_waves(
     )
     capsys.readouterr()
     assert goalloop_main(["assert", "A-01", "B", "--root", str(tmp_path)]) == 0
-    assert _last_json(capsys) == {"ok": True, "not_done": []}
+    assert _last_json(capsys) == {"ok": True, "not_done": [], "unknown": []}
     assert goalloop_main(["assert", "A", "--root", str(tmp_path)]) == 1
     assert _last_json(capsys)["not_done"] == [{"id": "A-02", "status": "doing"}]
 
@@ -550,3 +550,145 @@ def test_goal_loop_skill_documents_the_portable_workflow() -> None:
         "pi",
     ]:
         assert phrase in rendered
+
+
+@covers("M10-001")
+def test_tracker_rows_with_malformed_ids_error_instead_of_vanishing(
+    tmp_path: Path,
+) -> None:
+    _init_loop(tmp_path)
+    paths = LoopPaths(root=tmp_path)
+
+    _write_tracker(
+        tmp_path,
+        [
+            "| A-01 | first | check | done | |",
+            "| A-CORE-01 | unfinished work | check | todo | |",
+        ],
+    )
+    with pytest.raises(ValueError, match="Invalid requirement ID 'A-CORE-01'"):
+        load_requirements(paths)
+
+    _write_tracker(tmp_path, ["| a-01 | lowercase | check | todo | |"])
+    with pytest.raises(ValueError, match="Invalid requirement ID"):
+        load_requirements(paths)
+
+    # Header and separator rows are still recognized, not treated as data.
+    _write_tracker(tmp_path, ["| A-01 | first | check | done | |"])
+    assert [row.requirement_id for row in load_requirements(paths)] == ["A-01"]
+
+
+@covers("M10-001")
+def test_assert_fails_on_unknown_selectors(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _init_loop(tmp_path)
+    _write_tracker(tmp_path, ["| A-01 | first | check | done | |"])
+    capsys.readouterr()
+    assert goalloop_main(["assert", "NOPE-99", "--root", str(tmp_path)]) == 1
+    payload = _last_json(capsys)
+    assert payload["ok"] is False
+    assert payload["unknown"] == ["NOPE-99"]
+    assert goalloop_main(["assert", "A-01", "--root", str(tmp_path)]) == 0
+    assert _last_json(capsys)["unknown"] == []
+
+
+@covers("M10-001")
+def test_malformed_charter_yaml_and_missing_findings_exit_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _init_loop(tmp_path, auditor="codex exec")
+    charter_path = tmp_path / "goalloop.charter.md"
+    original = charter_path.read_text(encoding="utf-8")
+
+    charter_path.write_text(
+        "---\nname: demo\ngates: [true\n---\nbody\n", encoding="utf-8"
+    )
+    capsys.readouterr()
+    assert goalloop_main(["status", "--root", str(tmp_path)]) == 2
+    assert "not valid YAML" in capsys.readouterr().err
+
+    charter_path.write_text(original, encoding="utf-8")
+    assert (
+        goalloop_main(
+            ["audit", "ingest", str(tmp_path / "nope.json"), "--root", str(tmp_path)]
+        )
+        == 2
+    )
+    assert "does not exist" in capsys.readouterr().err
+
+
+@covers("M10-002")
+def test_audit_ingest_rejects_tracker_corruption_and_wave_collisions(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _init_loop(tmp_path, auditor="codex exec")
+    _write_tracker(tmp_path, ["| A-01 | first | check | done | |"])
+    findings = tmp_path / "findings.json"
+    tracker_before = (tmp_path / TRACKER_FILENAME).read_text(encoding="utf-8")
+
+    findings.write_text(
+        json.dumps(
+            [{"title": "pipe | injection", "verdict": "confirmed", "evidence": "x"}]
+        ),
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+    assert (
+        goalloop_main(["audit", "ingest", str(findings), "--root", str(tmp_path)]) == 2
+    )
+    assert "corrupt the tracker" in capsys.readouterr().err
+    assert (tmp_path / TRACKER_FILENAME).read_text(encoding="utf-8") == tracker_before
+
+    findings.write_text(
+        json.dumps(
+            [{"title": "multi\nline", "verdict": "refuted", "evidence": "proof"}]
+        ),
+        encoding="utf-8",
+    )
+    assert (
+        goalloop_main(["audit", "ingest", str(findings), "--root", str(tmp_path)]) == 2
+    )
+    capsys.readouterr()
+
+    # A pre-existing R1 wave blocks round-1 confirmed ingestion outright.
+    _write_tracker(
+        tmp_path,
+        [
+            "| A-01 | first | check | done | |",
+            "| R1-01 | manually created | check | done | |",
+        ],
+    )
+    findings.write_text(
+        json.dumps(
+            [{"title": "real bug", "verdict": "confirmed", "evidence": "repro"}]
+        ),
+        encoding="utf-8",
+    )
+    assert (
+        goalloop_main(["audit", "ingest", str(findings), "--root", str(tmp_path)]) == 2
+    )
+    assert "reserved for audit ingestion" in capsys.readouterr().err
+
+
+@covers("M10-003")
+def test_umbrella_rejects_global_output_flag_for_goalloop(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _init_loop(tmp_path)
+    capsys.readouterr()
+    assert (
+        autoclanker_main(
+            [
+                "--output",
+                str(tmp_path / "copy.json"),
+                "goalloop",
+                "status",
+                "--root",
+                str(tmp_path),
+            ]
+        )
+        == 2
+    )
+    assert "shell redirection" in capsys.readouterr().err
+    assert not (tmp_path / "copy.json").exists()

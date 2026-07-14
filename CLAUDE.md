@@ -31,7 +31,7 @@ Library-first, CLI-first: every CLI is non-interactive, emits JSON to stdout by 
 
 Test lanes (pytest markers in `pyproject.toml`):
 
-- Default lane `addopts` bakes in `-m 'not integration and not upstream_live and not live'` and `--cov=autoclanker --cov=bigbets` (clankerprof is not a coverage target). It is self-contained: no upstreams or API keys (though with `cargo` installed, the Rust parity tests build `clankerprof-core`, which fetches crates on a cold cargo cache).
+- Default lane `addopts` bakes in `-m 'not integration and not upstream_live and not live'` and `--cov=autoclanker --cov=bigbets --cov=goalloop` (clankerprof is not a coverage target). It is self-contained: no upstreams or API keys (though with `cargo` installed, the Rust parity tests build `clankerprof-core`, which fetches crates on a cold cargo cache).
 - `./bin/dev test-integration` — tests marked `integration` (only `tests/test_cli_integration.py`).
 - `./bin/dev test-upstream-live` — non-billed; shallow-clones real autoresearch/cevolve into `.local/real-upstreams` and runs `-m upstream_live`.
 - `AUTOCLANKER_ENABLE_LLM_LIVE=1 ./bin/dev test-live` — billed LLM lane; also needs `ANTHROPIC_API_KEY` (or `AUTOCLANKER_ANTHROPIC_API_KEY`). Never make the required gate billing-dependent or nondeterministic.
@@ -93,7 +93,7 @@ The Rust crate (`crates/clankerprof-core`, binary `clankerprof-rs`) is capabilit
 
 ### goalloop
 
-Host-neutral goal loops: `goalloop/model.py` holds the file-backed state contract (charter with YAML frontmatter gates/audit policy, wave-grouped tracker rows as the single source of execution state, append-only audit log and history JSONL); `goalloop/cli.py` exposes init/status/assert/gate/goal/handoff/audit. `goalloop goal` exits 0 only when all rows are `done`/`dropped`-with-reason, gates pass (exit codes propagate verbatim), and any configured adversarial audit has converged (a round confirming nothing new). Confirmed audit findings are appended to the tracker as `R<N>` waves. Everything is documented in `docs/GOALLOOP.md`; the operator workflow ships as `skills/goal-loop`.
+Host-neutral goal loops: `goalloop/model.py` holds the file-backed state contract (charter with YAML frontmatter gates/audit policy, wave-grouped tracker rows as the single source of execution state, append-only audit log and history JSONL); `goalloop/cli.py` exposes init/status/assert/gate/goal/lock/handoff/audit. `goalloop goal` exits 0 only when all rows are `done`/`dropped`-with-reason, gates pass (exit codes propagate verbatim), and any configured adversarial audit has converged (a round confirming nothing new). Confirmed audit findings are appended to the tracker as `R<N>` waves. Everything is documented in `docs/GOALLOOP.md`; the operator workflow ships as `skills/goal-loop`.
 
 ### bigbets
 
