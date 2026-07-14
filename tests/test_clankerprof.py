@@ -8,8 +8,8 @@ from typing import Any, cast
 
 import pytest
 
-import clankerprof.analysis as clankerprof_analysis
 import clankerprof.cli as clankerprof_cli
+import clankerprof.scopes as clankerprof_scopes
 
 from autoclanker.cli import main as autoclanker_main
 from clankerprof.analysis import (
@@ -2149,7 +2149,7 @@ def test_clankerprof_boundary_predicate_matching_is_cached(
         _boundary_decomposition_profile_bytes(sample_repetitions=100)
     )
     options = _generic_boundary_options()
-    original = clankerprof_analysis.match_path_pattern
+    original = clankerprof_scopes.match_path_pattern
     call_count = 0
 
     def counted_match_path_pattern(
@@ -2162,7 +2162,7 @@ def test_clankerprof_boundary_predicate_matching_is_cached(
         return original(pattern, path, rules)
 
     monkeypatch.setattr(
-        clankerprof_analysis,
+        clankerprof_scopes,
         "match_path_pattern",
         counted_match_path_pattern,
     )
@@ -2205,7 +2205,7 @@ def test_clankerprof_boundary_expression_matching_stays_frame_cached(
             ),
         ),
     )
-    original = clankerprof_analysis.match_path_pattern
+    original = clankerprof_scopes.match_path_pattern
     call_count = 0
 
     def counted_match_path_pattern(
@@ -2218,7 +2218,7 @@ def test_clankerprof_boundary_expression_matching_stays_frame_cached(
         return original(pattern, path, rules)
 
     monkeypatch.setattr(
-        clankerprof_analysis,
+        clankerprof_scopes,
         "match_path_pattern",
         counted_match_path_pattern,
     )
@@ -2271,7 +2271,7 @@ def test_clankerprof_boundary_category_predicates_stay_frame_cached(
             ),
         ),
     )
-    original = clankerprof_analysis.match_path_pattern
+    original = clankerprof_scopes.match_path_pattern
     call_count = 0
 
     def counted_match_path_pattern(
@@ -2284,7 +2284,7 @@ def test_clankerprof_boundary_category_predicates_stay_frame_cached(
         return original(pattern, path, rules)
 
     monkeypatch.setattr(
-        clankerprof_analysis,
+        clankerprof_scopes,
         "match_path_pattern",
         counted_match_path_pattern,
     )

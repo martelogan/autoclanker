@@ -204,9 +204,7 @@ def _load_match_rules(
         raw_item = cast(dict[str, object], item)
         unknown_keys = sorted(set(raw_item) - _KNOWN_MATCH_RULE_KEYS)
         if unknown_keys:
-            raise ValueError(
-                f"Unknown {key} entry keys: {', '.join(unknown_keys)}."
-            )
+            raise ValueError(f"Unknown {key} entry keys: {', '.join(unknown_keys)}.")
         if "category" not in raw_item:
             raise ValueError(f"Each {key} entry must include category.")
         rules.append(
@@ -235,9 +233,7 @@ def runtime_rules_from_mapping(
 ) -> RuntimeRuleSet:
     unknown_keys = sorted(set(payload) - _KNOWN_RULE_PACK_KEYS)
     if unknown_keys:
-        raise ValueError(
-            f"Unknown runtime rule pack keys: {', '.join(unknown_keys)}."
-        )
+        raise ValueError(f"Unknown runtime rule pack keys: {', '.join(unknown_keys)}.")
     schema_version = payload.get("schema_version", RUNTIME_RULES_SCHEMA_VERSION)
     if schema_version != RUNTIME_RULES_SCHEMA_VERSION:
         raise ValueError(

@@ -350,8 +350,7 @@ def _validated_profile_meta(raw: object) -> _ProfileMeta:
     if not isinstance(raw_value_types, list):
         raise ValueError("Sample facts profile value_types must be an array.")
     value_types = tuple(
-        _value_type_from_jsonable(item)
-        for item in cast(list[object], raw_value_types)
+        _value_type_from_jsonable(item) for item in cast(list[object], raw_value_types)
     )
     raw_period_type = payload.get("period_type")
     period_type = (
