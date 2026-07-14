@@ -273,3 +273,19 @@ Replay speed: decode+to_sample_facts 179.1 ms; v2 facts replay 57.5 ms —
 replay is now 3.1x faster than re-decoding (v1 replay was slower than
 re-decoding). Python and Rust compact exports verified byte-identical,
 including non-ASCII frame names.
+
+### A3/A4 — projection and decode performance (2026-07-14, same synthetic profile)
+
+Best-of-3 on the 10,000-sample / 200-unique-frame / depth 3–25 profile:
+
+| Stage | Before | After | Change |
+| --- | --- | --- | --- |
+| decode + to_sample_facts (cold) | 179.1 ms | 84.3 ms | 2.1x (frame interning, A4-01) |
+| to_sample_facts (repeat call) | full recompute | 0.08 µs | memoized (A4-01) |
+| facts v2 replay | 57.5 ms | 50.5 ms | shared interned import path |
+| slice analysis (20 slices + filter + collapse) | 197.3 ms | 26.1 ms | 7.6x (typed DSL + frame-identity memoization, A3-03) |
+| targets (20 parents) | — | 43.8 ms | baseline recorded post-A3-02 shared cache |
+
+Boundary analysis additionally skips the exclude-descendants scan entirely
+when no boundary declares exclusions and normalizes exclusion expressions
+once per analysis (A4-03).

@@ -434,6 +434,16 @@ def analyze_boundary_facts(
     )
     predicate_matcher.set_configured_category_matcher(category_matcher)
     domain_matcher = _BoundaryDomainMatcher(options.domains, predicate_matcher)
+    # Exclusion expressions normalize once here; the per-frame scan below
+    # only runs for boundaries that actually declare exclusions.
+    exclusion_exprs = tuple(
+        (boundary_index, normalized)
+        for boundary_index, boundary in enumerate(options.boundaries)
+        for normalized in (
+            normalize_frame_predicate_expr(boundary.exclude_descendants),
+        )
+        if normalized.predicates or normalized.any or normalized.all or normalized.not_
+    )
 
     for fact in index.non_empty_samples():
         value = fact.primary_value
@@ -519,8 +529,10 @@ def analyze_boundary_facts(
                 first_non_runtime_caller_below = frame
             if position > 0 and fallback_owner is None:
                 fallback_owner = frame
-            for boundary_index, boundary in enumerate(options.boundaries):
-                if predicate_matcher.matches_expr(frame, boundary.exclude_descendants):
+            for boundary_index, exclude_expr in exclusion_exprs:
+                if boundary_index in excluded_boundaries:
+                    continue
+                if predicate_matcher.matches_expr(frame, exclude_expr):
                     excluded_boundaries.add(boundary_index)
 
     return BoundaryAnalysisResult(

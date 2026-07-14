@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TypeAlias
 
 TimeNs: TypeAlias = int
@@ -110,6 +110,14 @@ class Location:
     is_folded: bool = False
 
 
+def _frames_by_location_cache() -> dict[int, tuple[Frame, ...]]:
+    return {}
+
+
+def _profile_facts_cache() -> dict[int, ProfileFacts]:
+    return {}
+
+
 @dataclass(frozen=True, slots=True)
 class Profile:
     string_table: tuple[str, ...]
@@ -121,13 +129,29 @@ class Profile:
     period: int = 0
     default_sample_type: str = ""
     primary_value_index: int = 0
+    # Interning caches: the location→frames expansion is invariant per
+    # profile, so unique Frame instances are shared across every sample
+    # occurrence instead of reallocated per stack.
+    _frames_by_location: dict[int, tuple[Frame, ...]] = field(
+        default_factory=_frames_by_location_cache,
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _facts_cache: dict[int, ProfileFacts] = field(
+        default_factory=_profile_facts_cache,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
-    def stack_for_sample(self, sample: Sample) -> tuple[Frame, ...]:
+    def _frames_for_location(self, location_id: int) -> tuple[Frame, ...]:
+        cached = self._frames_by_location.get(location_id)
+        if cached is not None:
+            return cached
         frames: list[Frame] = []
-        for location_id in sample.location_ids:
-            location = self.locations.get(location_id)
-            if location is None:
-                continue
+        location = self.locations.get(location_id)
+        if location is not None:
             for function_id, line in location.lines:
                 function = self.functions.get(function_id)
                 if function is None:
@@ -142,9 +166,20 @@ class Profile:
                         location_is_folded=location.is_folded,
                     )
                 )
+        interned = tuple(frames)
+        self._frames_by_location[location_id] = interned
+        return interned
+
+    def stack_for_sample(self, sample: Sample) -> tuple[Frame, ...]:
+        frames: list[Frame] = []
+        for location_id in sample.location_ids:
+            frames.extend(self._frames_for_location(location_id))
         return tuple(frames)
 
     def to_sample_facts(self) -> ProfileFacts:
+        cached = self._facts_cache.get(0)
+        if cached is not None:
+            return cached
         facts = tuple(
             SampleFact(
                 sample_index=index,
@@ -153,7 +188,7 @@ class Profile:
             )
             for index, sample in enumerate(self.samples)
         )
-        return ProfileFacts(
+        result = ProfileFacts(
             samples=facts,
             total_primary_value=sum(fact.primary_value for fact in facts),
             empty_sample_count=sum(1 for fact in facts if fact.is_empty),
@@ -163,6 +198,8 @@ class Profile:
             default_sample_type=self.default_sample_type,
             primary_value_index=self.primary_value_index,
         )
+        self._facts_cache[0] = result
+        return result
 
     def sample_facts(self) -> tuple[SampleFact, ...]:
         return self.to_sample_facts().samples

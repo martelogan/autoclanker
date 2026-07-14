@@ -65,10 +65,10 @@ file — it is the single source of execution state.
 
 | ID | Requirement | Verify | Status | Notes |
 | --- | --- | --- | --- | --- |
-| A4-01 | Frames interned at decode (unique-frame table, occurrences reference it); `Profile.sample_facts()` memoized (item 25) | identity test + perf evidence | todo | |
+| A4-01 | Frames interned at decode (unique-frame table, occurrences reference it); `Profile.sample_facts()` memoized (item 25) | decode+facts 179ms -> 84ms; memoized repeat ~0.1us; suite green | done | per-location frame table on Profile; caches excluded from eq/repr |
 | A4-02 | Facts v2 compact encoding: string/frame tables + per-sample index lists; compact separators by default, `--pretty` opt-in (item 28) | size ratio recorded; replay identity tests | done | 4.0x raw pprof (was ~90x); replay 3.1x faster than re-decode (plan appendix) |
-| A4-03 | Boundary loop: predicate exprs normalized once at config parse; exclude-descendants pass skipped when no boundary uses it (item 26) | equivalence tests + perf evidence | todo | |
-| A4-04 | Benchmark evidence recorded (large synthetic profile, before/after) in plan doc appendix | docs/CLANKERPROF_V2_PLAN.md appendix | todo | |
+| A4-03 | Boundary loop: predicate exprs normalized once at config parse; exclude-descendants pass skipped when no boundary uses it (item 26) | boundary tests green; exclusion exprs precomputed | done | scan loops only over boundaries with exclusions |
+| A4-04 | Benchmark evidence recorded (large synthetic profile, before/after) in plan doc appendix | docs/CLANKERPROF_V2_PLAN.md appendix | done | A1/A4 facts table + A3/A4 projection table |
 
 ## Wave A5 — tests
 
