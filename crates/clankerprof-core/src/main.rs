@@ -679,7 +679,7 @@ fn run_targets(args: TargetsArgs) -> Result<(), String> {
             attributables.as_ref(),
             args.format == "simple-csv",
             false,
-        )
+        )?
     } else {
         render_target_text(
             &results,
@@ -708,12 +708,12 @@ fn write_compat_target_csv_artifacts(
     let verbose_path = verbose_dir.join(base_name);
     std::fs::write(
         &simplified_path,
-        render_target_csv(results, attributables, true, true),
+        render_target_csv(results, attributables, true, true)?,
     )
     .map_err(|error| error.to_string())?;
     std::fs::write(
         &verbose_path,
-        render_target_csv(results, attributables, false, true),
+        render_target_csv(results, attributables, false, true)?,
     )
     .map_err(|error| error.to_string())?;
     // Rich receipt matching the Python CLI's compat-layout payload.

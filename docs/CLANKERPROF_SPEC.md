@@ -310,6 +310,24 @@ For each sample:
 Target projection must preserve complete target accounting. Category totals for
 one parent must sum to the total CPU time under that parent.
 
+Rendering rules shared by both implementations:
+
+- A zero parent total (valid signed samples can cancel to exactly zero)
+  renders every dependent percentage as `0` — never a division error, `inf`,
+  or `NaN` — and the text report's TOTAL row reports `0.00%`, not `100.00%`.
+- The simplified (`simple-csv` and compat simplified) noise gate is
+  magnitude-aware: categories with `|share| < 0.1%` other than `Other` may be
+  omitted; rows with negative shares of any magnitude must be rendered —
+  sample values are signed, and dropping them breaks additivity.
+- Caller-to-leaf attribution picks the first non-pseudo, non-runtime-stdlib
+  frame above the leaf, scanning to the root — never a fixed-depth window.
+  The leaf's immediate caller is the last-resort fallback only when no
+  eligible frame exists in the whole stack.
+- Core-class CSV files (packaged or `--core-classes` overrides) parse their
+  first field with CSV semantics (Python `csv.reader` default dialect):
+  quoted fields unwrap, doubled quotes unescape, and quoted commas stay in
+  the field — identical class sets in both implementations.
+
 Parents emit in first-seen encounter order (the order the analysis first
 attributed a sample to them) in every row-oriented format — `csv`,
 `simple-csv`, `text`, and the compat CSV pair — matching the Python
@@ -387,6 +405,12 @@ estimates must also stay JSON-representable end to end: a finite metric scaled
 by a >100% bucket share can overflow, and a non-finite estimate — input or
 scaled — fails closed in both implementations with
 `Attributable estimate for '<name>' is not finite.`, never a silent `null`.
+This covers every estimate surface — scope buckets, categories, caller pairs,
+and the target CSV layouts — and the load layer: a `--cpu-attributables`
+value that is non-finite after parsing (e.g. an overflowing `1e309` literal)
+is rejected before any scaling in both languages (Python emits the shared
+estimate message; serde_json fails the parse itself — exit codes match,
+message detail is engine-specific).
 Selector and predicate arrays require string entries: a non-string entry in
 a scope `selector`/`matcher`/`match` list is
 `<section> selector values must be strings.`, and a non-string entry in any

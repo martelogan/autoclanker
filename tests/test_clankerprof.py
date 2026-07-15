@@ -6067,6 +6067,160 @@ def test_clankerprof_attributable_overflow_fails_closed(
     assert envelope["error"] == "Attributable estimate for 'huge' is not finite."
 
 
+def _signed_target_profile(tmp_path: Path) -> tuple[Path, Path]:
+    builder = PprofFixtureBuilder.create()
+    t_fn = builder.function("T", "/app/t.py")
+    pos_leaf = builder.function("PosLeaf", "/srv/app/pos.py")
+    neg_leaf = builder.function("NegLeaf", "/srv/app/neg.py")
+    t_loc = builder.location(t_fn)
+    builder.sample((builder.location(pos_leaf), t_loc), 110)
+    builder.sample((builder.location(neg_leaf), t_loc), -10)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "targets.json"
+    config_path.write_text(
+        json.dumps({"T": {"Positive": "pos.py", "Negative": "neg.py"}}),
+        encoding="utf-8",
+    )
+    return profile_path, config_path
+
+
+def test_clankerprof_target_attributable_overflow_fails_closed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Targets twin of the scope guard: a finite metric scaled by the 110%
+    # category share overflows and must fail closed in every CSV layout.
+    monkeypatch.chdir(tmp_path)
+    profile_path, config_path = _signed_target_profile(tmp_path)
+    attrs_path = tmp_path / "attrs.json"
+    attrs_path.write_text(json.dumps({"huge": {"T": 1.7e308}}), encoding="utf-8")
+    base = [
+        "targets",
+        "--profile",
+        str(profile_path),
+        "--config",
+        str(config_path),
+        "--cpu-attributables",
+        str(attrs_path),
+    ]
+    for extra in (
+        ["--format", "csv"],
+        ["--format", "simple-csv"],
+        ["--format", "csv", "--target-csv-layout", "compat", "--output", "x.csv"],
+    ):
+        exit_code = clankerprof_main([*base, *extra])
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == "Attributable estimate for 'huge' is not finite."
+
+    # Non-finite at load (1e309 parses to inf in Python): rejected before any
+    # scaling, matching Rust's parse-time rejection outcome (exit 2).
+    attrs_path.write_text('{"huge": {"T": 1e309}}', encoding="utf-8")
+    exit_code = clankerprof_main([*base, "--format", "csv"])
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Attributable estimate for 'huge' is not finite."
+
+
+def test_clankerprof_zero_total_targets_render_without_division_errors(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Valid signed samples cancelling to zero previously crashed the CSV
+    # renderers with ZeroDivisionError; every pct over a zero total is 0.
+    builder = PprofFixtureBuilder.create()
+    t_fn = builder.function("T", "/app/t.py")
+    pos_leaf = builder.function("PosLeaf", "/srv/app/pos.py")
+    neg_leaf = builder.function("NegLeaf", "/srv/app/neg.py")
+    t_loc = builder.location(t_fn)
+    builder.sample((builder.location(pos_leaf), t_loc), 10)
+    builder.sample((builder.location(neg_leaf), t_loc), -10)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "targets.json"
+    config_path.write_text(
+        json.dumps({"T": {"Pos": "pos.py", "Neg": "neg.py"}}),
+        encoding="utf-8",
+    )
+    base = ["targets", "--profile", str(profile_path), "--config", str(config_path)]
+    for fmt in ("csv", "simple-csv", "text"):
+        exit_code = clankerprof_main([*base, "--format", fmt])
+        assert exit_code == 0
+        output = capsys.readouterr().out
+        assert "inf" not in output and "NaN" not in output
+        if fmt == "text":
+            # The TOTAL row must not claim 100% of a zero total.
+            assert "0.00%" in output and "100.00%" not in output
+
+
+def test_clankerprof_simple_csv_renders_negative_categories(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The simplified noise gate is magnitude-aware: |pct| < 0.1 is omitted,
+    # so a material negative category must render (signed data rule).
+    monkeypatch.chdir(tmp_path)
+    profile_path, config_path = _signed_target_profile(tmp_path)
+    base = ["targets", "--profile", str(profile_path), "--config", str(config_path)]
+    exit_code = clankerprof_main([*base, "--format", "simple-csv"])
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "T,Negative,-10.0" in output
+
+    exit_code = clankerprof_main(
+        [*base, "--format", "csv", "--target-csv-layout", "compat", "--output", "x.csv"]
+    )
+    assert exit_code == 0
+    capsys.readouterr()
+    simplified_csv = (tmp_path / "output" / "x.csv").read_text(encoding="utf-8")
+    assert '"T","Negative",-10.0' in simplified_csv
+
+
+def test_clankerprof_caller_selection_scans_past_deep_native_runs(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The first eligible application caller wins at ANY depth (an arbitrary
+    # nine-frame window used to fall back to the first native frame); the
+    # immediate caller remains the fallback only when no frame is eligible.
+    def build(native_frames: int, with_app_caller: bool) -> Path:
+        builder = PprofFixtureBuilder.create()
+        stack = [builder.location(builder.function("Leaf", "<native>"))]
+        for index in range(native_frames):
+            stack.append(
+                builder.location(builder.function(f"Native{index + 1}", "<native>"))
+            )
+        if with_app_caller:
+            stack.append(
+                builder.location(builder.function("AppCaller", "/app/caller.py"))
+            )
+        # The parent target is native too, so the fallback case genuinely has
+        # no eligible application frame anywhere in the stack.
+        parent_filename = "/app/t.py" if with_app_caller else "<native>"
+        stack.append(builder.location(builder.function("T", parent_filename)))
+        builder.sample(tuple(stack), 100)
+        profile_path = tmp_path / f"profile_{native_frames}_{with_app_caller}.pb"
+        profile_path.write_bytes(builder.encode())
+        return profile_path
+
+    deep = build(9, with_app_caller=True)
+    exit_code = clankerprof_main(
+        ["targets", "--profile", str(deep), "--target", "T", "--format", "simple-csv"]
+    )
+    assert exit_code == 0
+    assert "AppCaller (100.0%)" in capsys.readouterr().out
+
+    no_app = build(2, with_app_caller=False)
+    exit_code = clankerprof_main(
+        ["targets", "--profile", str(no_app), "--target", "T", "--format", "simple-csv"]
+    )
+    assert exit_code == 0
+    assert "Native1 (100.0%)" in capsys.readouterr().out
+
+
 def test_clankerprof_pseudo_slices_render_negative_aggregates(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

@@ -3427,30 +3427,40 @@ def test_clankerprof_rust_round3_fixes_match_python(tmp_path: Path) -> None:
     # every pct field's zero arm — Python emits integer 0 there, and Rust must
     # spell it identically (not 0.0).
     builder = PprofFixtureBuilder.create()
+    t_fn = builder.function("T", "/app/t.py")
     pos_fn = builder.function("pos", "/srv/a/a.py")
     neg_fn = builder.function("neg", "/srv/b/b.py")
-    builder.sample((builder.location(pos_fn),), 10)
-    builder.sample((builder.location(neg_fn),), -10)
+    builder.sample((builder.location(pos_fn), builder.location(t_fn)), 10)
+    builder.sample((builder.location(neg_fn), builder.location(t_fn)), -10)
     zero_profile = tmp_path / "zero_total.pb"
     zero_profile.write_bytes(builder.encode())
     output = _assert_identical_success(
         ["slices", "--profile", str(zero_profile)], "zero-total-slices"
     )
     assert '"pct": 0,' in output
+    # The target T actually occurs in this fixture (R4-03 de-vacuated this
+    # leg: it previously configured an absent target and only requested
+    # JSON, so the unguarded CSV/text divisions were never exercised).
     zero_targets = tmp_path / "zero_targets.json"
-    zero_targets.write_text('{"T": {"App": "path:/srv"}}', encoding="utf-8")
-    _assert_identical_success(
-        [
-            "targets",
-            "--profile",
-            str(zero_profile),
-            "--config",
-            str(zero_targets),
-            "--format",
-            "json",
-        ],
-        "zero-total-targets",
+    zero_targets.write_text(
+        '{"T": {"Pos": "path:/srv/a", "Neg": "path:/srv/b"}}', encoding="utf-8"
     )
+    for zero_format in ("json", "csv", "simple-csv", "text"):
+        output = _assert_identical_success(
+            [
+                "targets",
+                "--profile",
+                str(zero_profile),
+                "--config",
+                str(zero_targets),
+                "--format",
+                zero_format,
+            ],
+            f"zero-total-targets-{zero_format}",
+        )
+        assert "inf" not in output and "NaN" not in output
+        if zero_format == "text":
+            assert "TOTAL" in output and "100.00%" not in output
     zero_scopes = tmp_path / "zero_scopes.yml"
     zero_scopes.write_text(
         'cost_kind:\n  Work: "name_eq:pos"\nscope:\n  - function: pos\n',
@@ -3665,3 +3675,118 @@ def test_clankerprof_rust_compare_fail_closed_matches_python(tmp_path: Path) -> 
         ],
         "zero-thresholds",
     )
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_target_renderer_semantics_match_python(
+    tmp_path: Path,
+) -> None:
+    # R4 cluster N: signed/zero-total rendering, attributable finiteness on
+    # the targets surface, deep-native caller selection, and quoted
+    # core-class CSV must behave identically in both languages.
+    builder = PprofFixtureBuilder.create()
+    t_fn = builder.function("T", "/app/t.py")
+    pos_leaf = builder.function("PosLeaf", "/srv/app/pos.py")
+    neg_leaf = builder.function("NegLeaf", "/srv/app/neg.py")
+    t_loc = builder.location(t_fn)
+    builder.sample((builder.location(pos_leaf), t_loc), 110)
+    builder.sample((builder.location(neg_leaf), t_loc), -10)
+    signed_profile = tmp_path / "signed.pb"
+    signed_profile.write_bytes(builder.encode())
+    signed_config = tmp_path / "signed_targets.json"
+    signed_config.write_text(
+        json.dumps({"T": {"Positive": "pos.py", "Negative": "neg.py"}}),
+        encoding="utf-8",
+    )
+    signed_base = [
+        "targets",
+        "--profile",
+        str(signed_profile),
+        "--config",
+        str(signed_config),
+    ]
+
+    # R4-06: the simplified noise gate is magnitude-aware — the -10%
+    # category renders in simple-csv, byte-identically.
+    output = _assert_identical_success(
+        [*signed_base, "--format", "simple-csv"], "negative-simple-csv"
+    )
+    assert "T,Negative,-10.0" in output
+
+    # R4-04: a finite metric scaled by the 110% share overflows and fails
+    # closed with the identical envelope in both languages.
+    overflow_attrs = tmp_path / "attrs_finite.json"
+    overflow_attrs.write_text(json.dumps({"huge": {"T": 1.7e308}}), encoding="utf-8")
+    for fmt in ("csv", "simple-csv"):
+        envelope = _assert_identical_envelope(
+            [*signed_base, "--format", fmt, "--cpu-attributables", str(overflow_attrs)],
+            f"attributable-overflow-{fmt}",
+        )
+        assert json.loads(envelope) == {
+            "ok": False,
+            "error": "Attributable estimate for 'huge' is not finite.",
+        }
+    # Non-finite at load: Python rejects the parsed inf, Rust rejects at the
+    # JSON parse — exit codes match, message detail is engine-specific.
+    huge_attrs = tmp_path / "attrs_1e309.json"
+    huge_attrs.write_text('{"huge": {"T": 1e309}}', encoding="utf-8")
+    argv = [*signed_base, "--format", "csv", "--cpu-attributables", str(huge_attrs)]
+    python_run = _run_python_cli_raw(argv)
+    rust_run = _run_rust_cli_raw(argv)
+    assert python_run.returncode == 2, python_run.stderr
+    assert rust_run.returncode == 2, rust_run.stderr
+
+    # R4-07: the first eligible application caller wins at any native-run
+    # depth (the nine-frame window is gone); byte-identical outputs.
+    deep_builder = PprofFixtureBuilder.create()
+    deep_stack = [deep_builder.location(deep_builder.function("Leaf", "<native>"))]
+    for index in range(9):
+        deep_stack.append(
+            deep_builder.location(
+                deep_builder.function(f"Native{index + 1}", "<native>")
+            )
+        )
+    deep_stack.append(
+        deep_builder.location(deep_builder.function("AppCaller", "/app/caller.py"))
+    )
+    deep_stack.append(deep_builder.location(deep_builder.function("T", "/app/t.py")))
+    deep_builder.sample(tuple(deep_stack), 100)
+    deep_profile = tmp_path / "deep_native.pb"
+    deep_profile.write_bytes(deep_builder.encode())
+    output = _assert_identical_success(
+        ["targets", "--profile", str(deep_profile), "--target", "T", "--format", "simple-csv"],
+        "deep-native-caller",
+    )
+    assert "AppCaller (100.0%)" in output
+
+    # R4-09: quoted core-class CSV fields parse with csv.reader semantics in
+    # both languages (quotes unwrapped, doubled quotes unescaped).
+    ruby_builder = PprofFixtureBuilder.create()
+    ruby_t = ruby_builder.function("T", "/srv/app/t.py")
+    ruby_leaf = ruby_builder.function("Array#map", "<cfunc>")
+    ruby_builder.sample(
+        (ruby_builder.location(ruby_leaf), ruby_builder.location(ruby_t)), 7
+    )
+    ruby_profile = tmp_path / "ruby.pb"
+    ruby_profile.write_bytes(ruby_builder.encode())
+    ruby_config = tmp_path / "ruby_targets.json"
+    ruby_config.write_text(json.dumps({"T": {"App": "/srv/app/**"}}), encoding="utf-8")
+    core_csv = tmp_path / "core.csv"
+    core_csv.write_text('"Array"\n', encoding="utf-8")
+    output = _assert_identical_success(
+        [
+            "targets",
+            "--profile",
+            str(ruby_profile),
+            "--config",
+            str(ruby_config),
+            "--target",
+            "T",
+            "--runtime",
+            "ruby",
+            "--core-classes",
+            str(core_csv),
+        ],
+        "quoted-core-classes",
+    )
+    assert "Ruby Core (Native)" in output

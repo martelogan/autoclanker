@@ -122,6 +122,16 @@ def _f64_ratio(numerator: TimeNs, denominator: TimeNs) -> float:
     return float(numerator) / float(denominator)
 
 
+def _pct_of(numerator: TimeNs, total: TimeNs) -> float:
+    """Percentage with the shared zero-total arm.
+
+    Valid signed samples can cancel a parent's total to exactly zero; every
+    percentage over a zero total renders as 0 in both implementations —
+    never a ZeroDivisionError, inf, or NaN.
+    """
+    return _f64_ratio(numerator, total) * 100 if total else 0.0
+
+
 def _finite_attributable(name: str, estimate: float) -> float:
     """Attributable estimates — input or scaled — must stay JSON-representable.
 
@@ -554,7 +564,7 @@ def render_target_csv(
             categories.items(), key=lambda item: item[1].cpu_time, reverse=True
         ):
             pct = (_f64_ratio(stats.cpu_time, total) * 100) if total else 0
-            if simplified and pct < 0.1 and category != "Other":
+            if simplified and abs(pct) < 0.1 and category != "Other":
                 continue
             top_functions = sorted(
                 stats.functions.items(),
@@ -562,7 +572,7 @@ def render_target_csv(
                 reverse=True,
             )[: 3 if simplified else 5]
             function_summary = "; ".join(
-                f"{name} ({_f64_ratio(metrics.cpu_time, total) * 100:.1f}%)"
+                f"{name} ({_pct_of(metrics.cpu_time, total):.1f}%)"
                 for name, metrics in top_functions
             )
             caller_totals: dict[str, int] = {}
@@ -573,12 +583,12 @@ def render_target_csv(
                 caller_totals.items(), key=lambda item: item[1], reverse=True
             )[:3]
             callsites_summary = "; ".join(
-                f"{caller} ({_f64_ratio(time_ns, total) * 100:.1f}%)"
+                f"{caller} ({_pct_of(time_ns, total):.1f}%)"
                 for caller, time_ns in top_callers
             )
             attributable_values = [
                 (
-                    f"{(pct / 100.0) * attributables[column][parent]:.1f}"
+                    f"{_finite_attributable(column, (pct / 100.0) * attributables[column][parent]):.1f}"
                     if attributables
                     and column in attributables
                     and parent in attributables[column]
@@ -604,7 +614,7 @@ def render_target_csv(
                 reverse=True,
             )[:3]
             pair_columns = [
-                f"{pair} ({metrics.count} samples, {_f64_ratio(metrics.cpu_time, total) * 100:.1f}%)"
+                f"{pair} ({metrics.count} samples, {_pct_of(metrics.cpu_time, total):.1f}%)"
                 for pair, metrics in top_pairs
             ]
             while len(pair_columns) < 3:
@@ -661,7 +671,7 @@ def _render_legacy_target_csv(
             categories.items(), key=lambda item: item[1].cpu_time, reverse=True
         ):
             pct = (_f64_ratio(stats.cpu_time, total) * 100) if total else 0
-            if simplified and pct < 0.1 and category != "Other":
+            if simplified and abs(pct) < 0.1 and category != "Other":
                 continue
 
             top_functions = sorted(
@@ -671,12 +681,12 @@ def _render_legacy_target_csv(
             )[: 3 if simplified else 5]
             if simplified:
                 function_summary = "; ".join(
-                    f"{name} ({_f64_ratio(metrics.cpu_time, total) * 100:.1f}%)"
+                    f"{name} ({_pct_of(metrics.cpu_time, total):.1f}%)"
                     for name, metrics in top_functions
                 )
             else:
                 function_summary = "; ".join(
-                    f"{name} ({metrics.count} samples, {_f64_ratio(metrics.cpu_time, total) * 100:.1f}%)"
+                    f"{name} ({metrics.count} samples, {_pct_of(metrics.cpu_time, total):.1f}%)"
                     for name, metrics in top_functions
                 )
 
@@ -689,13 +699,13 @@ def _render_legacy_target_csv(
             )[:3]
             callsite_separator = "; " if simplified else ", "
             callsites_summary = callsite_separator.join(
-                f"{caller} ({_f64_ratio(time_ns, total) * 100:.1f}%)"
+                f"{caller} ({_pct_of(time_ns, total):.1f}%)"
                 for caller, time_ns in top_callers
             )
 
             attributable_values = [
                 (
-                    f"{(pct / 100.0) * attributables[column][parent]:.1f}"
+                    f"{_finite_attributable(column, (pct / 100.0) * attributables[column][parent]):.1f}"
                     if attributables
                     and column in attributables
                     and parent in attributables[column]
@@ -726,7 +736,7 @@ def _render_legacy_target_csv(
             pair_columns = [
                 _quote_legacy_csv(
                     f"{_legacy_pair_arrow(pair)} "
-                    f"({metrics.count} samples, {_f64_ratio(metrics.cpu_time, total) * 100:.1f}%)"
+                    f"({metrics.count} samples, {_pct_of(metrics.cpu_time, total):.1f}%)"
                 )
                 for pair, metrics in top_pairs
             ]
@@ -791,7 +801,10 @@ def render_target_text(
                 f"{stats.sample_count:>9} {len(stats.functions):>14} {len(stats.files):>7}"
             )
         lines.append("-" * 110)
-        lines.append(f"{'TOTAL':<35} {format_time(total):<15} {'100.00%':>8}")
+        lines.append(
+            f"{'TOTAL':<35} {format_time(total):<15} "
+            f"{'100.00%' if total else '0.00%':>8}"
+        )
         if show_folded:
             folded_categories = [
                 (category, stats)

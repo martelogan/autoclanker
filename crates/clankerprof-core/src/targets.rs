@@ -160,10 +160,12 @@ pub fn analyze_target_facts_with_options(
             stats.sample_count += 1;
             stats.add_function(&leaf.name, value);
             stats.files.insert(frame_to_categorize.filename.clone());
+            // Scan to the root: the first eligible application caller wins
+            // at any depth (an arbitrary nine-frame window silently fell
+            // back to the first native frame under deep native runs).
             let caller = stack
                 .iter()
                 .skip(1)
-                .take(9)
                 .find(|frame| {
                     !frame.filename.starts_with('<')
                         && !is_runtime_stdlib_path(&frame.filename, &options.runtime_rules)

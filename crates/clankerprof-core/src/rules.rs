@@ -492,13 +492,39 @@ pub fn ruby_rules(core_classes: BTreeSet<String>, verbose: bool) -> Result<Runti
     load_runtime_rules_str(RUBY_PACK_YAML, "ruby", core_classes, verbose)
 }
 
+/// First CSV field with Python `csv.reader` default-dialect semantics:
+/// a leading `"` opens a quoted field (doubled `""` escapes a quote, the
+/// closing quote ends the field); otherwise the field runs to the first
+/// comma. Raw line splitting kept the quotes and broke categorization.
+fn first_csv_field(line: &str) -> String {
+    match line.strip_prefix('"') {
+        None => line.split(',').next().unwrap_or("").to_string(),
+        Some(rest) => {
+            let mut field = String::new();
+            let mut chars = rest.chars().peekable();
+            while let Some(ch) = chars.next() {
+                if ch == '"' {
+                    if chars.peek() == Some(&'"') {
+                        field.push('"');
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                } else {
+                    field.push(ch);
+                }
+            }
+            field
+        }
+    }
+}
+
 fn core_classes_from_csv(payload: &str) -> BTreeSet<String> {
     payload
         .lines()
-        .filter_map(|line| line.split(',').next())
-        .map(str::trim)
+        .map(first_csv_field)
+        .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty() && !value.starts_with('#'))
-        .map(ToString::to_string)
         .collect()
 }
 
@@ -514,6 +540,21 @@ pub fn load_ruby_core_classes(path: impl AsRef<Path>) -> Result<BTreeSet<String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn core_classes_csv_first_field_matches_python_csv_reader() {
+        // Quoted fields unwrap, doubled quotes unescape, quoted commas stay
+        // inside the field, unquoted lines split at the first comma, and
+        // the '#' comment check applies after unquoting+trim.
+        let parsed = core_classes_from_csv(
+            "\"Array\"\nHash,ignored\n\"Set\",ignored\n\"Em\"\"bed\"\n\"Com,ma\"\n\n\"#quoted-comment\"\n#comment\n",
+        );
+        let expected: BTreeSet<String> = ["Array", "Hash", "Set", "Em\"bed", "Com,ma"]
+            .into_iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(parsed, expected);
+    }
 
     #[test]
     fn packaged_generic_pack_parses_with_expected_fields() {

@@ -128,6 +128,9 @@ def analyze_target_facts(
             stats.sample_count += 1
             stats.add_function(leaf.name, value)
             stats.files.add(frame_to_categorize.filename)
+            # Scan to the root: the first eligible application caller wins at
+            # any depth (an arbitrary nine-frame window silently fell back to
+            # the first native frame under deep native runs).
             caller = index.first_caller_after_leaf(
                 fact,
                 lambda frame: (
@@ -137,7 +140,6 @@ def analyze_target_facts(
                         resolved_options.runtime_rules,
                     )
                 ),
-                limit=9,
             )
             if caller is None and len(stack) > 1:
                 caller = stack[1]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 import tomllib
@@ -117,7 +118,15 @@ def _load_attributables(path: str | None) -> dict[str, dict[str, float]] | None:
             # and strings that Python's float() would silently coerce.
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise ValueError(f"Attributable column {name} values must be numbers.")
-            column[str(key)] = float(value)
+            metric = float(value)
+            # Rust never sees a non-finite here (serde_json rejects 1e309 at
+            # parse); Python's unbounded parse must fail closed at load so
+            # both exit 2 before any estimate is scaled.
+            if not math.isfinite(metric):
+                raise ValueError(
+                    f"Attributable estimate for '{name}' is not finite."
+                )
+            column[str(key)] = metric
         result[str(name)] = column
     return result
 
