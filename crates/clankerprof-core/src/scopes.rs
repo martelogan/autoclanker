@@ -816,15 +816,60 @@ fn render_domain(
 // ---------------------------------------------------------------------------
 // Config loading, mirroring the Python CLI's boundary config parsing.
 
-fn config_to_json(path: &Path) -> Result<Value, String> {
+/// Top-level sections whose table KEY ORDER is semantic: configured cost
+/// kinds and owners evaluate first-match-wins in declaration order.
+const ORDERED_CONFIG_SECTIONS: [&str; 4] = ["cost_kind", "category", "owner", "domain"];
+
+/// Parse the config into a serde_json tree plus the declaration order of the
+/// order-sensitive tables. serde_json's Map re-sorts keys alphabetically, so
+/// the order is captured from the order-preserving YAML/TOML values before
+/// conversion (toml is built with preserve_order for exactly this reason).
+fn config_to_json(path: &Path) -> Result<(Value, HashMap<String, Vec<String>>), String> {
     let payload = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    if path.extension().and_then(|ext| ext.to_str()) == Some("toml") {
+    let mut order: HashMap<String, Vec<String>> = HashMap::new();
+    let value = if path.extension().and_then(|ext| ext.to_str()) == Some("toml") {
         let value: toml::Value = toml::from_str(&payload).map_err(|error| error.to_string())?;
-        serde_json::to_value(value).map_err(|error| error.to_string())
+        if let toml::Value::Table(table) = &value {
+            for section in ORDERED_CONFIG_SECTIONS {
+                if let Some(toml::Value::Table(inner)) = table.get(section) {
+                    order.insert(section.to_string(), inner.keys().cloned().collect());
+                }
+            }
+        }
+        serde_json::to_value(value).map_err(|error| error.to_string())?
     } else {
         let value: serde_yaml::Value =
             serde_yaml::from_str(&payload).map_err(|error| error.to_string())?;
-        serde_json::to_value(value).map_err(|error| error.to_string())
+        if let serde_yaml::Value::Mapping(mapping) = &value {
+            for section in ORDERED_CONFIG_SECTIONS {
+                let key = serde_yaml::Value::String(section.to_string());
+                if let Some(serde_yaml::Value::Mapping(inner)) = mapping.get(&key) {
+                    order.insert(
+                        section.to_string(),
+                        inner
+                            .keys()
+                            .filter_map(|item| item.as_str().map(String::from))
+                            .collect(),
+                    );
+                }
+            }
+        }
+        serde_json::to_value(value).map_err(|error| error.to_string())?
+    };
+    Ok((value, order))
+}
+
+/// Iterate a config table's entries in declaration order.
+fn ordered_entries<'a>(
+    table: &'a Map<String, Value>,
+    order: Option<&Vec<String>>,
+) -> Vec<(&'a String, &'a Value)> {
+    match order {
+        Some(names) => names
+            .iter()
+            .filter_map(|name| table.get_key_value(name))
+            .collect(),
+        None => table.iter().collect(),
     }
 }
 
@@ -989,6 +1034,7 @@ fn aliased_config_value<'a>(
 fn load_boundary_categories(
     raw: Option<&Value>,
     section_name: &str,
+    order: Option<&Vec<String>>,
 ) -> Result<Vec<BoundaryCategoryDefinition>, String> {
     let Some(raw) = raw else {
         return Ok(Vec::new());
@@ -997,7 +1043,7 @@ fn load_boundary_categories(
         return Err(format!("[{section_name}] must be an object."));
     };
     let mut categories = Vec::new();
-    for (name, raw_value) in table {
+    for (name, raw_value) in ordered_entries(table, order) {
         categories.push(BoundaryCategoryDefinition {
             name: name.clone(),
             predicates: predicate_expr(raw_value, &format!("{section_name} {name}"), "path")?,
@@ -1009,6 +1055,7 @@ fn load_boundary_categories(
 fn load_boundary_domains(
     raw: Option<&Value>,
     section_name: &str,
+    order: Option<&Vec<String>>,
 ) -> Result<Vec<BoundaryDomainDefinition>, String> {
     let Some(raw) = raw else {
         return Ok(Vec::new());
@@ -1017,7 +1064,7 @@ fn load_boundary_domains(
         return Err(format!("[{section_name}] must be an object."));
     };
     let mut domains = Vec::new();
-    for (name, raw_value) in table {
+    for (name, raw_value) in ordered_entries(table, order) {
         let field_name = format!("{section_name} {name}");
         let (fallback, expression) = match raw_value {
             Value::Object(mapping) => {
@@ -1055,55 +1102,91 @@ fn python_truthy(value: &Value) -> bool {
     }
 }
 
-fn boundary_predicate_value(raw_boundary: &Map<String, Value>) -> Result<Value, String> {
+fn boundary_predicate_value(
+    raw_boundary: &Map<String, Value>,
+    section_name: &str,
+) -> Result<Value, String> {
     for key in ["selector", "matcher", "match"] {
         if let Some(value) = raw_boundary.get(key) {
             return Ok(value.clone());
         }
     }
     if let Some(raw_function) = raw_boundary.get("function") {
+        // Non-string function values fail closed: Python str() and Rust
+        // Display disagree on bool/number spellings, so neither is trusted.
+        let message = format!("{section_name}.function must be a string or array of strings.");
         return Ok(match raw_function {
-            Value::Array(items) => Value::Array(
-                items
-                    .iter()
-                    .map(|item| {
-                        Value::String(format!(
-                            "name_eq:{}",
-                            item.as_str().map_or_else(|| item.to_string(), String::from)
-                        ))
-                    })
-                    .collect(),
-            ),
-            other => Value::String(format!(
-                "name_eq:{}",
-                other
-                    .as_str()
-                    .map_or_else(|| other.to_string(), String::from)
-            )),
+            Value::Array(items) => {
+                let mut predicates = Vec::new();
+                for item in items {
+                    let Some(text) = item.as_str() else {
+                        return Err(message);
+                    };
+                    predicates.push(Value::String(format!("name_eq:{text}")));
+                }
+                Value::Array(predicates)
+            }
+            Value::String(text) => Value::String(format!("name_eq:{text}")),
+            _ => return Err(message),
         });
     }
     Err("Each scope must define selector, matcher, match, or function.".to_string())
 }
 
-fn boundary_label(raw_boundary: &Map<String, Value>, raw_predicates: &Value) -> String {
-    for key in ["label", "name", "function"] {
-        if let Some(value) = raw_boundary.get(key) {
-            if let Some(text) = value.as_str() {
+fn boundary_label(
+    raw_boundary: &Map<String, Value>,
+    raw_predicates: &Value,
+    section_name: &str,
+) -> Result<String, String> {
+    for key in ["label", "name"] {
+        match raw_boundary.get(key) {
+            None | Some(Value::Null) => {}
+            Some(Value::String(text)) => {
+                // Python's or-chain skips falsy values, so an empty string
+                // falls through to the next key.
                 if !text.is_empty() {
-                    return text.to_string();
+                    return Ok(text.clone());
                 }
-            } else if !value.is_null() {
-                return value.to_string();
+            }
+            Some(_) => {
+                return Err(format!("{section_name}.{key} must be a string."));
             }
         }
     }
-    match raw_predicates {
+    match raw_boundary.get("function") {
+        None | Some(Value::Null) => {}
+        Some(Value::String(text)) if !text.is_empty() => return Ok(text.clone()),
+        Some(Value::String(_)) => {}
+        Some(Value::Array(items)) if !items.is_empty() => {
+            // Python labels a multi-function scope with str(list); mirror
+            // repr() for the validated array-of-strings shape.
+            let rendered: Vec<String> = items
+                .iter()
+                .map(|item| python_str_repr(item.as_str().unwrap_or_default()))
+                .collect();
+            return Ok(format!("[{}]", rendered.join(", ")));
+        }
+        Some(Value::Array(_)) => {}
+        // boundary_predicate_value already rejected other function shapes.
+        Some(_) => {}
+    }
+    Ok(match raw_predicates {
         Value::String(text) => text.clone(),
         Value::Array(items) => items
             .first()
             .map(|item| item.as_str().map_or_else(|| item.to_string(), String::from))
             .unwrap_or_else(|| "boundary".to_string()),
         _ => "boundary".to_string(),
+    })
+}
+
+/// Python repr() for a plain string: single quotes unless the text contains a
+/// single quote and no double quote.
+fn python_str_repr(text: &str) -> String {
+    if text.contains('\'') && !text.contains('"') {
+        format!("\"{text}\"")
+    } else {
+        format!("'{text}'")
     }
 }
 
@@ -1120,8 +1203,8 @@ fn load_boundaries(
         let Value::Object(raw_boundary) = item else {
             return Err("Each boundary entry must be an object.".to_string());
         };
-        let raw_predicates = boundary_predicate_value(raw_boundary)?;
-        let label = boundary_label(raw_boundary, &raw_predicates);
+        let raw_predicates = boundary_predicate_value(raw_boundary, section_name)?;
+        let label = boundary_label(raw_boundary, &raw_predicates, section_name)?;
         if !seen.insert(label.clone()) {
             return Err(format!("Duplicate boundary label: {label}"));
         }
@@ -1210,7 +1293,7 @@ pub fn load_boundary_options(
     path: &Path,
     runtime_rules: RuntimeRuleSet,
 ) -> Result<BoundaryAnalysisOptions, String> {
-    let payload = config_to_json(path)?;
+    let (payload, declaration_order) = config_to_json(path)?;
     let Value::Object(payload) = payload else {
         return Err("Boundary config file must be an object.".to_string());
     };
@@ -1235,8 +1318,16 @@ pub fn load_boundary_options(
         aliased_config_value(&payload, &["scope", "boundary"], "scope definitions")?;
     let options = BoundaryAnalysisOptions {
         boundaries: load_boundaries(raw_scopes, &scope_name)?,
-        categories: load_boundary_categories(raw_categories, &category_name)?,
-        domains: load_boundary_domains(raw_domains, &domain_name)?,
+        categories: load_boundary_categories(
+            raw_categories,
+            &category_name,
+            declaration_order.get(&category_name),
+        )?,
+        domains: load_boundary_domains(
+            raw_domains,
+            &domain_name,
+            declaration_order.get(&domain_name),
+        )?,
         slices,
         runtime_rules,
         enhanced_runtime_categorization: true,

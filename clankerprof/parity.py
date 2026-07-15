@@ -16,10 +16,8 @@ from collections.abc import Generator, Sequence
 from pathlib import Path
 from typing import Any, cast
 
-import yaml
-
 from clankerprof.cli import main as clankerprof_main
-from clankerprof.jsonio import parse_strict_json
+from clankerprof.jsonio import parse_strict_json, parse_strict_yaml
 
 OPT_IN_ENV = "CLANKERPROF_REAL_PROFILE_PARITY"
 ROOT = Path(__file__).resolve().parents[1]
@@ -335,7 +333,7 @@ def _load_config_mapping(path: str | Path) -> dict[str, object]:
     if config_path.suffix == ".toml":
         payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
     else:
-        payload = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        payload = parse_strict_yaml(config_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"{path} must contain a config object.")
     return cast(dict[str, object], payload)

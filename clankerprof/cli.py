@@ -49,7 +49,7 @@ from clankerprof.facts import (
     sample_facts_to_jsonable,
     write_sample_facts,
 )
-from clankerprof.jsonio import parse_strict_json
+from clankerprof.jsonio import parse_strict_json, parse_strict_yaml
 from clankerprof.proto import load_profile
 from clankerprof.render import (
     render_boundary_json,
@@ -139,7 +139,7 @@ def _load_slices_config(path: str | None) -> dict[str, object]:
     if config_path.suffix == ".toml":
         payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
     else:
-        payload = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        payload = parse_strict_yaml(config_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("Slice config file must be a YAML object.")
     return cast(dict[str, object], payload)
@@ -427,7 +427,7 @@ def _parse_attribute(raw: str) -> AttributionRule:
 def _load_slices(path: str | None) -> tuple[SliceDefinition, ...]:
     if path is None:
         return ()
-    payload = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    payload = parse_strict_yaml(Path(path).read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("Slices file must be a YAML object.")
     raw_payload = cast(dict[object, object], payload)
@@ -463,7 +463,7 @@ def _load_config_payload(path: str | Path, *, description: str) -> dict[str, obj
     if config_path.suffix == ".toml":
         payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
     else:
-        payload = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        payload = parse_strict_yaml(config_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"{description} config file must be an object.")
     return cast(dict[str, object], payload)
@@ -772,7 +772,11 @@ def _load_boundary_attributables(
     return result
 
 
-def _boundary_predicate_value(raw_boundary: dict[object, object]) -> object:
+def _boundary_predicate_value(
+    raw_boundary: dict[object, object],
+    *,
+    section_name: str = "boundary",
+) -> object:
     if "selector" in raw_boundary:
         return raw_boundary["selector"]
     if "matcher" in raw_boundary:
@@ -780,9 +784,17 @@ def _boundary_predicate_value(raw_boundary: dict[object, object]) -> object:
     if "match" in raw_boundary:
         return raw_boundary["match"]
     if "function" in raw_boundary:
+        # Non-string function values fail closed: Python str() and Rust
+        # Display disagree on bool/number spellings, so neither is trusted.
+        message = f"{section_name}.function must be a string or array of strings."
         raw_function = raw_boundary["function"]
         if isinstance(raw_function, list):
-            return [f"name_eq:{item}" for item in cast(list[object], raw_function)]
+            items = cast(list[object], raw_function)
+            if not all(isinstance(item, str) for item in items):
+                raise ValueError(message)
+            return [f"name_eq:{item}" for item in items]
+        if not isinstance(raw_function, str):
+            raise ValueError(message)
         return f"name_eq:{raw_function}"
     raise ValueError("Each scope must define selector, matcher, match, or function.")
 
@@ -810,7 +822,15 @@ def _load_boundaries(
         if not isinstance(item, dict):
             raise ValueError("Each boundary entry must be an object.")
         raw_boundary = cast(dict[object, object], item)
-        raw_predicates = _boundary_predicate_value(raw_boundary)
+        raw_predicates = _boundary_predicate_value(
+            raw_boundary, section_name=section_name
+        )
+        for key in ("label", "name"):
+            value = raw_boundary.get(key)
+            if value is not None and not isinstance(value, str):
+                # str(True) and Rust's Display disagree ("True" vs "true");
+                # non-string labels fail closed in both implementations.
+                raise ValueError(f"{section_name}.{key} must be a string.")
         label = str(
             raw_boundary.get("label")
             or raw_boundary.get("name")

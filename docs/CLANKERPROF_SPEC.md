@@ -292,6 +292,13 @@ For each sample:
 Target projection must preserve complete target accounting. Category totals for
 one parent must sum to the total CPU time under that parent.
 
+Parents emit in first-seen encounter order (the order the analysis first
+attributed a sample to them) in every row-oriented format — `csv`,
+`simple-csv`, `text`, and the compat CSV pair — matching the Python
+reference; JSON objects remain sorted-key. Ranked arrays inside a parent keep
+breaking ties by first-seen order. Alphabetical reordering of parents is a
+compatibility bug, not a presentation choice.
+
 ## Scope decomposition contract
 
 `scopes` answers: “inside this parent denominator, which rollups and cost
@@ -318,6 +325,17 @@ never-matching predicate. A scope's `count` must be the string `occurrence`
 or `once_per_sample`; any other value (including non-strings) is a validation
 error, never a silent occurrence default. An owner's `fallback` flag follows
 Python truthiness over the parsed value in both implementations.
+Configured cost-kind and owner definitions are evaluated in declaration
+order and the first matching definition wins, in YAML and TOML alike; a
+sorted-map reordering of these tables is a correctness bug. A scope's
+`label` and `name` values must be strings (`scope.label must be a string.`),
+and `function` must be a string or an array of strings; other shapes are
+validation errors in both implementations, because Python `str()` and Rust
+`Display` spell non-string scalars differently. YAML inputs (configs and
+rule packs) reject duplicate mapping keys in both implementations — never
+silent last-wins. The envelope message contains
+`duplicate entry with key "<key>"`; surrounding context or line/column
+detail is engine-specific and not part of the byte contract.
 Supported selector keys are intentionally generic: function name contains,
 function name equality, path/glob, regex, native frame, dependency selectors,
 optional slice label, configured cost-kind label, and runtime-rule label.
@@ -331,7 +349,22 @@ patterns, slice `paths`, scope predicates): `*`, `?`, and bracket classes —
 `[seq]`, negation `[!seq]`, character ranges, a literal `]` in first
 position — all match; an unterminated `[` is a literal; an inverted range
 such as `[z-a]` never matches. Both implementations must attribute
-identically for every supported glob form. A
+identically for every supported glob form. Explicit `regex:` patterns (and
+rule-pack `name_patterns` and `library_path_patterns` regexes) follow
+Python's regular-expression dialect, including lookaround and
+backreferences; the Rust implementation compiles them with an engine
+(fancy-regex) that accepts that dialect, and configs must stay within the
+common subset both engines accept. An explicit pattern that fails to compile
+is a validation error — exit `2` with an envelope whose message starts with
+`Invalid regex pattern '<pattern>':` (library patterns:
+`Invalid library regex pattern '<pattern>':`); engine-specific detail may
+follow the prefix and is not part of the byte contract. Pattern errors
+surface lazily, when a frame first evaluates the pattern, identically in
+both implementations — never as a silent no-match. Auto-mode patterns
+(no `mode:` prefix) that fail to compile fall back to path matching when
+they look like paths, exactly like the reference. Rule packs additionally
+validate `name_patterns` at load in both implementations with the identical
+message `Invalid runtime rule name pattern '<pattern>'.`. A
 `cost_kind:<label>` selector matches the configured `[cost_kind]` label for a
 frame and is valid for owners, scopes, and exclusions. A
 `runtime_label:<label>` selector matches labels produced by the selected
@@ -453,7 +486,14 @@ and gate only the named rows while still reporting every row.
 
 Successful JSON commands print exactly one JSON document to stdout (the
 payload, or an `{"ok": true, "output": ...}` receipt when `--output` wrote the
-artifact). Non-JSON formats (`csv`, `simple-csv`, `text`) without `--output`
+artifact). Non-facts JSON artifacts, receipts, and error envelopes use
+Python's `json.dumps` lexical form in both implementations: sorted keys,
+two-space indentation for artifacts and receipts (envelopes are single-line
+with `", "`/`": "` separators), non-ASCII characters escaped as `\uXXXX`
+(surrogate pairs for astral code points), and CPython `repr` float spelling
+(`1e-06`, `1e+21`, integral floats keep `.0`). Facts artifacts are the
+documented exception: they serialize non-ASCII raw (UTF-8), compact by
+default. These are byte contracts verified by the parity suite. Non-JSON formats (`csv`, `simple-csv`, `text`) without `--output`
 print exactly the raw rendered payload to stdout — never mixed with a JSON
 envelope; with `--output` they write the artifact and print the JSON receipt.
 A global `--output` before the subcommand is equivalent to the subcommand's

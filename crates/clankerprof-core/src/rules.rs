@@ -90,10 +90,27 @@ impl RuntimeMatchRule {
                 .iter()
                 .any(|prefix| name.starts_with(prefix))
             || self.name_patterns.iter().any(|pattern| {
+                // Packs are validated at load, so errors here are a fail-closed
+                // backstop mirroring Python's lazy _match_name_pattern.
                 let resolved = pattern.strip_prefix("regex:").unwrap_or(pattern);
-                crate::targets::compiled_regex(resolved)
-                    .map(|regex| regex.is_match(name))
-                    .unwrap_or(false)
+                let compiled = match crate::targets::raw_compiled_regex(resolved) {
+                    Ok(regex) => regex,
+                    Err(_) => {
+                        crate::targets::record_pattern_error(format!(
+                            "Invalid runtime rule name pattern '{pattern}'."
+                        ));
+                        return false;
+                    }
+                };
+                match compiled.is_match(name) {
+                    Ok(matched) => matched,
+                    Err(_) => {
+                        crate::targets::record_pattern_error(format!(
+                            "Invalid runtime rule name pattern '{pattern}'."
+                        ));
+                        false
+                    }
+                }
             })
     }
 }
@@ -285,8 +302,8 @@ fn match_rules(mapping: &serde_yaml::Mapping, key: &str) -> Result<Vec<RuntimeMa
         if let Some(rule) = rules.last() {
             for pattern in &rule.name_patterns {
                 let resolved = pattern.strip_prefix("regex:").unwrap_or(pattern);
-                if crate::targets::compiled_regex(resolved).is_none() {
-                    return Err(format!("Invalid runtime rule name pattern {pattern:?}."));
+                if crate::targets::raw_compiled_regex(resolved).is_err() {
+                    return Err(format!("Invalid runtime rule name pattern '{pattern}'."));
                 }
             }
         }

@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 
 from pathlib import Path
 from typing import Any, cast
@@ -931,7 +932,7 @@ def test_clankerprof_rust_compare_rejects_malformed_reports_like_python(
         )
         assert completed.returncode == 2, (message, completed.stderr)
         assert message in completed.stderr, completed.stderr
-        assert '"ok":false' in completed.stderr, completed.stderr
+        assert '"ok": false' in completed.stderr, completed.stderr
 
 
 @pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
@@ -2034,7 +2035,7 @@ def test_clankerprof_rust_facts_numeric_contract_matches_python(
         )
         assert completed.returncode == 2, (message, completed.stderr)
         assert message in completed.stderr, completed.stderr
-        assert '"ok":false' in completed.stderr, completed.stderr
+        assert '"ok": false' in completed.stderr, completed.stderr
 
     # Non-finite JSON tokens fail closed in both languages (RFC 8259 strict).
     infinity_path = tmp_path / "infinity.json"
@@ -2067,7 +2068,7 @@ def test_clankerprof_rust_facts_numeric_contract_matches_python(
         text=True,
     )
     assert completed.returncode == 2, completed.stderr
-    assert '"ok":false' in completed.stderr, completed.stderr
+    assert '"ok": false' in completed.stderr, completed.stderr
 
 
 @pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
@@ -2555,3 +2556,332 @@ def _rust_cli(argv: list[str]) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
     )
+
+
+def _run_python_cli_raw(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    repo_root = Path(__file__).resolve().parents[1]
+    return subprocess.run(
+        [sys.executable, "-m", "clankerprof.cli", *argv],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _run_rust_cli_raw(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    repo_root = Path(__file__).resolve().parents[1]
+    return subprocess.run(
+        [
+            "cargo",
+            "run",
+            "--quiet",
+            "-p",
+            "clankerprof-core",
+            "--bin",
+            "clankerprof-rs",
+            "--",
+            *argv,
+        ],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _assert_identical_success(argv: list[str], label: str) -> str:
+    python_run = _run_python_cli_raw(argv)
+    rust_run = _run_rust_cli_raw(argv)
+    assert python_run.returncode == 0, (label, python_run.stderr)
+    assert rust_run.returncode == 0, (label, rust_run.stderr)
+    assert rust_run.stdout == python_run.stdout, label
+    return python_run.stdout
+
+
+def _assert_identical_envelope(argv: list[str], label: str) -> str:
+    python_run = _run_python_cli_raw(argv)
+    rust_run = _run_rust_cli_raw(argv)
+    assert python_run.returncode == 2, (label, python_run.stdout, python_run.stderr)
+    assert rust_run.returncode == 2, (label, rust_run.stdout, rust_run.stderr)
+    assert rust_run.stderr == python_run.stderr, label
+    return python_run.stderr
+
+
+def _order_scope_facts(tmp_path: Path) -> Path:
+    from clankerprof.facts import dumps_sample_facts
+
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    parent = builder.location(builder.function("T", "/srv/app/t.py"))
+    builder.sample((leaf, parent), 7)
+    facts_path = tmp_path / "order-facts.json"
+    facts_path.write_text(
+        dumps_sample_facts(decode_profile_bytes(builder.encode()).to_sample_facts()),
+        encoding="utf-8",
+    )
+    return facts_path
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_regex_dialect_and_failclosed_match_python(
+    tmp_path: Path,
+) -> None:
+    facts_path = _order_scope_facts(tmp_path)
+    lookahead_pack = tmp_path / "lookahead-pack.yml"
+    lookahead_pack.write_text(
+        'semantic_rules:\n  - category: Lookahead\n    name_patterns: ["^(?=.*Leaf)Leaf$"]\n',
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "t-config.json"
+    config_path.write_text(json.dumps({"T": {}}), encoding="utf-8")
+    stdout = _assert_identical_success(
+        [
+            "targets",
+            "--facts",
+            str(facts_path),
+            "--config",
+            str(config_path),
+            "--runtime-rules",
+            str(lookahead_pack),
+        ],
+        "lookahead-pack",
+    )
+    assert '"name": "Lookahead"' in stdout
+
+    # Explicit invalid regexes fail closed in both languages. The message
+    # prefix is the byte contract; engine detail after it may differ.
+    bad_config = tmp_path / "bad-regex.json"
+    bad_config.write_text(json.dumps({"T": {"Bad": "regex:["}}), encoding="utf-8")
+    for argv, label in (
+        (
+            ["targets", "--facts", str(facts_path), "--config", str(bad_config)],
+            "explicit-bad-regex",
+        ),
+    ):
+        python_run = _run_python_cli_raw(argv)
+        rust_run = _run_rust_cli_raw(argv)
+        assert python_run.returncode == 2, (label, python_run.stdout)
+        assert rust_run.returncode == 2, (label, rust_run.stdout)
+        for run in (python_run, rust_run):
+            envelope = json.loads(run.stderr)
+            assert envelope["ok"] is False, label
+            assert str(envelope["error"]).startswith("Invalid regex pattern '[':"), (
+                label,
+                envelope,
+            )
+        assert not python_run.stdout and not rust_run.stdout, label
+
+    bad_pack = tmp_path / "bad-pack.yml"
+    bad_pack.write_text(
+        'semantic_rules:\n  - category: Broken\n    name_patterns: ["("]\n',
+        encoding="utf-8",
+    )
+    stderr = _assert_identical_envelope(
+        [
+            "targets",
+            "--facts",
+            str(facts_path),
+            "--target",
+            "T",
+            "--runtime-rules",
+            str(bad_pack),
+        ],
+        "bad-pack-pattern",
+    )
+    assert "Invalid runtime rule name pattern '('." in stderr
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_target_parent_order_matches_python(tmp_path: Path) -> None:
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    ztarget = builder.location(builder.function("ZTarget", "/srv/app/z.py"))
+    atarget = builder.location(builder.function("ATarget", "/srv/app/a.py"))
+    builder.sample((leaf, ztarget, atarget), 10_000_000)
+    profile_path = tmp_path / "parent-order.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "parent-order.json"
+    config_path.write_text(json.dumps({"ZTarget": {}, "ATarget": {}}), encoding="utf-8")
+    base = [
+        "targets",
+        "--profile",
+        str(profile_path),
+        "--config",
+        str(config_path),
+    ]
+    for fmt in ("csv", "simple-csv", "text", "json"):
+        stdout = _assert_identical_success(
+            [*base, "--format", fmt], f"parent-order-{fmt}"
+        )
+        if fmt == "simple-csv":
+            rows = [line.split(",")[0] for line in stdout.splitlines()[1:] if line]
+            # First-seen (stack) order, not alphabetical.
+            assert rows == ["ZTarget", "ATarget"]
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_scope_declaration_order_matches_python(
+    tmp_path: Path,
+) -> None:
+    facts_path = _order_scope_facts(tmp_path)
+    yaml_config = tmp_path / "order.yml"
+    yaml_config.write_text(
+        'cost_kind:\n  ZFirst: "path:/srv/app"\n  ASecond: "path:/srv/app"\n'
+        "scope:\n  - function: T\n",
+        encoding="utf-8",
+    )
+    toml_config = tmp_path / "order.toml"
+    toml_config.write_text(
+        '[cost_kind]\nZFirst = "path:/srv/app"\nASecond = "path:/srv/app"\n\n'
+        '[[scope]]\nfunction = "T"\n',
+        encoding="utf-8",
+    )
+    owner_config = tmp_path / "owner-order.yml"
+    owner_config.write_text(
+        'cost_kind:\n  AppWork: "name:Leaf"\n'
+        'owner:\n  ZTeam: "path:/srv/app"\n  ATeam: "path:/srv/app"\n'
+        "scope:\n  - function: T\n",
+        encoding="utf-8",
+    )
+    for config_path in (yaml_config, toml_config, owner_config):
+        stdout = _assert_identical_success(
+            ["scopes", "--facts", str(facts_path), "--config", str(config_path)],
+            f"declaration-order-{config_path.name}",
+        )
+        if config_path is not owner_config:
+            assert '"ZFirst"' in stdout and '"ASecond"' not in stdout
+
+    label_config = tmp_path / "label-bool.yml"
+    label_config.write_text(
+        'cost_kind:\n  AppWork: "name:Leaf"\n'
+        "scope:\n  - function: T\n    label: true\n",
+        encoding="utf-8",
+    )
+    stderr = _assert_identical_envelope(
+        ["scopes", "--facts", str(facts_path), "--config", str(label_config)],
+        "label-bool",
+    )
+    assert "scope.label must be a string." in stderr
+
+    dup_config = tmp_path / "dup.yml"
+    dup_config.write_text(
+        'cost_kind:\n  AppWork: "name:Leaf"\ncost_kind:\n  Other2: "name:Nope"\n'
+        "scope:\n  - function: T\n",
+        encoding="utf-8",
+    )
+    stderr = _assert_identical_envelope(
+        ["scopes", "--facts", str(facts_path), "--config", str(dup_config)],
+        "duplicate-yaml-key",
+    )
+    assert json.loads(stderr)["error"] == 'duplicate entry with key "cost_kind"'
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_runtime_flags_match_python(tmp_path: Path) -> None:
+    facts_path = _order_scope_facts(tmp_path)
+    scope_config = tmp_path / "flags-scopes.yml"
+    scope_config.write_text(
+        'cost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - function: T\n',
+        encoding="utf-8",
+    )
+    scope_base = ["scopes", "--facts", str(facts_path), "--config", str(scope_config)]
+    for extra in (
+        ["--fold-runtime-internals"],
+        ["--no-enhanced"],
+        ["--verbose-runtime-internals"],
+        ["--fold-ruby-internals"],
+    ):
+        _assert_identical_success([*scope_base, *extra], f"scopes-{extra[0]}")
+    _assert_identical_success(
+        [
+            "targets",
+            "--facts",
+            str(facts_path),
+            "--target",
+            "T",
+            "--verbose-runtime-internals",
+        ],
+        "targets-verbose",
+    )
+    _assert_identical_success(
+        ["slices", "--facts", str(facts_path), "--verbose-runtime-internals"],
+        "slices-verbose",
+    )
+    # Verbose must actually change ruby-runtime folding output identically.
+    ruby_profile = tmp_path / "flags-ruby.pb"
+    ruby_profile.write_bytes(_ruby_runtime_profile_bytes())
+    ruby_base = [
+        "targets",
+        "--profile",
+        str(ruby_profile),
+        "--target",
+        "Example::HtmlResponder#render_template",
+        "--runtime",
+        "ruby",
+        "--fold-runtime-internals",
+    ]
+    plain = _assert_identical_success(ruby_base, "ruby-fold")
+    verbose = _assert_identical_success(
+        [*ruby_base, "--verbose-runtime-internals"], "ruby-fold-verbose"
+    )
+    assert plain != verbose, "verbose flag must change ruby folding output"
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_lexical_json_matches_python(tmp_path: Path) -> None:
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("café_leaf", "/café/x.py"))
+    parent = builder.location(builder.function("T", "/srv/t.py"))
+    builder.sample((leaf, parent), 1)
+    # Astral-plane character in a rendered field exercises surrogate pairs.
+    other_leaf = builder.location(builder.function("big", "/srv/app/😀.py"))
+    builder.sample((other_leaf, parent), 99_999_999)
+    profile_path = tmp_path / "lexical.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "lexical-config.json"
+    config_path.write_text(
+        json.dumps({"T": {"A": "path:/café", "B": "path:/srv/app"}}),
+        encoding="utf-8",
+    )
+    stdout = _assert_identical_success(
+        [
+            "targets",
+            "--profile",
+            str(profile_path),
+            "--config",
+            str(config_path),
+            "--format",
+            "json",
+        ],
+        "lexical-artifact",
+    )
+    # ensure_ascii escaping and CPython float repr are the byte contract.
+    assert "\\u00e9" in stdout
+    assert "\\ud83d\\ude00" in stdout
+    assert "1e-06" in stdout
+    # Facts artifacts stay raw UTF-8 (the documented exception).
+    facts_stdout = _assert_identical_success(
+        ["facts", "--profile", str(profile_path)], "lexical-facts"
+    )
+    assert "café_leaf" in facts_stdout
+    # Envelopes escape non-ASCII identically in both languages.
+    facts_path = _order_scope_facts(tmp_path)
+    dup_key_config = tmp_path / "dup-unicode.yml"
+    dup_key_config.write_text(
+        'cost_kind:\n  "café": "name:Leaf"\n  "café": "name:Nope"\n'
+        "scope:\n  - function: T\n",
+        encoding="utf-8",
+    )
+    # Nested duplicates carry engine-specific context/location detail, so
+    # only the shared message core and the \uXXXX escaping are compared.
+    argv = ["scopes", "--facts", str(facts_path), "--config", str(dup_key_config)]
+    for run, label in (
+        (_run_python_cli_raw(argv), "py-unicode-envelope"),
+        (_run_rust_cli_raw(argv), "rs-unicode-envelope"),
+    ):
+        assert run.returncode == 2, (label, run.stdout, run.stderr)
+        assert 'duplicate entry with key \\"caf\\u00e9\\"' in run.stderr, (
+            label,
+            run.stderr,
+        )

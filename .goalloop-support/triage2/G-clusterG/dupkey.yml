@@ -1,0 +1,6 @@
+cost_kind:
+  AppWork: "name:Leaf"
+cost_kind:
+  Other2: "name:Nope"
+scope:
+  - function: T

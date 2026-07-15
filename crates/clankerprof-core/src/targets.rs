@@ -1,18 +1,47 @@
 use crate::categorize::{categorize_stack, RuntimeCategoryCache};
 use crate::facts::{sample_facts_to_json_value, SAMPLE_FACTS_SCHEMA_VERSION};
 use crate::model::{CategoryStats, Frame, FunctionMetrics, ProfileFacts, TimeNs};
+use fancy_regex::Regex;
 use indexmap::IndexMap;
-use regex::Regex;
 use serde_json::value::RawValue;
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::sync::{Mutex, OnceLock};
+use std::cell::RefCell;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::{Arc, Mutex, OnceLock};
 
-// Category precedence is first-match-wins in config order, and ranked arrays
-// break ties by first-seen order, matching the Python reference; both need
-// insertion-ordered maps, never BTreeMap.
+// Category precedence is first-match-wins in config order, ranked arrays
+// break ties by first-seen order, and parents emit in first-seen encounter
+// order across every row format, matching the Python reference; all of them
+// need insertion-ordered maps, never BTreeMap.
 pub type TargetConfig = IndexMap<String, IndexMap<String, String>>;
-pub type TargetResults = BTreeMap<String, IndexMap<String, CategoryStats>>;
+pub type TargetResults = IndexMap<String, IndexMap<String, CategoryStats>>;
+
+thread_local! {
+    // Python raises on the first invalid user pattern it evaluates; the hot
+    // matchers here return plain bools through the categorization engine, so
+    // instead of threading Results through every closure the first pattern
+    // error is parked in this slot and the CLI fails closed (exit 2) before
+    // emitting or writing any artifact. Lazy like Python: a pattern that no
+    // frame ever reaches raises in neither implementation.
+    static PATTERN_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn record_pattern_error(message: String) {
+    PATTERN_ERROR.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(message);
+        }
+    });
+}
+
+/// Fail closed on any user-pattern error recorded during analysis/rendering.
+/// Must be checked before emitting or writing any artifact.
+pub fn take_pattern_error() -> Result<(), String> {
+    PATTERN_ERROR
+        .with(|slot| slot.borrow_mut().take())
+        .map_or(Ok(()), Err)
+}
 
 pub use crate::rules::{LibraryPattern, RuntimeRuleSet};
 
@@ -228,15 +257,25 @@ pub fn match_category_pattern(pattern: &str, path: &str, rules: &RuntimeRuleSet)
         PatternMode::Library => {
             match_library_selector(&resolved_pattern, path, rules, selector.as_deref())
         }
-        PatternMode::Auto => {
-            if match_regex(&resolved_pattern, path) {
-                return true;
+        PatternMode::Auto => match try_match_regex(&resolved_pattern, path) {
+            // Mirrors Python match_category_pattern: a valid-regex match wins;
+            // no-match falls through to path matching for path-like patterns;
+            // an invalid regex falls back to path matching iff it looks like a
+            // path, otherwise the projection fails closed.
+            Ok(true) => true,
+            Ok(false) => {
+                looks_like_path_pattern(&resolved_pattern)
+                    && match_path_pattern(&resolved_pattern, path, rules)
             }
-            if looks_like_path_pattern(&resolved_pattern) {
-                return match_path_pattern(&resolved_pattern, path, rules);
+            Err(error) => {
+                if looks_like_path_pattern(&resolved_pattern) {
+                    match_path_pattern(&resolved_pattern, path, rules)
+                } else {
+                    record_pattern_error(error);
+                    false
+                }
             }
-            false
-        }
+        },
     }
 }
 
@@ -298,8 +337,25 @@ pub fn extract_library_path(
     for pattern in patterns {
         match pattern {
             LibraryPattern::Regex(pattern) => {
-                let regex = compiled_regex(pattern)?;
-                let Some(captures) = regex.captures(&normalized) else {
+                let regex = match raw_compiled_regex(pattern) {
+                    Ok(regex) => regex,
+                    Err(detail) => {
+                        record_pattern_error(format!(
+                            "Invalid library regex pattern '{pattern}': {detail}"
+                        ));
+                        return None;
+                    }
+                };
+                let captures = match regex.captures(&normalized) {
+                    Ok(captures) => captures,
+                    Err(detail) => {
+                        record_pattern_error(format!(
+                            "Invalid library regex pattern '{pattern}': {detail}"
+                        ));
+                        return None;
+                    }
+                };
+                let Some(captures) = captures else {
                     continue;
                 };
                 let whole_match = captures.get(0)?;
@@ -380,17 +436,28 @@ fn normalize_profile_path(path: &str) -> String {
 /// Memoized regex compilation: rule-pack and config patterns are evaluated
 /// once per unique frame path across hot per-frame loops, so compiling on
 /// every call dominated runtime. Patterns come from configs, so the cache is
-/// small and bounded per process.
-pub(crate) fn compiled_regex(pattern: &str) -> Option<Regex> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Option<Regex>>>> = OnceLock::new();
+/// small and bounded per process. fancy-regex is used because the documented
+/// pattern language is Python's (lookaround included); the Err arm carries
+/// the engine's own detail so callers can build their contract messages.
+pub(crate) fn raw_compiled_regex(pattern: &str) -> Result<Arc<Regex>, String> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Result<Arc<Regex>, String>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let mut guard = cache.lock().expect("regex cache poisoned");
     if let Some(entry) = guard.get(pattern) {
         return entry.clone();
     }
-    let compiled = Regex::new(pattern).ok();
+    let compiled = Regex::new(pattern)
+        .map(Arc::new)
+        .map_err(|error| error.to_string());
     guard.insert(pattern.to_string(), compiled.clone());
     compiled
+}
+
+/// Non-recording compile with the shared contract message; auto-mode needs
+/// the error value to decide between path fallback and failing closed.
+pub(crate) fn try_compiled_regex(pattern: &str) -> Result<Arc<Regex>, String> {
+    raw_compiled_regex(pattern)
+        .map_err(|detail| format!("Invalid regex pattern '{pattern}': {detail}"))
 }
 
 fn has_glob_token(pattern: &str) -> bool {
@@ -404,13 +471,31 @@ fn looks_like_path_pattern(pattern: &str) -> bool {
         || pattern.starts_with("../")
 }
 
+/// Regex match that fails closed: compile or match errors are recorded in the
+/// pattern-error slot (first error wins) and count as no-match so the caller
+/// keeps its bool shape; the CLI turns the slot into an exit-2 envelope.
 pub(crate) fn match_regex(pattern: &str, path: &str) -> bool {
-    compiled_regex(pattern)
-        .map(|regex| regex.is_match(&normalize_profile_path(path)))
-        .unwrap_or(false)
+    match try_match_regex(pattern, path) {
+        Ok(matched) => matched,
+        Err(error) => {
+            record_pattern_error(error);
+            false
+        }
+    }
+}
+
+/// Non-recording variant for auto-mode, which mirrors Python's behavior of
+/// falling back to path matching when an invalid pattern looks like a path.
+pub(crate) fn try_match_regex(pattern: &str, path: &str) -> Result<bool, String> {
+    let regex = try_compiled_regex(pattern)?;
+    regex
+        .is_match(&normalize_profile_path(path))
+        .map_err(|detail| format!("Invalid regex pattern '{pattern}': {detail}"))
 }
 
 fn glob_matches(pattern: &str, path: &str) -> bool {
+    // Glob-derived regexes are internally generated and always compile; a
+    // None translation is fnmatch's never-matching class.
     glob_to_regex(pattern)
         .map(|regex| match_regex(&regex, path))
         .unwrap_or(false)
@@ -552,12 +637,20 @@ fn translate_glob_class(stuff: &[char]) -> Option<String> {
 fn normalize_library_component(component: &str, rules: &RuntimeRuleSet) -> String {
     let normalized = component.trim_matches('/');
     for pattern in &rules.library_name_suffix_patterns {
-        let Some(regex) = compiled_regex(pattern) else {
-            continue;
+        let regex = match try_compiled_regex(pattern) {
+            Ok(regex) => regex,
+            Err(error) => {
+                record_pattern_error(error);
+                continue;
+            }
         };
-        if let Some(found) = regex.find(normalized) {
-            if found.start() > 0 {
+        match regex.find(normalized) {
+            Ok(Some(found)) if found.start() > 0 => {
                 return normalized[..found.start()].to_string();
+            }
+            Ok(_) => {}
+            Err(detail) => {
+                record_pattern_error(format!("Invalid regex pattern '{pattern}': {detail}"));
             }
         }
     }

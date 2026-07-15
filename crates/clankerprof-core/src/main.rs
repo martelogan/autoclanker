@@ -82,14 +82,17 @@ struct TargetsArgs {
     #[arg(long)]
     runtime_rules: Option<PathBuf>,
     /// Core classes CSV override for the ruby runtime.
-    #[arg(long)]
+    #[arg(long, visible_alias = "ruby-core-classes")]
     core_classes: Option<PathBuf>,
     /// Disable enhanced runtime categorization (caller fallback engages).
     #[arg(long)]
     no_enhanced: bool,
     /// Fold runtime-internal leaves into the first meaningful caller.
-    #[arg(long)]
+    #[arg(long, visible_alias = "fold-ruby-internals")]
     fold_runtime_internals: bool,
+    /// Keep verbose-only foldable categories visible in runtime rule packs.
+    #[arg(long, visible_alias = "verbose-ruby-internals")]
+    verbose_runtime_internals: bool,
     /// Track semantic callers for native leaves.
     #[arg(long)]
     track_semantic_callers: bool,
@@ -97,7 +100,7 @@ struct TargetsArgs {
     #[arg(long)]
     semantic_callers_csv: Option<PathBuf>,
     /// JSON file of attributable column -> parent function -> value.
-    #[arg(long)]
+    #[arg(long, visible_alias = "attributables")]
     cpu_attributables: Option<PathBuf>,
     /// Write the report to this path instead of stdout.
     #[arg(long, overrides_with = "output")]
@@ -106,8 +109,11 @@ struct TargetsArgs {
     #[arg(long, default_value = "json")]
     format: String,
     /// CSV artifact layout (standard, or compat for the two-file pair).
-    #[arg(long, default_value = "standard")]
-    target_csv_layout: String,
+    #[arg(long)]
+    target_csv_layout: Option<String>,
+    /// Compatibility alias for --target-csv-layout=compat.
+    #[arg(long)]
+    legacy_target_csv_layout: bool,
 }
 
 #[derive(Args)]
@@ -137,8 +143,11 @@ struct SlicesArgs {
     #[arg(long)]
     runtime_rules: Option<PathBuf>,
     /// Core classes CSV override for the ruby runtime.
-    #[arg(long)]
+    #[arg(long, visible_alias = "ruby-core-classes")]
     core_classes: Option<PathBuf>,
+    /// Keep verbose-only foldable categories visible in runtime rule packs.
+    #[arg(long, visible_alias = "verbose-ruby-internals")]
+    verbose_runtime_internals: bool,
     /// Bottom-frame filter, repeatable.
     #[arg(long)]
     filter: Vec<String>,
@@ -188,8 +197,17 @@ struct ScopesArgs {
     #[arg(long)]
     runtime_rules: Option<PathBuf>,
     /// Core classes CSV override for the ruby runtime.
-    #[arg(long)]
+    #[arg(long, visible_alias = "ruby-core-classes")]
     core_classes: Option<PathBuf>,
+    /// Disable enhanced runtime categorization (caller fallback engages).
+    #[arg(long)]
+    no_enhanced: bool,
+    /// Fold runtime-internal leaves into the first meaningful caller.
+    #[arg(long, visible_alias = "fold-ruby-internals")]
+    fold_runtime_internals: bool,
+    /// Keep verbose-only foldable categories visible in runtime rule packs.
+    #[arg(long, visible_alias = "verbose-ruby-internals")]
+    verbose_runtime_internals: bool,
     /// Write the report to this path instead of stdout.
     #[arg(long, overrides_with = "output")]
     output: Option<PathBuf>,
@@ -283,12 +301,13 @@ fn main() {
 }
 
 fn exit_with_envelope(error: &str) -> ! {
+    // Byte-identical to Python's json.dumps({...}, sort_keys=True) envelope.
     eprintln!(
         "{}",
-        serde_json::json!({
+        clankerprof_core::pyjson::dumps_compact(&serde_json::json!({
             "error": error,
             "ok": false,
-        })
+        }))
     );
     std::process::exit(2);
 }
@@ -343,6 +362,7 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
         &args.runtime,
         args.runtime_rules.as_ref(),
         args.core_classes.as_ref(),
+        false,
     )?;
     // The whole point: decode a single facts model and feed every projection.
     let facts = load_projection_input(args.profile.as_ref(), args.facts.as_ref())?;
@@ -390,8 +410,8 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
             render_boundary_json(&analyze_boundary_facts(&facts, &options)?, args.top),
         );
     }
-    let rendered = serde_json::to_string_pretty(&serde_json::Value::Object(payload))
-        .map_err(|error| error.to_string())?;
+    clankerprof_core::targets::take_pattern_error()?;
+    let rendered = clankerprof_core::pyjson::dumps_pretty(&serde_json::Value::Object(payload));
     emit(&rendered, args.output.as_ref(), "clankerprof_report")
 }
 
@@ -420,11 +440,19 @@ fn run_scopes(args: ScopesArgs) -> Result<(), String> {
         &args.runtime,
         args.runtime_rules.as_ref(),
         args.core_classes.as_ref(),
+        args.verbose_runtime_internals,
     )?;
-    let options = load_boundary_options(&args.config, runtime_rules)?;
+    let mut options = load_boundary_options(&args.config, runtime_rules)?;
+    // Mirror the Python CLI's post-config option overrides (run_boundaries):
+    // Python's legacy_no_enhanced_caller_fallback is OR-ed into the caller
+    // fallback at categorize time, so one field carries both here.
+    options.enhanced_runtime_categorization = !args.no_enhanced;
+    options.fold_runtime_internals = args.fold_runtime_internals;
+    options.caller_fallback_when_uncategorized = args.no_enhanced;
     let facts = load_projection_input(args.profile.as_ref(), args.facts.as_ref())?;
     let payload = render_boundary_json(&analyze_boundary_facts(&facts, &options)?, args.top);
-    let rendered = serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?;
+    clankerprof_core::targets::take_pattern_error()?;
+    let rendered = clankerprof_core::pyjson::dumps_pretty(&payload);
     emit(&rendered, args.output.as_ref(), "clankerprof_boundaries")
 }
 
@@ -453,8 +481,7 @@ fn emit_with_receipt(
 ) -> Result<(), String> {
     if let Some(output_path) = output {
         std::fs::write(output_path, format!("{rendered}\n")).map_err(|error| error.to_string())?;
-        let receipt_rendered =
-            serde_json::to_string_pretty(&receipt).map_err(|error| error.to_string())?;
+        let receipt_rendered = clankerprof_core::pyjson::dumps_pretty(&receipt);
         println!("{receipt_rendered}");
     } else {
         println!("{rendered}");
@@ -492,6 +519,7 @@ fn resolve_runtime_rules(
     runtime: &str,
     runtime_rules: Option<&PathBuf>,
     core_classes: Option<&PathBuf>,
+    verbose: bool,
 ) -> Result<clankerprof_core::rules::RuntimeRuleSet, String> {
     use clankerprof_core::rules;
     let classes = match core_classes {
@@ -499,12 +527,14 @@ fn resolve_runtime_rules(
         None if runtime == "ruby" => rules::load_default_ruby_core_classes(),
         None => std::collections::BTreeSet::new(),
     };
+    // Verbose reaches only external packs and the ruby pack, mirroring the
+    // Python reference: the packaged generic default never applies it.
     if let Some(path) = runtime_rules {
-        return rules::load_runtime_rules_file(path, classes, false);
+        return rules::load_runtime_rules_file(path, classes, verbose);
     }
     match runtime {
         "generic" => Ok(rules::RuntimeRuleSet::generic().clone()),
-        "ruby" => rules::ruby_rules(classes, false),
+        "ruby" => rules::ruby_rules(classes, verbose),
         other => Err(format!("Unsupported runtime: {other}")),
     }
 }
@@ -540,11 +570,18 @@ fn run_targets(args: TargetsArgs) -> Result<(), String> {
     if !matches!(args.format.as_str(), "json" | "csv" | "simple-csv" | "text") {
         return Err(format!("Unsupported --format: {}.", args.format));
     }
-    let compat_layout = match args.target_csv_layout.as_str() {
-        "standard" => false,
-        "compat" => true,
-        other => return Err(format!("Unsupported --target-csv-layout: {other}.")),
-    };
+    if let Some(layout) = args.target_csv_layout.as_deref() {
+        if !matches!(layout, "standard" | "compat") {
+            return Err(format!("Unsupported --target-csv-layout: {layout}."));
+        }
+    }
+    if args.legacy_target_csv_layout && args.target_csv_layout.as_deref() == Some("standard") {
+        return Err(
+            "--legacy-target-csv-layout conflicts with --target-csv-layout=standard.".to_string(),
+        );
+    }
+    let compat_layout =
+        args.legacy_target_csv_layout || args.target_csv_layout.as_deref() == Some("compat");
     if compat_layout && (args.format != "csv" || args.output.is_none()) {
         return Err("--target-csv-layout=compat requires --format csv and --output.".to_string());
     }
@@ -552,6 +589,7 @@ fn run_targets(args: TargetsArgs) -> Result<(), String> {
         &args.runtime,
         args.runtime_rules.as_ref(),
         args.core_classes.as_ref(),
+        args.verbose_runtime_internals,
     )?;
     let mut config = match &args.config {
         Some(config_path) => {
@@ -577,6 +615,8 @@ fn run_targets(args: TargetsArgs) -> Result<(), String> {
         runtime_rules: runtime_rules.clone(),
     };
     let results = analyze_target_facts_with_options(&facts, &config, &options);
+    // Fail closed on invalid user patterns before writing any artifact.
+    clankerprof_core::targets::take_pattern_error()?;
     if let Some(semantic_csv_path) = &args.semantic_callers_csv {
         if !args.track_semantic_callers {
             return Err("--semantic-callers-csv requires --track-semantic-callers.".to_string());
@@ -590,7 +630,8 @@ fn run_targets(args: TargetsArgs) -> Result<(), String> {
     }
     if args.format == "json" {
         let payload = render_target_json(&results);
-        let rendered = serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?;
+        clankerprof_core::targets::take_pattern_error()?;
+        let rendered = clankerprof_core::pyjson::dumps_pretty(&payload);
         return emit(&rendered, args.output.as_ref(), "clankerprof_targets");
     }
     if compat_layout {
@@ -614,6 +655,7 @@ fn run_targets(args: TargetsArgs) -> Result<(), String> {
             args.track_semantic_callers,
         )
     };
+    clankerprof_core::targets::take_pattern_error()?;
     emit(&rendered, args.output.as_ref(), "clankerprof_targets")
 }
 
@@ -653,8 +695,7 @@ fn write_compat_target_csv_artifacts(
         },
         "tool": "clankerprof_targets",
     });
-    let receipt_rendered =
-        serde_json::to_string_pretty(&receipt).map_err(|error| error.to_string())?;
+    let receipt_rendered = clankerprof_core::pyjson::dumps_pretty(&receipt);
     println!("{receipt_rendered}");
     Ok(())
 }
@@ -742,6 +783,7 @@ fn run_slices(args: SlicesArgs) -> Result<(), String> {
         &args.runtime,
         args.runtime_rules.as_ref(),
         args.core_classes.as_ref(),
+        args.verbose_runtime_internals,
     )?;
     let mut options = SliceAnalysisOptions {
         filters,
@@ -760,7 +802,8 @@ fn run_slices(args: SlicesArgs) -> Result<(), String> {
     }
     validate_slice_options(&options, args.allow_virtual_attribute_slices)?;
     let payload = render_slice_json(&analyze_slice_facts(&facts, &options), &options)?;
-    let rendered = serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?;
+    clankerprof_core::targets::take_pattern_error()?;
+    let rendered = clankerprof_core::pyjson::dumps_pretty(&payload);
     emit(&rendered, args.output.as_ref(), "clankerprof_slices")
 }
 
@@ -1156,7 +1199,7 @@ fn run_compare(args: CompareArgs) -> Result<i32, String> {
         .get("has_regression")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    let rendered = serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?;
+    let rendered = clankerprof_core::pyjson::dumps_pretty(&payload);
     // The receipt keeps the regression gate intact: has_regression rides
     // along and the exit code is unchanged by --output.
     let receipt = match args.output.as_ref() {

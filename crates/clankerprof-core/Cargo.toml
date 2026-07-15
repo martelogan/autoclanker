@@ -16,10 +16,15 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+# fancy-regex: user-facing patterns are documented as Python-regex (the docs'
+# own rule-pack examples use lookahead), which the plain regex crate cannot
+# compile; fancy-regex layers lookaround/backreferences over the same engine.
+fancy-regex = "0.14"
 flate2 = "1"
 indexmap = { version = "2", features = ["serde"] }
-regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 serde_yaml = "0.9"
-toml = "0.8"
+# preserve_order: scope-config cost-kind/owner tables are first-match-wins in
+# declaration order; a sorted TOML table would silently reorder them.
+toml = { version = "0.8", features = ["preserve_order"] }

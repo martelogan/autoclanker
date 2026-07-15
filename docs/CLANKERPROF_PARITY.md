@@ -18,10 +18,11 @@ behavior must not define or override target-attribution semantics.
 `crates/clankerprof-core` reaches parity with every capability below through
 `tests/test_clankerprof_rust_parity.py`: byte-level artifact comparison across
 a per-subcommand flag matrix (facts compact/pretty, targets
-json/csv/simple-csv/text with runtime/fold/track/attributable/no-enhanced
-flags and the compat CSV pair, slices with filters/collapse/attributes/
-metadata/pseudo-slices, scopes with preferred and legacy configs and facts
-replay, compare gates, malformed-input rejection). Rows marked `not claimed`
+json/csv/simple-csv/text with runtime/fold/verbose/track/attributable/
+no-enhanced flags and the compat CSV pair, slices with filters/collapse/
+attributes/metadata/pseudo-slices, scopes with preferred and legacy configs,
+facts replay, and the no-enhanced/fold/verbose runtime flags, compare gates,
+malformed-input rejection). Rows marked `not claimed`
 below are not claimed by either implementation (legacy prose formats). Any
 capability added to Python must land in the Rust core and this parity suite
 in the same change.
@@ -63,6 +64,8 @@ in the same change.
 | Compatibility two-file CSV artifact pair, `output/<name>` and `output/verbose/<name>`, via `--target-csv-layout compat` or the older alias flag | covered with explicit opt-in | `test_clankerprof_can_emit_legacy_target_csv_artifact_pair` |
 | Legacy text report phrasing byte-for-byte | not claimed | Prefer structured JSON/CSV compatibility over exact prose output. |
 
+| Parents emit in first-seen encounter order across csv/simple-csv/text and the compat pair | covered | `test_clankerprof_rust_target_parent_order_matches_python` |
+
 ## Scope decomposition
 
 This section is scoped to `clankerprof scopes` and its compatibility alias
@@ -85,6 +88,10 @@ existing boundary JSON payloads, or slice ownership semantics.
 | Rust parity for scope decomposition | covered | `test_clankerprof_rust_scopes_match_python_boundary_decomposition`, `test_clankerprof_rust_scopes_legacy_aliases_and_boundaries_subcommand`, `test_clankerprof_rust_scopes_replay_facts_identically` |
 | Scope aggregates in `(i64::MAX, u64::MAX]` render, filter, and sort identically; occurrence-weighted totals beyond the aggregate bound exit 2 with matching envelopes; signed-minimum `--top`/`--by-slice`/`--unattributed-libraries` limits truncate without panicking | covered | `test_clankerprof_rust_numeric_edge_semantics_match_python`, `test_clankerprof_scope_occurrence_aggregates_fail_closed_beyond_bound`, `test_clankerprof_slices_tail_limits_accept_i64_min` |
 | Zero-aggregate rollup rows are omitted while negative rows render, keeping bucket/owner sums equal to scope totals byte-identically | covered | `test_clankerprof_rust_numeric_edge_semantics_match_python`, `test_clankerprof_scope_rollups_render_negative_costs_additively` |
+
+| Cost-kind/owner tables evaluate in declaration order (first match wins) in YAML and TOML | covered | `test_clankerprof_scope_tables_respect_declaration_order`, `test_clankerprof_rust_scope_declaration_order_matches_python` |
+| Scope `label`/`name` must be strings and `function` a string or string array; violations exit 2 with matching envelopes | covered | `test_clankerprof_scope_labels_must_be_strings`, `test_clankerprof_rust_scope_declaration_order_matches_python` |
+| Scope runtime flags (`--no-enhanced`, `--fold-runtime-internals`, `--verbose-runtime-internals`) parity | covered | `test_clankerprof_rust_runtime_flags_match_python` |
 
 ## Runtime rules
 
@@ -130,6 +137,7 @@ semantics.
 | `slices --config` merge semantics (value coercions, duplicate rejection, error ordering) in the Rust CLI | covered | `test_clankerprof_rust_cli_flag_matrix_matches_python`, `test_clankerprof_rust_slices_validation_envelopes_match_python` |
 | Default `./slices.yml` discovery when slice-aware options are used | covered | `test_clankerprof_slice_cli_supports_toml_config_default_slices_and_optional_by_slice` |
 | Bracket-class globs (`[seq]`, `[!seq]`, ranges, unterminated `[` literal) attribute identically across languages | covered | `test_clankerprof_rust_cli_flag_matrix_matches_python` (targets-bracket-class-globs), Rust `glob_matches_follows_cpython_fnmatch_semantics` |
+| Python-dialect regexes (lookaround included) load and match in both languages; explicit invalid regexes fail closed with a shared message prefix | covered | `test_clankerprof_rust_regex_dialect_and_failclosed_match_python`, `test_clankerprof_invalid_regex_patterns_fail_closed` |
 | Configured cost-kind/category predicate errors fail closed in both languages (no silent `Other` rebucketing) | covered | `test_clankerprof_rust_slices_validation_envelopes_match_python` |
 | Multi-member (concatenated) gzip profiles decode fully in both languages | covered | `test_clankerprof_rust_cli_flag_matrix_matches_python` (facts-multimember-gzip), Rust `concatenated_gzip_members_all_decode` |
 | GC pseudo-output for `(marking)` and `(sweeping)` | covered | `test_clankerprof_slice_outputs_gc_uncollapsible_and_unattributed_libraries` |
@@ -169,6 +177,8 @@ semantics.
 | Successful `--output` writes print the JSON receipt, byte-identically across languages | covered | `test_clankerprof_output_writes_print_json_receipts`, `test_clankerprof_rust_output_receipts_and_usage_envelopes_match_python` |
 | `compare --output` (local or hoisted global placement) writes the report, prints a `has_regression` receipt, and keeps the regression exit code | covered | `test_clankerprof_compare_output_receipt_preserves_regression_exit`, `test_clankerprof_rust_output_receipts_and_usage_envelopes_match_python` |
 | `facts` stdout carries the artifact bytes: compact by default, `--pretty` opt-in | covered | `test_clankerprof_facts_stdout_matches_artifact_bytes`, `test_clankerprof_rust_output_receipts_and_usage_envelopes_match_python` |
+| Non-facts JSON artifacts, receipts, and envelopes use Python `json.dumps` lexical form (`\uXXXX` escapes, CPython float repr) byte-identically | covered | `test_clankerprof_rust_lexical_json_matches_python`, Rust `pyjson` unit tests |
+| Duplicate YAML mapping keys rejected in both languages with the shared `duplicate entry with key` message | covered | `test_clankerprof_yaml_inputs_reject_duplicate_keys`, `test_clankerprof_rust_scope_declaration_order_matches_python` |
 
 ## Remaining confidence boundary
 

@@ -8,7 +8,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Final, cast
 
-import yaml
+from clankerprof.jsonio import parse_strict_yaml
 
 RUNTIME_RULES_SCHEMA_VERSION: Final = "clankerprof.runtime_rules.v1"
 
@@ -207,6 +207,16 @@ def _load_match_rules(
             raise ValueError(f"Unknown {key} entry keys: {', '.join(unknown_keys)}.")
         if "category" not in raw_item:
             raise ValueError(f"Each {key} entry must include category.")
+        name_patterns = _string_tuple(raw_item, "name_patterns")
+        for pattern in name_patterns:
+            # Eager validation at load, matching the Rust port: a bad pattern
+            # fails when the pack is read, not when a frame first reaches it.
+            try:
+                re.compile(pattern.removeprefix("regex:"))
+            except re.error as exc:
+                raise ValueError(
+                    f"Invalid runtime rule name pattern '{pattern}'."
+                ) from exc
         rules.append(
             RuntimeMatchRule(
                 category=str(raw_item["category"]),
@@ -217,7 +227,7 @@ def _load_match_rules(
                 ),
                 name_contains=_string_tuple(raw_item, "name_contains"),
                 name_prefixes=_string_tuple(raw_item, "name_prefixes"),
-                name_patterns=_string_tuple(raw_item, "name_patterns"),
+                name_patterns=name_patterns,
                 except_paths=frozenset(_string_tuple(raw_item, "except_paths")),
             )
         )
@@ -307,7 +317,7 @@ def load_runtime_rules(
     verbose: bool = False,
 ) -> RuntimeRuleSet:
     resource = resources.files("clankerprof.runtime_rules").joinpath(f"{name}.yml")
-    payload = yaml.safe_load(resource.read_text(encoding="utf-8"))
+    payload = parse_strict_yaml(resource.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"Runtime rule pack {name} must be a YAML object.")
     return runtime_rules_from_mapping(
@@ -325,7 +335,7 @@ def load_runtime_rules_file(
     verbose: bool = False,
 ) -> RuntimeRuleSet:
     rules_path = Path(path)
-    payload = yaml.safe_load(rules_path.read_text(encoding="utf-8"))
+    payload = parse_strict_yaml(rules_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"Runtime rule file {rules_path} must be a YAML object.")
     return runtime_rules_from_mapping(

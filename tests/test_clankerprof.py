@@ -5422,3 +5422,160 @@ def test_clankerprof_compare_summary_totals_span_u64_range() -> None:
             match="Report summary field 'total_time_ns' must be an integer.",
         ):
             compare_slice_json(report(total), report(total))
+
+
+def _scope_facts_fixture(tmp_path: Path) -> Path:
+    facts_path = tmp_path / "order-facts.json"
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    parent = builder.location(builder.function("T", "/srv/app/t.py"))
+    builder.sample((leaf, parent), 7)
+    facts_path.write_text(
+        dumps_sample_facts(decode_profile_bytes(builder.encode()).to_sample_facts()),
+        encoding="utf-8",
+    )
+    return facts_path
+
+
+def test_clankerprof_invalid_regex_patterns_fail_closed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path = _scope_facts_fixture(tmp_path)
+    config_path = tmp_path / "bad-regex-targets.json"
+    config_path.write_text(json.dumps({"T": {"Bad": "regex:["}}), encoding="utf-8")
+    exit_code = clankerprof_main(
+        ["targets", "--facts", str(facts_path), "--config", str(config_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert str(envelope["error"]).startswith("Invalid regex pattern '[':")
+
+    pack_path = tmp_path / "bad-pattern-pack.yml"
+    pack_path.write_text(
+        'semantic_rules:\n  - category: Broken\n    name_patterns: ["("]\n',
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        [
+            "targets",
+            "--facts",
+            str(facts_path),
+            "--target",
+            "T",
+            "--runtime-rules",
+            str(pack_path),
+        ]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Invalid runtime rule name pattern '('."
+
+
+def test_clankerprof_scope_tables_respect_declaration_order(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path = _scope_facts_fixture(tmp_path)
+    yaml_config = tmp_path / "order.yml"
+    yaml_config.write_text(
+        'cost_kind:\n  ZFirst: "path:/srv/app"\n  ASecond: "path:/srv/app"\n'
+        "scope:\n  - function: T\n",
+        encoding="utf-8",
+    )
+    toml_config = tmp_path / "order.toml"
+    toml_config.write_text(
+        '[cost_kind]\nZFirst = "path:/srv/app"\nASecond = "path:/srv/app"\n\n'
+        '[[scope]]\nfunction = "T"\n',
+        encoding="utf-8",
+    )
+    for config_path in (yaml_config, toml_config):
+        exit_code = clankerprof_main(
+            ["scopes", "--facts", str(facts_path), "--config", str(config_path)]
+        )
+        assert exit_code == 0
+        payload = json.loads(capsys.readouterr().out)
+        categories = {
+            category["name"]
+            for boundary in payload["boundaries"]
+            for bucket in boundary["buckets"]
+            for category in bucket["categories"]
+        }
+        # First matching definition in declaration order wins, even though
+        # ASecond sorts first alphabetically.
+        assert categories == {"ZFirst"}, config_path.suffix
+
+
+def test_clankerprof_scope_labels_must_be_strings(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path = _scope_facts_fixture(tmp_path)
+    cases = [
+        (
+            'cost_kind:\n  AppWork: "name:Leaf"\n'
+            "scope:\n  - function: T\n    label: true\n",
+            "scope.label must be a string.",
+        ),
+        (
+            'cost_kind:\n  AppWork: "name:Leaf"\n'
+            "scope:\n  - function: T\n    name: 7\n",
+            "scope.name must be a string.",
+        ),
+        (
+            'cost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - function: [true]\n',
+            "scope.function must be a string or array of strings.",
+        ),
+        (
+            'cost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - function: 3\n',
+            "scope.function must be a string or array of strings.",
+        ),
+    ]
+    for index, (config_text, message) in enumerate(cases):
+        config_path = tmp_path / f"labels-{index}.yml"
+        config_path.write_text(config_text, encoding="utf-8")
+        exit_code = clankerprof_main(
+            ["scopes", "--facts", str(facts_path), "--config", str(config_path)]
+        )
+        assert exit_code == 2, message
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == message
+
+
+def test_clankerprof_yaml_inputs_reject_duplicate_keys(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path = _scope_facts_fixture(tmp_path)
+    dup_config = tmp_path / "dup.yml"
+    dup_config.write_text(
+        'cost_kind:\n  AppWork: "name:Leaf"\ncost_kind:\n  Other2: "name:Nope"\n'
+        "scope:\n  - function: T\n",
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["scopes", "--facts", str(facts_path), "--config", str(dup_config)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == 'duplicate entry with key "cost_kind"'
+
+    dup_pack = tmp_path / "dup-pack.yml"
+    dup_pack.write_text(
+        "semantic_rules: []\nsemantic_rules: []\n",
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        [
+            "targets",
+            "--facts",
+            str(facts_path),
+            "--target",
+            "T",
+            "--runtime-rules",
+            str(dup_pack),
+        ]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == 'duplicate entry with key "semantic_rules"'

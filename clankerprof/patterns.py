@@ -187,7 +187,12 @@ def _normalize_library_component(component: str, rules: RuntimeRuleSet) -> str:
     if not normalized:
         return normalized
     for pattern in rules.library_name_suffix_patterns:
-        match = re.search(pattern, normalized)
+        try:
+            match = re.search(pattern, normalized)
+        except re.error as exc:
+            # re.error is not a ValueError; unwrapped it would escape the CLI
+            # error envelope as a traceback.
+            raise ValueError(f"Invalid regex pattern {pattern!r}: {exc}") from exc
         if match and match.start() > 0:
             return normalized[: match.start()]
     return normalized
