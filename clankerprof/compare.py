@@ -100,7 +100,12 @@ def _slice_map(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
         if not isinstance(item, dict):
             raise ValueError("Slice rows must be objects.")
         raw_item = cast(dict[str, Any], item)
-        result[_require_name(raw_item, "name", "Slice")] = raw_item
+        name = _require_name(raw_item, "name", "Slice")
+        if name in result:
+            # Projections never emit duplicate top-level names; a duplicate is
+            # malformed input and last-wins would make the gate order-dependent.
+            raise ValueError(f"Duplicate Slice row '{name}' in comparison input.")
+        result[name] = raw_item
     return result
 
 
@@ -115,11 +120,22 @@ def _frames_by_function(slice_payload: dict[str, Any]) -> dict[str, float]:
 
 
 def _delta_rel(before_pct: float, after_pct: float) -> float:
+    """Relative delta against the magnitude of the baseline.
+
+    Sample values are signed, so rows can carry negative percentages; dividing
+    by ``abs(before_pct)`` keeps the sign of the change meaningful (-10% ->
+    -5% is a +50% increase and must be gateable). A zero baseline yields an
+    unbounded delta in the direction of the absolute change, serialized as
+    null by the finite-JSON path. Positive baselines are bit-identical to the
+    plain ``delta/before`` form.
+    """
     delta_abs = after_pct - before_pct
-    if before_pct > 0:
-        return (delta_abs / before_pct) * 100
-    if after_pct > 0:
+    if before_pct != 0:
+        return (delta_abs / abs(before_pct)) * 100
+    if delta_abs > 0:
         return float("inf")
+    if delta_abs < 0:
+        return float("-inf")
     return 0.0
 
 
@@ -238,6 +254,19 @@ def compare_slice_json(
     }
 
 
+def _insert_row(
+    rows: dict[tuple[str, str, str], float],
+    key: tuple[str, str, str],
+    value: float,
+    context: str,
+) -> None:
+    if key in rows:
+        # Projections never emit duplicate row names; a duplicate is malformed
+        # input and last-wins would make the gate order-dependent.
+        raise ValueError(f"Duplicate {context} row '{key[2]}' in comparison input.")
+    rows[key] = value
+
+
 def _boundary_rows(payload: dict[str, Any]) -> dict[tuple[str, str, str], float]:
     raw_boundaries: object = payload.get("boundaries")
     if not isinstance(raw_boundaries, list):
@@ -248,23 +277,35 @@ def _boundary_rows(payload: dict[str, Any]) -> dict[tuple[str, str, str], float]
             raise ValueError("Boundary rows must be objects.")
         boundary = cast(dict[str, Any], item)
         boundary_name = _require_name(boundary, "name", "Boundary")
-        rows[("boundary", boundary_name, boundary_name)] = _require_number(
-            boundary, "pct_of_profile", "Boundary"
+        _insert_row(
+            rows,
+            ("boundary", boundary_name, boundary_name),
+            _require_number(boundary, "pct_of_profile", "Boundary"),
+            "Boundary",
         )
         for bucket in _optional_rows(boundary, "buckets", "Boundary"):
             bucket_name = _require_name(bucket, "name", "Bucket")
-            rows[("bucket", boundary_name, bucket_name)] = _require_number(
-                bucket, "pct", "Bucket"
+            _insert_row(
+                rows,
+                ("bucket", boundary_name, bucket_name),
+                _require_number(bucket, "pct", "Bucket"),
+                "Bucket",
             )
             for category in _optional_rows(bucket, "categories", "Bucket"):
                 category_name = _require_name(category, "name", "Category")
-                rows[("category", boundary_name, category_name)] = _require_number(
-                    category, "pct", "Category"
+                _insert_row(
+                    rows,
+                    ("category", boundary_name, category_name),
+                    _require_number(category, "pct", "Category"),
+                    "Category",
                 )
         for domain in _optional_rows(boundary, "domains", "Boundary"):
             domain_name = _require_name(domain, "name", "Domain")
-            rows[("domain", boundary_name, domain_name)] = _require_number(
-                domain, "pct", "Domain"
+            _insert_row(
+                rows,
+                ("domain", boundary_name, domain_name),
+                _require_number(domain, "pct", "Domain"),
+                "Domain",
             )
     return rows
 

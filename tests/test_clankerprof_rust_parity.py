@@ -2934,7 +2934,13 @@ def test_clankerprof_rust_value_domain_grammar_matches_python(tmp_path: Path) ->
         ),
         encoding="utf-8",
     )
-    compare_base = ["compare", "--before", str(report_path), "--after", str(report_path)]
+    compare_base = [
+        "compare",
+        "--before",
+        str(report_path),
+        "--after",
+        str(report_path),
+    ]
     focus_last_wins = _assert_identical_success(
         [*compare_base, "--focus-slices", "zzz", "--focus-slices", "a,b"],
         "focus-last-wins",
@@ -3049,9 +3055,7 @@ def test_clankerprof_rust_yaml_scalars_and_attributables_match_python(
     # `017` stays a string in both YAML dialects, and both string arms then
     # parse it as decimal 17 (Rust trim+parse::<i64>, Python's ASCII mirror).
     leading_zero_config = tmp_path / "top-leading-zero.yml"
-    leading_zero_config.write_text(
-        "profile: /dev/null\ntop: 017\n", encoding="utf-8"
-    )
+    leading_zero_config.write_text("profile: /dev/null\ntop: 017\n", encoding="utf-8")
     _assert_identical_success(
         ["slices", "--config", str(leading_zero_config)], "top-leading-zero"
     )
@@ -3077,7 +3081,9 @@ def test_clankerprof_rust_yaml_scalars_and_attributables_match_python(
     rust_run = _run_rust_cli_raw(argv)
     assert python_run.returncode == 2, python_run.stderr
     assert rust_run.returncode == 2, rust_run.stderr
-    core = "invalid type: integer `18446744073709551616` as u128, expected any YAML value"
+    core = (
+        "invalid type: integer `18446744073709551616` as u128, expected any YAML value"
+    )
     assert core in json.loads(python_run.stderr)["error"]
     assert core in json.loads(rust_run.stderr)["error"]
 
@@ -3138,4 +3144,319 @@ def test_clankerprof_rust_yaml_scalars_and_attributables_match_python(
     _assert_identical_success(
         [*targets_base, "--cpu-attributables", str(huge_attributables)],
         "attributables-huge-int",
+    )
+
+
+def test_clankerprof_rust_round3_fixes_match_python(tmp_path: Path) -> None:
+    # R3-01 + R3-04: signed rows gate on their true relative increase, and
+    # float re-emission is exact (serde_json float_roundtrip): the report
+    # below carries 110.00000000000001, which default serde_json re-emitted
+    # as 110.0.
+    before = tmp_path / "before.json"
+    after = tmp_path / "after.json"
+    before.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [
+                    {"name": "negative", "pct": -10.0, "frames": []},
+                    {"name": "positive", "pct": 110.00000000000001, "frames": []},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    after.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [
+                    {"name": "negative", "pct": -5.0, "frames": []},
+                    {"name": "positive", "pct": 105.0, "frames": []},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    argv = [
+        "compare",
+        "--before",
+        str(before),
+        "--after",
+        str(after),
+        "--threshold-abs",
+        "2",
+        "--threshold-rel",
+        "15",
+    ]
+    python_run = _run_python_cli_raw(argv)
+    rust_run = _run_rust_cli_raw(argv)
+    assert python_run.returncode == 2, python_run.stderr
+    assert rust_run.returncode == 2, rust_run.stderr
+    assert rust_run.stdout == python_run.stdout
+    payload = json.loads(python_run.stdout)
+    negative = next(row for row in payload["slices"] if row["name"] == "negative")
+    assert negative["delta_rel"] == 50.0
+    assert negative["status"] == "regression"
+    assert "110.00000000000001" in python_run.stdout
+
+    # R3-02: duplicate top-level rows are rejected identically in both
+    # orderings (last-wins made the gate order-dependent).
+    duplicated = tmp_path / "duplicated.json"
+    for pcts in ((30.0, 10.0), (10.0, 30.0)):
+        duplicated.write_text(
+            json.dumps(
+                {
+                    "tool": "clankerprof_slices",
+                    "summary": {"total_time_ns": 100},
+                    "slices": [
+                        {"name": "hot", "pct": pcts[0], "frames": []},
+                        {"name": "hot", "pct": pcts[1], "frames": []},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        envelope = _assert_identical_envelope(
+            ["compare", "--before", str(before), "--after", str(duplicated)],
+            f"duplicate-rows-{pcts}",
+        )
+        assert json.loads(envelope) == {
+            "ok": False,
+            "error": "Duplicate Slice row 'hot' in comparison input.",
+        }
+
+    # R3-03: a finite attributable that overflows during scaling fails closed
+    # with the shared metric-naming message (Rust silently emitted null).
+    builder = PprofFixtureBuilder.create()
+    scope_fn = builder.function("ScopeFn", "/srv/app/scope.py")
+    pos_leaf = builder.function("PosLeaf", "/srv/app/pos.py")
+    neg_leaf = builder.function("NegLeaf", "/srv/app/neg.py")
+    scope_loc = builder.location(scope_fn)
+    builder.sample((builder.location(pos_leaf), scope_loc), 110)
+    builder.sample((builder.location(neg_leaf), scope_loc), -10)
+    overflow_profile = tmp_path / "overflow.pb"
+    overflow_profile.write_bytes(builder.encode())
+    overflow_config = tmp_path / "overflow.yml"
+    overflow_config.write_text(
+        'cost_kind:\n  Pos: "name_eq:PosLeaf"\n  Neg: "name_eq:NegLeaf"\n'
+        "scope:\n  - function: ScopeFn\n"
+        '    rollup:\n      Positive: ["Pos"]\n      Negative: ["Neg"]\n'
+        "    attributables:\n      huge: 1.7e308\n",
+        encoding="utf-8",
+    )
+    envelope = _assert_identical_envelope(
+        [
+            "scopes",
+            "--profile",
+            str(overflow_profile),
+            "--config",
+            str(overflow_config),
+        ],
+        "attributable-overflow",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Attributable estimate for 'huge' is not finite.",
+    }
+
+    # R3-04: aggregate percentages above 2^53 divide identically (Python now
+    # mirrors Rust's f64-operand casts), including --by-slice selection.
+    builder = PprofFixtureBuilder.create()
+    fn_a = builder.function("a_work", "/srv/a/a.py")
+    fn_b = builder.function("b_work", "/srv/b/b.py")
+    builder.sample((builder.location(fn_a),), 4813636180488882346)
+    builder.sample((builder.location(fn_b),), 3969268729998903787)
+    huge_profile = tmp_path / "huge.pb"
+    huge_profile.write_bytes(builder.encode())
+    huge_slices = tmp_path / "huge_slices.yml"
+    huge_slices.write_text(
+        "slices:\n  - name: a\n    paths: [/srv/a]\n  - name: b\n    default: true\n",
+        encoding="utf-8",
+    )
+    output = _assert_identical_success(
+        ["slices", "--profile", str(huge_profile), "--slices", str(huge_slices)],
+        "huge-total-pct",
+    )
+    assert "54.80688029242869" in output
+    selected = _assert_identical_success(
+        [
+            "slices",
+            "--profile",
+            str(huge_profile),
+            "--slices",
+            str(huge_slices),
+            "--by-slice",
+            "54.80688029242869%",
+        ],
+        "huge-total-by-slice",
+    )
+    assert [row["name"] for row in json.loads(selected)["slices"]] == ["a"]
+
+    # R3-05: negative GC / uncollapsible pseudo-outputs are rendered.
+    builder = PprofFixtureBuilder.create()
+    marking = builder.function("(marking)", "")
+    builder.sample((builder.location(marking),), -10)
+    gc_profile = tmp_path / "gc_neg.pb"
+    gc_profile.write_bytes(builder.encode())
+    output = _assert_identical_success(
+        ["slices", "--profile", str(gc_profile)], "gc-negative"
+    )
+    assert json.loads(output)["gc"] == {"pct": 100.0, "time_ns": -10}
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.function("Leaf", "/srv/app/leaf.py")
+    builder.sample((builder.location(leaf),), -10)
+    collapse_profile = tmp_path / "collapse_neg.pb"
+    collapse_profile.write_bytes(builder.encode())
+    output = _assert_identical_success(
+        [
+            "slices",
+            "--profile",
+            str(collapse_profile),
+            "--collapse",
+            "path:/srv/app/leaf.py",
+        ],
+        "uncollapsible-negative",
+    )
+    assert json.loads(output)["uncollapsible"]["time_ns"] == -10
+
+    # R3-06: non-string entries on the three remaining config surfaces fail
+    # closed with shared messages instead of coercing/dropping divergently.
+    builder = PprofFixtureBuilder.create()
+    worker = builder.function("work", "/srv/123/file.py")
+    builder.sample((builder.location(worker),), 7)
+    strings_profile = tmp_path / "strings.pb"
+    strings_profile.write_bytes(builder.encode())
+    numeric_slices = tmp_path / "numeric_slices.yml"
+    numeric_slices.write_text(
+        "slices:\n  - name: numeric\n    paths: [123]\n"
+        "  - name: fallback\n    default: true\n",
+        encoding="utf-8",
+    )
+    envelope = _assert_identical_envelope(
+        [
+            "slices",
+            "--profile",
+            str(strings_profile),
+            "--slices",
+            str(numeric_slices),
+        ],
+        "slice-paths-numeric",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Slice paths values must be strings.",
+    }
+    numeric_targets = tmp_path / "numeric_targets.json"
+    numeric_targets.write_text('{"T": {"Numeric": 123}}', encoding="utf-8")
+    envelope = _assert_identical_envelope(
+        [
+            "targets",
+            "--profile",
+            str(strings_profile),
+            "--config",
+            str(numeric_targets),
+            "--format",
+            "json",
+        ],
+        "target-pattern-numeric",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Target config pattern for Numeric must be a string.",
+    }
+    null_rules = tmp_path / "null_rules.yml"
+    null_rules.write_text(
+        "schema_version: clankerprof.runtime_rules.v1\nname: strictness\n"
+        "native_rules:\n  - category: Hit\n    name_contains:\n      - null\n",
+        encoding="utf-8",
+    )
+    plain_targets = tmp_path / "plain_targets.json"
+    plain_targets.write_text('{"T": {"App": "path:/srv"}}', encoding="utf-8")
+    envelope = _assert_identical_envelope(
+        [
+            "targets",
+            "--profile",
+            str(strings_profile),
+            "--config",
+            str(plain_targets),
+            "--runtime-rules",
+            str(null_rules),
+        ],
+        "rule-entries-null",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Runtime rule field name_contains entries must be strings.",
+    }
+
+    # R3-07: compare thresholds share one strict float grammar.
+    for spelling in ("1_0", " 2 ", "nan", "1e999"):
+        envelope = _assert_identical_envelope(
+            [
+                "compare",
+                "--before",
+                str(before),
+                "--after",
+                str(before),
+                "--threshold-abs",
+                spelling,
+            ],
+            f"threshold-{spelling!r}",
+        )
+        assert json.loads(envelope) == {
+            "ok": False,
+            "error": "Compare thresholds must be finite numbers.",
+        }
+    _assert_identical_success(
+        [
+            "compare",
+            "--before",
+            str(before),
+            "--after",
+            str(before),
+            "--threshold-abs",
+            "2.5",
+        ],
+        "threshold-control",
+    )
+
+    # R3-04 sweep: zero-total profiles (mixed signs summing to zero) exercise
+    # every pct field's zero arm — Python emits integer 0 there, and Rust must
+    # spell it identically (not 0.0).
+    builder = PprofFixtureBuilder.create()
+    pos_fn = builder.function("pos", "/srv/a/a.py")
+    neg_fn = builder.function("neg", "/srv/b/b.py")
+    builder.sample((builder.location(pos_fn),), 10)
+    builder.sample((builder.location(neg_fn),), -10)
+    zero_profile = tmp_path / "zero_total.pb"
+    zero_profile.write_bytes(builder.encode())
+    output = _assert_identical_success(
+        ["slices", "--profile", str(zero_profile)], "zero-total-slices"
+    )
+    assert '"pct": 0,' in output
+    zero_targets = tmp_path / "zero_targets.json"
+    zero_targets.write_text('{"T": {"App": "path:/srv"}}', encoding="utf-8")
+    _assert_identical_success(
+        [
+            "targets",
+            "--profile",
+            str(zero_profile),
+            "--config",
+            str(zero_targets),
+            "--format",
+            "json",
+        ],
+        "zero-total-targets",
+    )
+    zero_scopes = tmp_path / "zero_scopes.yml"
+    zero_scopes.write_text(
+        'cost_kind:\n  Work: "name_eq:pos"\nscope:\n  - function: pos\n',
+        encoding="utf-8",
+    )
+    _assert_identical_success(
+        ["scopes", "--profile", str(zero_profile), "--config", str(zero_scopes)],
+        "zero-total-scopes",
     )

@@ -87,9 +87,7 @@ _REPLACED_RESOLVER_TAGS = frozenset(
 
 _StrictYamlLoader.yaml_implicit_resolvers = {
     prefix: [
-        (tag, regexp)
-        for tag, regexp in resolvers
-        if tag not in _REPLACED_RESOLVER_TAGS
+        (tag, regexp) for tag, regexp in resolvers if tag not in _REPLACED_RESOLVER_TAGS
     ]
     for prefix, resolvers in _StrictYamlLoader.yaml_implicit_resolvers.items()
 }

@@ -23,7 +23,10 @@ fancy-regex = "0.14"
 flate2 = "1"
 indexmap = { version = "2", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["raw_value"] }
+# float_roundtrip: serde_json's default float parse is lossy (1-ulp vs
+# CPython's correctly rounded strtod), which breaks byte parity when
+# re-emitting floats read from reports (e.g. 110.00000000000001 -> 110.0).
+serde_json = { version = "1", features = ["raw_value", "float_roundtrip"] }
 serde_yaml = "0.9"
 # preserve_order: scope-config cost-kind/owner tables are first-match-wins in
 # declaration order; a sorted TOML table would silently reorder them.

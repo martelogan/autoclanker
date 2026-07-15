@@ -432,5 +432,5 @@ def analyze_slice_facts(
         total_time_ns=total_time,
         slices=ordered,
         gc_time_ns=gc_time,
-        uncollapsible=uncollapsible_stats if uncollapsible_stats.time_ns > 0 else None,
+        uncollapsible=uncollapsible_stats if uncollapsible_stats.time_ns != 0 else None,
     )

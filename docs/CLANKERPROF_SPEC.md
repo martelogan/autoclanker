@@ -154,6 +154,14 @@ subset sums only; occurrence-mode scope attribution counts a sample once per
 matching frame occurrence and can therefore exceed it. Both implementations
 re-enforce the same bound during scope accumulation and fail with the
 identical validation error rather than emitting out-of-range integers.
+
+Percentage fields divide with both integer operands rounded to `f64` first
+(Rust `as f64` casts; Python mirrors them operand-for-operand). Below `2^53`
+this is identical to exact integer division; above it, the f64-operand form
+is the shared contract, so percentage bytes and `--by-slice` threshold
+selection stay identical across implementations. Floats read from JSON
+re-emit exactly (serde_json's `float_roundtrip`; CPython parses correctly
+rounded natively).
 Implementations must read rendered totals back through both signed and
 unsigned integer views: a value in `(i64::MAX, u64::MAX]` is valid data, not
 zero.
@@ -369,12 +377,24 @@ Attributable metric values — the `--cpu-attributables` JSON table and a
 scope's `attributables` block — must be JSON numbers in both
 implementations: booleans and numeric strings are rejected
 (`Attributable column <name> values must be numbers.` /
-`Boundary attributable <name> must be a number.`), never coerced.
+`Boundary attributable <name> must be a number.`), never coerced. Attributable
+estimates must also stay JSON-representable end to end: a finite metric scaled
+by a >100% bucket share can overflow, and a non-finite estimate — input or
+scaled — fails closed in both implementations with
+`Attributable estimate for '<name>' is not finite.`, never a silent `null`.
 Selector and predicate arrays require string entries: a non-string entry in
 a scope `selector`/`matcher`/`match` list is
 `<section> selector values must be strings.`, and a non-string entry in any
 string-or-array field (cost-kind patterns, rollup categories) is
 `<field> must be a string or array of strings.` in both implementations.
+The same string strictness covers the other configuration surfaces: slice
+definition names and `paths` entries (`Slice name must be a string.` /
+`Slice paths values must be strings.`), target config patterns
+(`Target config pattern for <category> must be a string.`), and runtime rule
+pack fields — scalar fields are
+`Runtime rule field <key> must be a string.` and list/map entries are
+`Runtime rule field <key> entries must be strings.` — because Python `str()`
+and Rust would otherwise spell (or drop) non-string values differently.
 Supported selector keys are intentionally generic: function name contains,
 function name equality, path/glob, regex, native frame, dependency selectors,
 optional slice label, configured cost-kind label, and runtime-rule label.
@@ -455,6 +475,9 @@ For each sample:
 - apply attribute rules before path-based slice matching;
 - use the configured default slice or `(all)` for unmatched samples;
 - report GC pseudo-slice time for `(marking)` and `(sweeping)`;
+- pseudo-outputs (`gc`, `uncollapsible`) are omitted only when their
+  aggregate is exactly zero; negative aggregates are signed data and must be
+  reported (mirrors the scope rollup rule);
 - report unattributed dependency/library summaries for default-slice time when
   requested.
 
@@ -480,7 +503,11 @@ silent "no regression". Each report must contain its projection's row array
 an empty comparison. Rows are strict: every row must be an object carrying a
 string `name` (frame rows a string `function`) and its numeric field (`pct`,
 `pct_of_profile`) — a present row missing its numeric field is malformed
-input, never a zero default. Row-level absence is different and legal: a name
+input, never a zero default. Duplicate top-level row names (a slice name, or
+a boundary/bucket/category/domain row within one boundary) are a validation
+error in both implementations — projections never emit duplicates, and
+last-wins would make the gate order-dependent. Row-level absence is different
+and legal: a name
 present in only one report compares against `0.0` (the documented new/removed
 row semantics). Nested row arrays (`frames`, `buckets`, `categories`,
 `domains`) may be absent, but a present key must be an array of objects.
@@ -489,9 +516,11 @@ error in both implementations, never coerced to zero. Each report must carry
 a `summary` object whose `total_time_ns` is an integer, accepted across the
 full aggregate range `[i64::MIN, u64::MAX]`, exactly as projections emit
 them; absent or out-of-range values are rejected like non-integers. Compare
-thresholds
-must be finite numbers; a NaN or infinite threshold is an option-validation
-error (a non-finite threshold would silently disable gating). For slice
+thresholds must be finite numbers spelled in the strict shared float grammar
+(Rust `f64::from_str` mirrored by Python): underscores, surrounding
+whitespace, and non-ASCII digits are validation errors, and a NaN, infinite,
+or overflowing threshold is an option-validation error (a non-finite
+threshold would silently disable gating). For slice
 payloads, it reports:
 
 - total before/after primary time from summaries;
@@ -507,12 +536,16 @@ For boundary payloads, it reports the same threshold semantics over stable
 boundary, bucket, category, and domain rows. Boundary compare is intentionally
 JSON-first; exact terminal prose is not part of the compatibility contract.
 
-Compare artifacts are strict JSON. A row that is new (`before_pct == 0`,
-`after_pct > 0`) has no finite relative delta; its `delta_rel` serializes as
-`null`, never as a bare `Infinity` token or a string. New rows still
-participate in regression gating: threshold math treats their relative delta
-as unbounded, so a new row whose absolute delta exceeds the absolute
-threshold gates. `top_regressions` orders rows by descending absolute delta;
+Compare artifacts are strict JSON. Relative deltas are computed against the
+magnitude of the baseline (`delta_abs / |before_pct| * 100`): sample values
+are signed, so rows can carry negative percentages, and a `-10% -> -5%` row
+is a +50% relative increase that gates like any other (positive baselines are
+bit-identical to plain `delta/before`). A zero baseline has no finite
+relative delta; its `delta_rel` serializes as `null`, never as a bare
+`Infinity` token or a string, and threshold math treats it as unbounded in
+the direction of the absolute delta — so a new row whose absolute delta
+exceeds the absolute threshold gates, and a new negative row is an unbounded
+improvement, symmetrically. `top_regressions` orders rows by descending absolute delta;
 `top_improvements` orders rows by ascending (most negative first) delta.
 
 A slice is a regression only when it exceeds both the configured absolute and

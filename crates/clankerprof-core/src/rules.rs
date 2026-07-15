@@ -192,19 +192,34 @@ impl RuntimeRuleSet {
     }
 }
 
-fn value_str(value: &Value) -> String {
-    match value {
-        Value::String(text) => text.clone(),
-        Value::Bool(flag) => (if *flag { "True" } else { "False" }).to_string(),
-        Value::Number(number) => number.to_string(),
-        other => format!("{other:?}"),
-    }
+/// Mapping keys reaching this point are pre-validated as strings
+/// (`require_string_keys` at pack load; Python's strict YAML loader mirrors
+/// it), so the fallback below is unreachable in practice.
+fn key_str(value: &Value) -> String {
+    value.as_str().unwrap_or_default().to_string()
+}
+
+fn require_rule_str(value: &Value, key: &str) -> Result<String, String> {
+    value
+        .as_str()
+        .map(ToString::to_string)
+        .ok_or_else(|| format!("Runtime rule field {key} must be a string."))
+}
+
+fn require_entry_str(value: &Value, key: &str) -> Result<String, String> {
+    value
+        .as_str()
+        .map(ToString::to_string)
+        .ok_or_else(|| format!("Runtime rule field {key} entries must be strings."))
 }
 
 fn string_list(mapping: &serde_yaml::Mapping, key: &str) -> Result<Vec<String>, String> {
     match mapping.get(Value::String(key.to_string())) {
         None | Some(Value::Null) => Ok(Vec::new()),
-        Some(Value::Sequence(items)) => Ok(items.iter().map(value_str).collect()),
+        Some(Value::Sequence(items)) => items
+            .iter()
+            .map(|item| require_entry_str(item, key))
+            .collect(),
         Some(_) => Err(format!("Runtime rule field {key} must be an array.")),
     }
 }
@@ -215,10 +230,12 @@ fn string_map(
 ) -> Result<BTreeMap<String, String>, String> {
     match mapping.get(Value::String(key.to_string())) {
         None | Some(Value::Null) => Ok(BTreeMap::new()),
-        Some(Value::Mapping(entries)) => Ok(entries
+        Some(Value::Mapping(entries)) => entries
             .iter()
-            .map(|(entry_key, entry_value)| (value_str(entry_key), value_str(entry_value)))
-            .collect()),
+            .map(|(entry_key, entry_value)| {
+                Ok((key_str(entry_key), require_entry_str(entry_value, key)?))
+            })
+            .collect(),
         Some(_) => Err(format!("Runtime rule field {key} must be an object.")),
     }
 }
@@ -242,13 +259,16 @@ fn selector_pattern_map(
         Some(Value::Mapping(entries)) => {
             let mut result = BTreeMap::new();
             for (selector, patterns) in entries {
-                let selector_name = value_str(selector);
+                let selector_name = key_str(selector);
                 let converted = match patterns {
                     Value::Null => Vec::new(),
                     Value::Sequence(items) => items
                         .iter()
-                        .map(|item| library_pattern(&value_str(item)))
-                        .collect(),
+                        .map(|item| {
+                            let entry_key = format!("{key}.{selector_name}");
+                            Ok(library_pattern(&require_entry_str(item, &entry_key)?))
+                        })
+                        .collect::<Result<Vec<_>, String>>()?,
                     _ => {
                         return Err(format!(
                             "Runtime rule field {key}.{selector_name} must be an array."
@@ -276,7 +296,7 @@ fn match_rules(mapping: &serde_yaml::Mapping, key: &str) -> Result<Vec<RuntimeMa
         };
         let unknown: Vec<String> = entry
             .keys()
-            .map(value_str)
+            .map(key_str)
             .filter(|entry_key| !KNOWN_MATCH_RULE_KEYS.contains(&entry_key.as_str()))
             .collect();
         if !unknown.is_empty() {
@@ -289,10 +309,10 @@ fn match_rules(mapping: &serde_yaml::Mapping, key: &str) -> Result<Vec<RuntimeMa
         };
         let native_category = match entry.get(Value::String("native_category".to_string())) {
             None | Some(Value::Null) => None,
-            Some(value) => Some(value_str(value)),
+            Some(value) => Some(require_rule_str(value, "native_category")?),
         };
         rules.push(RuntimeMatchRule {
-            category: value_str(category),
+            category: require_rule_str(category, "category")?,
             native_category,
             name_contains: string_list(entry, "name_contains")?,
             name_prefixes: string_list(entry, "name_prefixes")?,
@@ -330,11 +350,11 @@ fn aliased_string_list(
     })
 }
 
-fn string_field(mapping: &serde_yaml::Mapping, key: &str, default: &str) -> String {
+fn string_field(mapping: &serde_yaml::Mapping, key: &str, default: &str) -> Result<String, String> {
     mapping
         .get(Value::String(key.to_string()))
-        .map(value_str)
-        .unwrap_or_else(|| default.to_string())
+        .map(|value| require_rule_str(value, key))
+        .unwrap_or_else(|| Ok(default.to_string()))
 }
 
 pub fn runtime_rules_from_mapping(
@@ -345,7 +365,7 @@ pub fn runtime_rules_from_mapping(
 ) -> Result<RuntimeRuleSet, String> {
     let mut unknown: Vec<String> = mapping
         .keys()
-        .map(value_str)
+        .map(key_str)
         .filter(|key| !KNOWN_RULE_PACK_KEYS.contains(&key.as_str()))
         .collect();
     if !unknown.is_empty() {
@@ -355,14 +375,14 @@ pub fn runtime_rules_from_mapping(
             unknown.join(", ")
         ));
     }
-    let schema_version = string_field(mapping, "schema_version", RUNTIME_RULES_SCHEMA_VERSION);
+    let schema_version = string_field(mapping, "schema_version", RUNTIME_RULES_SCHEMA_VERSION)?;
     if schema_version != RUNTIME_RULES_SCHEMA_VERSION {
         return Err(format!(
             "Unsupported runtime rules schema version: {schema_version:?}; expected {RUNTIME_RULES_SCHEMA_VERSION:?}."
         ));
     }
     Ok(RuntimeRuleSet {
-        name: string_field(mapping, "name", name),
+        name: string_field(mapping, "name", name)?,
         core_classes,
         verbose,
         enabled: true,
@@ -406,9 +426,9 @@ pub fn runtime_rules_from_mapping(
             mapping,
             "core_native_default_category",
             "Runtime Core (Native)",
-        ),
-        stdlib_category: string_field(mapping, "stdlib_category", "Runtime Stdlib"),
-        internals_category: string_field(mapping, "internals_category", "Runtime Internals"),
+        )?,
+        stdlib_category: string_field(mapping, "stdlib_category", "Runtime Stdlib")?,
+        internals_category: string_field(mapping, "internals_category", "Runtime Internals")?,
     })
 }
 

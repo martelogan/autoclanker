@@ -187,6 +187,13 @@ semantics.
 | String-typed integer config fields share the trim + ASCII signed-decimal i64 grammar | covered | `test_clankerprof_rust_yaml_scalars_and_attributables_match_python` |
 | Attributable metric values must be JSON numbers (booleans/strings rejected, shared messages) in `--cpu-attributables` and scope `attributables` | covered | `test_clankerprof_attributables_reject_non_numeric_values`, `test_clankerprof_rust_yaml_scalars_and_attributables_match_python` |
 | JSON integer literals outside `[i64::MIN, u64::MAX]` behave identically (f64 fallback vs unbounded int: same f64 in float domains, same rejection in integer domains) | covered | `test_clankerprof_json_out_of_range_integers_reject_in_integer_domains`, `test_clankerprof_rust_yaml_scalars_and_attributables_match_python` |
+| Signed compare gating: relative deltas divide by the baseline magnitude, zero baselines are unbounded in the delta's direction (null-serialized) | covered | `test_clankerprof_compare_gates_signed_rows`, `test_clankerprof_rust_round3_fixes_match_python` |
+| Duplicate top-level compare rows (slices; boundary/bucket/category/domain) are validation errors, killing order-dependent gate bypasses | covered | `test_clankerprof_compare_rejects_duplicate_rows`, `test_clankerprof_rust_round3_fixes_match_python` |
+| Non-finite attributable estimates (input or scaled) fail closed with the shared metric-naming message | covered | `test_clankerprof_attributable_overflow_fails_closed`, `test_clankerprof_rust_round3_fixes_match_python` |
+| Percentage arithmetic uses f64-operand division in both languages; floats re-emit exactly (serde_json float_roundtrip); pinned above 2^53 incl. `--by-slice` selection | covered | `test_clankerprof_rust_round3_fixes_match_python` |
+| Negative GC/uncollapsible pseudo-outputs render (zero stays omitted), keeping slice artifacts additive | covered | `test_clankerprof_pseudo_slices_render_negative_aggregates`, `test_clankerprof_rust_round3_fixes_match_python` |
+| String strictness on slice paths/names, target config patterns, and runtime-rule fields (shared messages, no str()-coercion or silent drops) | covered | `test_clankerprof_config_string_fields_fail_closed`, `test_clankerprof_rust_round3_fixes_match_python` |
+| Compare thresholds share the strict float grammar (`1_0`, ` 2 `, NaN, overflow all rejected identically) | covered | `test_clankerprof_compare_threshold_flags_use_strict_grammar`, `test_clankerprof_rust_round3_fixes_match_python` |
 
 ## Remaining confidence boundary
 

@@ -194,7 +194,7 @@ pub fn render_target_json(results: &TargetResults) -> Value {
                         "folded_from": stats.folded_from,
                         "leaf_functions": render_function_metrics(&stats.functions),
                         "name": category,
-                        "pct": if total == 0 { 0.0 } else { stats.cpu_time as f64 / total as f64 * 100.0 },
+                        "pct": if total == 0 { json!(0) } else { json!(stats.cpu_time as f64 / total as f64 * 100.0) },
                         "samples": stats.sample_count,
                         "semantic_callers": stats.semantic_callers.iter().map(|(leaf, metrics)| {
                             (leaf.clone(), json!({

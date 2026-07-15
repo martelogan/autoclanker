@@ -37,7 +37,7 @@ def render_target_json(
                 {
                     "name": category,
                     "time_ns": stats.cpu_time,
-                    "pct": (stats.cpu_time / total * 100) if total else 0,
+                    "pct": (_f64_ratio(stats.cpu_time, total) * 100) if total else 0,
                     "samples": stats.sample_count,
                     "leaf_functions": {
                         name: asdict(metrics)
@@ -110,6 +110,30 @@ def render_boundary_json(
     }
 
 
+def _f64_ratio(numerator: TimeNs, denominator: TimeNs) -> float:
+    """Aggregate ratio with both operands rounded to f64 BEFORE dividing.
+
+    Mirrors the Rust core's `as f64` operand casts operand-for-operand: this
+    is the shared arithmetic contract for percentage fields, so artifacts
+    stay byte-identical even when aggregates exceed 2**53 (below that the
+    result is identical to exact integer division). Adopted from Rust as the
+    shared contract in audit round 3 (R3-04).
+    """
+    return float(numerator) / float(denominator)
+
+
+def _finite_attributable(name: str, estimate: float) -> float:
+    """Attributable estimates — input or scaled — must stay JSON-representable.
+
+    Scaling a finite metric by a >100% bucket share can overflow to infinity;
+    failing closed here (instead of at serialization) names the offending
+    metric and keeps the message identical across both implementations.
+    """
+    if not math.isfinite(estimate):
+        raise ValueError(f"Attributable estimate for '{name}' is not finite.")
+    return estimate
+
+
 def _scale_attributables(
     attributables: Mapping[str, float],
     total: TimeNs,
@@ -118,7 +142,7 @@ def _scale_attributables(
     if not attributables or total <= 0:
         return {}
     return {
-        name: metric_value * (value / total)
+        name: _finite_attributable(name, metric_value * _f64_ratio(value, total))
         for name, metric_value in sorted(attributables.items())
     }
 
@@ -153,9 +177,14 @@ def _render_boundary(
     return {
         "name": boundary.name,
         "total_time_ns": total,
-        "pct_of_profile": (total / profile_total * 100 if profile_total else 0),
+        "pct_of_profile": (
+            _f64_ratio(total, profile_total) * 100 if profile_total else 0
+        ),
         "samples": boundary.sample_count,
-        "attributable_estimates": dict(sorted(boundary.attributables.items())),
+        "attributable_estimates": {
+            name: _finite_attributable(name, value)
+            for name, value in sorted(boundary.attributables.items())
+        },
         "buckets": buckets,
         "domains": [
             _render_domain(boundary, name, top=top)
@@ -185,7 +214,7 @@ def _render_boundary_bucket(
     return {
         "name": label,
         "time_ns": cpu_time,
-        "pct": (cpu_time / total * 100) if total else 0,
+        "pct": (_f64_ratio(cpu_time, total) * 100) if total else 0,
         "attributable_estimates": _scale_attributables(
             boundary.attributables,
             total,
@@ -205,7 +234,7 @@ def _render_boundary_category(
     return {
         "name": category,
         "time_ns": stats.cpu_time,
-        "pct": (stats.cpu_time / total * 100) if total else 0,
+        "pct": (_f64_ratio(stats.cpu_time, total) * 100) if total else 0,
         "attributable_estimates": _scale_attributables(
             boundary.attributables,
             total,
@@ -233,7 +262,7 @@ def _render_boundary_category(
                 "pair": pair,
                 "time_ns": metrics.cpu_time,
                 "samples": metrics.count,
-                "pct": (metrics.cpu_time / total * 100) if total else 0,
+                "pct": (_f64_ratio(metrics.cpu_time, total) * 100) if total else 0,
                 "attributable_estimates": _scale_attributables(
                     boundary.attributables,
                     total,
@@ -260,7 +289,7 @@ def _render_domain(
     return {
         "name": name,
         "time_ns": stats.cpu_time,
-        "pct": (stats.cpu_time / total * 100) if total else 0,
+        "pct": (_f64_ratio(stats.cpu_time, total) * 100) if total else 0,
         "attributable_estimates": _scale_attributables(
             boundary.attributables,
             total,
@@ -273,9 +302,13 @@ def _render_domain(
                 "time_ns": metrics.cpu_time,
                 "samples": metrics.count,
                 "pct_of_domain": (
-                    metrics.cpu_time / stats.cpu_time * 100 if stats.cpu_time else 0
+                    _f64_ratio(metrics.cpu_time, stats.cpu_time) * 100
+                    if stats.cpu_time
+                    else 0
                 ),
-                "pct_of_boundary": (metrics.cpu_time / total * 100 if total else 0),
+                "pct_of_boundary": (
+                    _f64_ratio(metrics.cpu_time, total) * 100 if total else 0
+                ),
                 "attributable_estimates": _scale_attributables(
                     boundary.attributables,
                     total,
@@ -294,9 +327,13 @@ def _render_domain(
                 "time_ns": file_stats.cpu_time,
                 "samples": file_stats.sample_count,
                 "pct_of_domain": (
-                    file_stats.cpu_time / stats.cpu_time * 100 if stats.cpu_time else 0
+                    _f64_ratio(file_stats.cpu_time, stats.cpu_time) * 100
+                    if stats.cpu_time
+                    else 0
                 ),
-                "pct_of_boundary": (file_stats.cpu_time / total * 100 if total else 0),
+                "pct_of_boundary": (
+                    _f64_ratio(file_stats.cpu_time, total) * 100 if total else 0
+                ),
                 "attributable_estimates": _scale_attributables(
                     boundary.attributables,
                     total,
@@ -316,7 +353,7 @@ def _render_domain(
                         "time_ns": metrics.cpu_time,
                         "samples": metrics.count,
                         "pct_of_file": (
-                            metrics.cpu_time / file_stats.cpu_time * 100
+                            _f64_ratio(metrics.cpu_time, file_stats.cpu_time) * 100
                             if file_stats.cpu_time
                             else 0
                         ),
@@ -334,7 +371,7 @@ def _render_domain(
                         "time_ns": metrics.cpu_time,
                         "samples": metrics.count,
                         "pct_of_file": (
-                            metrics.cpu_time / file_stats.cpu_time * 100
+                            _f64_ratio(metrics.cpu_time, file_stats.cpu_time) * 100
                             if file_stats.cpu_time
                             else 0
                         ),
@@ -516,7 +553,7 @@ def render_target_csv(
         for category, stats in sorted(
             categories.items(), key=lambda item: item[1].cpu_time, reverse=True
         ):
-            pct = (stats.cpu_time / total * 100) if total else 0
+            pct = (_f64_ratio(stats.cpu_time, total) * 100) if total else 0
             if simplified and pct < 0.1 and category != "Other":
                 continue
             top_functions = sorted(
@@ -525,7 +562,7 @@ def render_target_csv(
                 reverse=True,
             )[: 3 if simplified else 5]
             function_summary = "; ".join(
-                f"{name} ({metrics.cpu_time / total * 100:.1f}%)"
+                f"{name} ({_f64_ratio(metrics.cpu_time, total) * 100:.1f}%)"
                 for name, metrics in top_functions
             )
             caller_totals: dict[str, int] = {}
@@ -536,7 +573,7 @@ def render_target_csv(
                 caller_totals.items(), key=lambda item: item[1], reverse=True
             )[:3]
             callsites_summary = "; ".join(
-                f"{caller} ({time_ns / total * 100:.1f}%)"
+                f"{caller} ({_f64_ratio(time_ns, total) * 100:.1f}%)"
                 for caller, time_ns in top_callers
             )
             attributable_values = [
@@ -567,7 +604,7 @@ def render_target_csv(
                 reverse=True,
             )[:3]
             pair_columns = [
-                f"{pair} ({metrics.count} samples, {metrics.cpu_time / total * 100:.1f}%)"
+                f"{pair} ({metrics.count} samples, {_f64_ratio(metrics.cpu_time, total) * 100:.1f}%)"
                 for pair, metrics in top_pairs
             ]
             while len(pair_columns) < 3:
@@ -623,7 +660,7 @@ def _render_legacy_target_csv(
         for category, stats in sorted(
             categories.items(), key=lambda item: item[1].cpu_time, reverse=True
         ):
-            pct = (stats.cpu_time / total * 100) if total else 0
+            pct = (_f64_ratio(stats.cpu_time, total) * 100) if total else 0
             if simplified and pct < 0.1 and category != "Other":
                 continue
 
@@ -634,12 +671,12 @@ def _render_legacy_target_csv(
             )[: 3 if simplified else 5]
             if simplified:
                 function_summary = "; ".join(
-                    f"{name} ({metrics.cpu_time / total * 100:.1f}%)"
+                    f"{name} ({_f64_ratio(metrics.cpu_time, total) * 100:.1f}%)"
                     for name, metrics in top_functions
                 )
             else:
                 function_summary = "; ".join(
-                    f"{name} ({metrics.count} samples, {metrics.cpu_time / total * 100:.1f}%)"
+                    f"{name} ({metrics.count} samples, {_f64_ratio(metrics.cpu_time, total) * 100:.1f}%)"
                     for name, metrics in top_functions
                 )
 
@@ -652,7 +689,7 @@ def _render_legacy_target_csv(
             )[:3]
             callsite_separator = "; " if simplified else ", "
             callsites_summary = callsite_separator.join(
-                f"{caller} ({time_ns / total * 100:.1f}%)"
+                f"{caller} ({_f64_ratio(time_ns, total) * 100:.1f}%)"
                 for caller, time_ns in top_callers
             )
 
@@ -689,7 +726,7 @@ def _render_legacy_target_csv(
             pair_columns = [
                 _quote_legacy_csv(
                     f"{_legacy_pair_arrow(pair)} "
-                    f"({metrics.count} samples, {metrics.cpu_time / total * 100:.1f}%)"
+                    f"({metrics.count} samples, {_f64_ratio(metrics.cpu_time, total) * 100:.1f}%)"
                 )
                 for pair, metrics in top_pairs
             ]
@@ -748,7 +785,7 @@ def render_target_text(
         for category, stats in sorted(
             categories.items(), key=lambda item: item[1].cpu_time, reverse=True
         ):
-            pct = (stats.cpu_time / total * 100) if total else 0
+            pct = (_f64_ratio(stats.cpu_time, total) * 100) if total else 0
             lines.append(
                 f"{category:<35} {format_time(stats.cpu_time):<15} {pct:>6.2f}% "
                 f"{stats.sample_count:>9} {len(stats.functions):>14} {len(stats.files):>7}"
@@ -827,16 +864,23 @@ def _by_slice_limit(raw: str) -> int:
     return strict_int64(raw, message=_BY_SLICE_INT_MESSAGE)
 
 
-def _by_slice_threshold(raw: str) -> float:
+def strict_float(raw: str, *, message: str) -> float:
+    """Strict shared grammar with the Rust core (`f64::from_str` plus a
+    finiteness check): no surrounding whitespace, underscores, or non-ASCII
+    digits; overflowing literals parse to infinity and are rejected."""
     if raw != raw.strip() or "_" in raw or not raw.isascii():
-        raise ValueError(_BY_SLICE_THRESHOLD_MESSAGE)
+        raise ValueError(message)
     try:
-        threshold = float(raw)
+        value = float(raw)
     except ValueError as exc:
-        raise ValueError(_BY_SLICE_THRESHOLD_MESSAGE) from exc
-    if not math.isfinite(threshold):
-        raise ValueError(_BY_SLICE_THRESHOLD_MESSAGE)
-    return threshold
+        raise ValueError(message) from exc
+    if not math.isfinite(value):
+        raise ValueError(message)
+    return value
+
+
+def _by_slice_threshold(raw: str) -> float:
+    return strict_float(raw, message=_BY_SLICE_THRESHOLD_MESSAGE)
 
 
 def render_slice_json(
@@ -871,7 +915,7 @@ def render_slice_json(
             selected_slices = [
                 item
                 for item in selected_slices
-                if total and item.time_ns / total * 100 >= threshold
+                if total and _f64_ratio(item.time_ns, total) * 100 >= threshold
             ]
         else:
             selected_slices = selected_slices[: _by_slice_limit(by_slice)]
@@ -881,7 +925,7 @@ def render_slice_json(
         payload_item: dict[str, object] = {
             "name": slice_item.name,
             "time_ns": slice_item.time_ns,
-            "pct": (slice_item.time_ns / total * 100) if total else 0,
+            "pct": (_f64_ratio(slice_item.time_ns, total) * 100) if total else 0,
             "is_default": slice_item.is_default,
             "frames": [
                 {
@@ -889,7 +933,7 @@ def render_slice_json(
                     "filename": frame.filename,
                     "line": frame.line,
                     "time_ns": frame.time_ns,
-                    "pct": (frame.time_ns / total * 100) if total else 0,
+                    "pct": (_f64_ratio(frame.time_ns, total) * 100) if total else 0,
                 }
                 for frame in sorted(
                     slice_item.frames.values(),
@@ -901,7 +945,7 @@ def render_slice_json(
                 {
                     "name": name,
                     "time_ns": time_ns,
-                    "pct": (time_ns / total * 100) if total else 0,
+                    "pct": (_f64_ratio(time_ns, total) * 100) if total else 0,
                 }
                 for name, time_ns in sorted(
                     slice_item.unattributed_gems.items(),
@@ -913,7 +957,7 @@ def render_slice_json(
                 {
                     "name": name,
                     "time_ns": time_ns,
-                    "pct": (time_ns / total * 100) if total else 0,
+                    "pct": (_f64_ratio(time_ns, total) * 100) if total else 0,
                 }
                 for name, time_ns in sorted(
                     slice_item.unattributed_libraries.items(),
@@ -931,29 +975,35 @@ def render_slice_json(
         "summary": {
             "matching_time_ns": result.matching_time_ns,
             "total_time_ns": result.total_time_ns,
-            "matching_pct": (result.matching_time_ns / result.total_time_ns * 100)
+            "matching_pct": (
+                _f64_ratio(result.matching_time_ns, result.total_time_ns) * 100
+            )
             if result.total_time_ns
             else 0,
         },
         "slices": [slice_payload(item) for item in selected_slices],
     }
-    if result.gc_time_ns > 0:
+    # Zero-aggregate pseudo-outputs stay omitted; negative aggregates are
+    # signed data and must be reported (R2-07 rule, extended by R3-05).
+    if result.gc_time_ns != 0:
         payload["gc"] = {
             "time_ns": result.gc_time_ns,
-            "pct": (result.gc_time_ns / total * 100) if total else 0,
+            "pct": (_f64_ratio(result.gc_time_ns, total) * 100) if total else 0,
         }
     if result.uncollapsible is not None:
         payload["uncollapsible"] = {
             "name": result.uncollapsible.name,
             "time_ns": result.uncollapsible.time_ns,
-            "pct": (result.uncollapsible.time_ns / total * 100) if total else 0,
+            "pct": (_f64_ratio(result.uncollapsible.time_ns, total) * 100)
+            if total
+            else 0,
             "frames": [
                 {
                     "function": frame.function,
                     "filename": frame.filename,
                     "line": frame.line,
                     "time_ns": frame.time_ns,
-                    "pct": (frame.time_ns / total * 100) if total else 0,
+                    "pct": (_f64_ratio(frame.time_ns, total) * 100) if total else 0,
                 }
                 for frame in sorted(
                     result.uncollapsible.frames.values(),

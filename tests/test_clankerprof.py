@@ -5734,13 +5734,9 @@ def test_clankerprof_compare_focus_flags_take_one_comma_delimited_value(
     gated = ["compare", "--before", str(report_path), "--after", str(regressed)]
     assert clankerprof_main([*gated, "--focus-slices", "a"]) == 0
     capsys.readouterr()
-    assert (
-        clankerprof_main([*gated, "--focus-slices", "b", "--focus-slices", "a"]) == 0
-    )
+    assert clankerprof_main([*gated, "--focus-slices", "b", "--focus-slices", "a"]) == 0
     capsys.readouterr()
-    assert (
-        clankerprof_main([*gated, "--focus-slices", "a", "--focus-slices", "b"]) == 2
-    )
+    assert clankerprof_main([*gated, "--focus-slices", "a", "--focus-slices", "b"]) == 2
     last_wins = json.loads(capsys.readouterr().out)
     assert last_wins["has_regression"] is True
 
@@ -5757,9 +5753,7 @@ def test_clankerprof_yaml_inputs_reject_non_string_mapping_keys(
             parse_strict_yaml(f"{key}: x\n")
     # The YAML 1.1 timestamp resolver is removed to match serde_yaml: date-like
     # scalars stay plain strings in keys and values.
-    assert parse_strict_yaml("2026-01-01: 2026-01-02") == {
-        "2026-01-01": "2026-01-02"
-    }
+    assert parse_strict_yaml("2026-01-01: 2026-01-02") == {"2026-01-01": "2026-01-02"}
     scope_config = tmp_path / "badkey-scopes.yml"
     scope_config.write_text(
         'cost_kind:\n  true: "name:Leaf"\nscope:\n  - function: T\n',
@@ -5979,3 +5973,231 @@ def test_clankerprof_attributables_reject_non_numeric_values(
             ValueError, match="Boundary attributable p90 must be a number."
         ):
             _load_boundary_attributables({"p90": bad_metric})
+
+
+def _round3_slice_report(slices: list[dict[str, object]]) -> dict[str, object]:
+    return {
+        "tool": "clankerprof_slices",
+        "summary": {"total_time_ns": 100},
+        "slices": slices,
+    }
+
+
+def test_clankerprof_compare_gates_signed_rows() -> None:
+    # -10% -> -5% is a +50% relative increase against |before| and must gate;
+    # the old positive-only branch silently disabled gating for signed rows.
+    before = _round3_slice_report([{"name": "negative", "pct": -10.0, "frames": []}])
+    after = _round3_slice_report([{"name": "negative", "pct": -5.0, "frames": []}])
+    compared = compare_slice_json(
+        before, after, CompareOptions(threshold_abs=2.0, threshold_rel=15.0)
+    )
+    row = cast(dict[str, object], cast(list[object], compared["slices"])[0])
+    assert row["delta_rel"] == 50.0
+    assert row["status"] == "regression"
+    assert compared["has_regression"] is True
+
+    # A zero baseline yields an unbounded delta in the direction of the
+    # absolute change: new negative rows are unbounded improvements (null
+    # delta_rel), symmetric with the documented new-row regression rule.
+    improved = compare_slice_json(
+        _round3_slice_report([]),
+        _round3_slice_report([{"name": "credit", "pct": -5.0, "frames": []}]),
+        CompareOptions(threshold_abs=2.0, threshold_rel=15.0),
+    )
+    row = cast(dict[str, object], cast(list[object], improved["slices"])[0])
+    assert row["delta_rel"] is None
+    assert row["status"] == "improvement"
+    assert improved["has_regression"] is False
+
+
+def test_clankerprof_compare_rejects_duplicate_rows() -> None:
+    duplicated = _round3_slice_report(
+        [
+            {"name": "hot", "pct": 10.0, "frames": []},
+            {"name": "hot", "pct": 30.0, "frames": []},
+        ]
+    )
+    clean = _round3_slice_report([{"name": "hot", "pct": 10.0, "frames": []}])
+    with pytest.raises(
+        ValueError, match="Duplicate Slice row 'hot' in comparison input."
+    ):
+        compare_slice_json(duplicated, clean)
+    boundary_report: dict[str, object] = {
+        "tool": "clankerprof_boundaries",
+        "summary": {"total_time_ns": 100},
+        "boundaries": [
+            {"name": "web", "pct_of_profile": 10.0},
+            {"name": "web", "pct_of_profile": 30.0},
+        ],
+    }
+    with pytest.raises(
+        ValueError, match="Duplicate Boundary row 'web' in comparison input."
+    ):
+        compare_json(boundary_report, dict(boundary_report))
+
+
+def test_clankerprof_attributable_overflow_fails_closed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    scope_fn = builder.function("ScopeFn", "/srv/app/scope.py")
+    pos_leaf = builder.function("PosLeaf", "/srv/app/pos.py")
+    neg_leaf = builder.function("NegLeaf", "/srv/app/neg.py")
+    scope_loc = builder.location(scope_fn)
+    builder.sample((builder.location(pos_leaf), scope_loc), 110)
+    builder.sample((builder.location(neg_leaf), scope_loc), -10)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "scopes.yml"
+    config_path.write_text(
+        'cost_kind:\n  Pos: "name_eq:PosLeaf"\n  Neg: "name_eq:NegLeaf"\n'
+        "scope:\n  - function: ScopeFn\n"
+        '    rollup:\n      Positive: ["Pos"]\n      Negative: ["Neg"]\n'
+        "    attributables:\n      huge: 1.7e308\n",
+        encoding="utf-8",
+    )
+    # 1.7e308 is a finite, valid input; scaling by the 110% positive bucket
+    # overflows to infinity and must fail closed, naming the metric.
+    exit_code = clankerprof_main(
+        ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Attributable estimate for 'huge' is not finite."
+
+
+def test_clankerprof_pseudo_slices_render_negative_aggregates(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    marking = builder.function("(marking)", "")
+    builder.sample((builder.location(marking),), -10)
+    gc_path = tmp_path / "gc_neg.pb"
+    gc_path.write_bytes(builder.encode())
+    assert clankerprof_main(["slices", "--profile", str(gc_path)]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["gc"] == {"pct": 100.0, "time_ns": -10}
+
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.function("Leaf", "/srv/app/leaf.py")
+    builder.sample((builder.location(leaf),), -10)
+    collapse_path = tmp_path / "collapse_neg.pb"
+    collapse_path.write_bytes(builder.encode())
+    exit_code = clankerprof_main(
+        [
+            "slices",
+            "--profile",
+            str(collapse_path),
+            "--collapse",
+            "path:/srv/app/leaf.py",
+        ]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["uncollapsible"]["time_ns"] == -10
+
+
+def test_clankerprof_config_string_fields_fail_closed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.function("work", "/srv/123/file.py")
+    builder.sample((builder.location(leaf),), 7)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+
+    slices_path = tmp_path / "slices.yml"
+    slices_path.write_text(
+        "slices:\n  - name: numeric\n    paths: [123]\n"
+        "  - name: fallback\n    default: true\n",
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["slices", "--profile", str(profile_path), "--slices", str(slices_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Slice paths values must be strings."
+
+    numeric_config = tmp_path / "targets_numeric.json"
+    numeric_config.write_text('{"T": {"Numeric": 123}}', encoding="utf-8")
+    exit_code = clankerprof_main(
+        [
+            "targets",
+            "--profile",
+            str(profile_path),
+            "--config",
+            str(numeric_config),
+            "--format",
+            "json",
+        ]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Target config pattern for Numeric must be a string."
+
+    rules_path = tmp_path / "rules.yml"
+    rules_path.write_text(
+        "schema_version: clankerprof.runtime_rules.v1\nname: strictness\n"
+        "native_rules:\n  - category: Hit\n    name_contains:\n      - null\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "targets.json"
+    config_path.write_text('{"T": {"App": "path:/srv"}}', encoding="utf-8")
+    exit_code = clankerprof_main(
+        [
+            "targets",
+            "--profile",
+            str(profile_path),
+            "--config",
+            str(config_path),
+            "--runtime-rules",
+            str(rules_path),
+        ]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert (
+        envelope["error"] == "Runtime rule field name_contains entries must be strings."
+    )
+
+
+def test_clankerprof_compare_threshold_flags_use_strict_grammar(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    report_path = tmp_path / "report.json"
+    report_path.write_text(
+        json.dumps(_round3_slice_report([{"name": "hot", "pct": 10.0}])),
+        encoding="utf-8",
+    )
+    for spelling in ("1_0", " 2 ", "nan", "1e999"):
+        exit_code = clankerprof_main(
+            [
+                "compare",
+                "--before",
+                str(report_path),
+                "--after",
+                str(report_path),
+                "--threshold-abs",
+                spelling,
+            ]
+        )
+        assert exit_code == 2, spelling
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == "Compare thresholds must be finite numbers."
+    exit_code = clankerprof_main(
+        [
+            "compare",
+            "--before",
+            str(report_path),
+            "--after",
+            str(report_path),
+            "--threshold-abs",
+            "2.5",
+        ]
+    )
+    assert exit_code == 0

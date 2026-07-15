@@ -127,23 +127,30 @@ pub fn load_slices_file(path: impl AsRef<Path>) -> Result<Vec<SliceDefinition>, 
         let Some(mapping) = item.as_mapping() else {
             return Err("Each slice entry must be an object.".to_string());
         };
-        let Some(name) = mapping
-            .get(serde_yaml::Value::String("name".to_string()))
-            .and_then(serde_yaml::Value::as_str)
-        else {
+        // Validation order mirrors Python `_load_slices`: paths shape, name
+        // presence, name type, then paths entry types.
+        let raw_paths = match mapping.get(serde_yaml::Value::String("paths".to_string())) {
+            None | Some(serde_yaml::Value::Null) => None,
+            Some(value) => {
+                let Some(items) = value.as_sequence() else {
+                    return Err("Slice paths must be an array.".to_string());
+                };
+                Some(items)
+            }
+        };
+        let Some(raw_name) = mapping.get(serde_yaml::Value::String("name".to_string())) else {
             return Err("Each slice entry must include a name.".to_string());
         };
-        let paths = mapping
-            .get(serde_yaml::Value::String("paths".to_string()))
-            .and_then(serde_yaml::Value::as_sequence)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(serde_yaml::Value::as_str)
-                    .map(ToString::to_string)
-                    .collect()
-            })
-            .unwrap_or_default();
+        let Some(name) = raw_name.as_str() else {
+            return Err("Slice name must be a string.".to_string());
+        };
+        let mut paths: Vec<String> = Vec::new();
+        for item in raw_paths.into_iter().flatten() {
+            let Some(text) = item.as_str() else {
+                return Err("Slice paths values must be strings.".to_string());
+            };
+            paths.push(text.to_string());
+        }
         let is_default = mapping
             .get(serde_yaml::Value::String("default".to_string()))
             .and_then(serde_yaml::Value::as_bool)
@@ -268,7 +275,7 @@ pub fn analyze_slice_facts(
         total_time_ns: total_time,
         slices,
         gc_time_ns: gc_time,
-        uncollapsible: (uncollapsible_stats.time_ns > 0).then_some(uncollapsible_stats),
+        uncollapsible: (uncollapsible_stats.time_ns != 0).then_some(uncollapsible_stats),
     }
 }
 
@@ -347,11 +354,13 @@ fn add_optional_slice_payloads(
     let Some(object) = payload.as_object_mut() else {
         return payload;
     };
-    if result.gc_time_ns > 0 {
+    // Zero-aggregate pseudo-outputs stay omitted; negative aggregates are
+    // signed data and must be reported (R2-07 rule, extended by R3-05).
+    if result.gc_time_ns != 0 {
         object.insert(
             "gc".to_string(),
             json!({
-                "pct": if total == 0 { 0.0 } else { result.gc_time_ns as f64 / total as f64 * 100.0 },
+                "pct": if total == 0 { json!(0) } else { json!(result.gc_time_ns as f64 / total as f64 * 100.0) },
                 "time_ns": result.gc_time_ns,
             }),
         );
@@ -362,7 +371,7 @@ fn add_optional_slice_payloads(
             json!({
                 "frames": rendered_frames(uncollapsible, total, options.top),
                 "name": uncollapsible.name,
-                "pct": if total == 0 { 0.0 } else { uncollapsible.time_ns as f64 / total as f64 * 100.0 },
+                "pct": if total == 0 { json!(0) } else { json!(uncollapsible.time_ns as f64 / total as f64 * 100.0) },
                 "time_ns": uncollapsible.time_ns,
                 "unattributed_gems": [],
                 "unattributed_libraries": [],
@@ -378,7 +387,7 @@ fn slice_payload(slice: &SliceStats, total: TimeNs, options: &SliceAnalysisOptio
         "frames": rendered_frames(slice, total, options.top),
         "is_default": slice.is_default,
         "name": slice.name,
-        "pct": if total == 0 { 0.0 } else { slice.time_ns as f64 / total as f64 * 100.0 },
+        "pct": if total == 0 { json!(0) } else { json!(slice.time_ns as f64 / total as f64 * 100.0) },
         "time_ns": slice.time_ns,
         "unattributed_gems": rendered_libraries(slice, total, library_limit),
         "unattributed_libraries": rendered_libraries(slice, total, library_limit),
@@ -408,7 +417,7 @@ fn rendered_frames(slice: &SliceStats, total: TimeNs, top: Option<i64>) -> Vec<V
                 "filename": frame.filename,
                 "function": frame.function,
                 "line": frame.line,
-                "pct": if total == 0 { 0.0 } else { frame.time_ns as f64 / total as f64 * 100.0 },
+                "pct": if total == 0 { json!(0) } else { json!(frame.time_ns as f64 / total as f64 * 100.0) },
                 "time_ns": frame.time_ns,
             })
         })
@@ -424,7 +433,7 @@ fn rendered_libraries(slice: &SliceStats, total: TimeNs, limit: Option<i64>) -> 
         .map(|(name, time_ns)| {
             json!({
                 "name": name,
-                "pct": if total == 0 { 0.0 } else { *time_ns as f64 / total as f64 * 100.0 },
+                "pct": if total == 0 { json!(0) } else { json!(*time_ns as f64 / total as f64 * 100.0) },
                 "time_ns": time_ns,
             })
         })

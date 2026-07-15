@@ -49,6 +49,26 @@ fn validate_options(options: &CompareOptions) -> Result<(), String> {
     Ok(())
 }
 
+/// Relative delta against the magnitude of the baseline (mirrors Python
+/// `_delta_rel`). Sample values are signed, so rows can carry negative
+/// percentages; dividing by `before_pct.abs()` keeps the sign of the change
+/// meaningful (-10% -> -5% is a +50% increase and must be gateable). A zero
+/// baseline yields an unbounded delta in the direction of the absolute
+/// change, serialized as null by `finite_json_number`. Positive baselines
+/// are bit-identical to the plain `delta/before` form.
+fn delta_rel(before_pct: f64, after_pct: f64) -> f64 {
+    let delta_abs = after_pct - before_pct;
+    if before_pct != 0.0 {
+        delta_abs / before_pct.abs() * 100.0
+    } else if delta_abs > 0.0 {
+        f64::INFINITY
+    } else if delta_abs < 0.0 {
+        f64::NEG_INFINITY
+    } else {
+        0.0
+    }
+}
+
 pub fn compare_slice_json(
     before: &Value,
     after: &Value,
@@ -78,13 +98,7 @@ pub fn compare_slice_json(
             .transpose()?
             .unwrap_or(0.0);
         let delta_abs = after_pct - before_pct;
-        let delta_rel = if before_pct > 0.0 {
-            delta_abs / before_pct * 100.0
-        } else if after_pct > 0.0 {
-            f64::INFINITY
-        } else {
-            0.0
-        };
+        let delta_rel = delta_rel(before_pct, after_pct);
         let in_focus = options.focus_slices.is_empty() || options.focus_slices.contains(&name);
         let is_regression =
             in_focus && delta_abs > options.threshold_abs && delta_rel > options.threshold_rel;
@@ -181,7 +195,12 @@ fn slice_map(payload: &Value) -> Result<BTreeMap<String, Value>, String> {
         if !item.is_object() {
             return Err("Slice rows must be objects.".to_string());
         }
-        result.insert(require_name(item, "name", "Slice")?, item.clone());
+        let name = require_name(item, "name", "Slice")?;
+        if result.insert(name.clone(), item.clone()).is_some() {
+            // Projections never emit duplicate top-level names; a duplicate is
+            // malformed input and last-wins would make the gate order-dependent.
+            return Err(format!("Duplicate Slice row '{name}' in comparison input."));
+        }
     }
     Ok(result)
 }
@@ -283,7 +302,26 @@ fn finite_json_number(value: f64) -> Value {
     }
 }
 
-fn boundary_rows(payload: &Value) -> Result<BTreeMap<(String, String, String), f64>, String> {
+type BoundaryRowKey = (String, String, String);
+
+fn insert_row(
+    rows: &mut BTreeMap<BoundaryRowKey, f64>,
+    key: BoundaryRowKey,
+    value: f64,
+    context: &str,
+) -> Result<(), String> {
+    let name = key.2.clone();
+    if rows.insert(key, value).is_some() {
+        // Projections never emit duplicate row names; a duplicate is malformed
+        // input and last-wins would make the gate order-dependent.
+        return Err(format!(
+            "Duplicate {context} row '{name}' in comparison input."
+        ));
+    }
+    Ok(())
+}
+
+fn boundary_rows(payload: &Value) -> Result<BTreeMap<BoundaryRowKey, f64>, String> {
     let mut rows = BTreeMap::new();
     let boundaries = payload
         .get("boundaries")
@@ -294,34 +332,42 @@ fn boundary_rows(payload: &Value) -> Result<BTreeMap<(String, String, String), f
             return Err("Boundary rows must be objects.".to_string());
         }
         let boundary_name = require_name(boundary, "name", "Boundary")?;
-        rows.insert(
+        insert_row(
+            &mut rows,
             (
                 "boundary".to_string(),
                 boundary_name.clone(),
                 boundary_name.clone(),
             ),
             require_number(boundary, "pct_of_profile", "Boundary")?,
-        );
+            "Boundary",
+        )?;
         for bucket in optional_rows(boundary, "buckets", "Boundary")? {
             let bucket_name = require_name(bucket, "name", "Bucket")?;
-            rows.insert(
+            insert_row(
+                &mut rows,
                 ("bucket".to_string(), boundary_name.clone(), bucket_name),
                 require_number(bucket, "pct", "Bucket")?,
-            );
+                "Bucket",
+            )?;
             for category in optional_rows(bucket, "categories", "Bucket")? {
                 let category_name = require_name(category, "name", "Category")?;
-                rows.insert(
+                insert_row(
+                    &mut rows,
                     ("category".to_string(), boundary_name.clone(), category_name),
                     require_number(category, "pct", "Category")?,
-                );
+                    "Category",
+                )?;
             }
         }
         for domain in optional_rows(boundary, "domains", "Boundary")? {
             let domain_name = require_name(domain, "name", "Domain")?;
-            rows.insert(
+            insert_row(
+                &mut rows,
                 ("domain".to_string(), boundary_name.clone(), domain_name),
                 require_number(domain, "pct", "Domain")?,
-            );
+                "Domain",
+            )?;
         }
     }
     Ok(rows)
@@ -344,13 +390,7 @@ pub fn compare_boundary_json(
         let before_pct = before_rows.get(key).copied().unwrap_or(0.0);
         let after_pct = after_rows.get(key).copied().unwrap_or(0.0);
         let delta_abs = after_pct - before_pct;
-        let delta_rel = if before_pct > 0.0 {
-            delta_abs / before_pct * 100.0
-        } else if after_pct > 0.0 {
-            f64::INFINITY
-        } else {
-            0.0
-        };
+        let delta_rel = delta_rel(before_pct, after_pct);
         let in_focus =
             options.focus_boundaries.is_empty() || options.focus_boundaries.contains(boundary);
         let is_regression =
@@ -566,6 +606,47 @@ mod tests {
             error,
             "Report summary field 'total_time_ns' must be an integer."
         );
+    }
+
+    #[test]
+    fn signed_rows_gate_on_relative_increase() {
+        let before = slice_report(json!([{"name": "negative", "pct": -10.0, "frames": []}]));
+        let after = slice_report(json!([{"name": "negative", "pct": -5.0, "frames": []}]));
+        let compared = compare_slice_json(&before, &after, &CompareOptions::default())
+            .expect("signed rows compare");
+        assert_eq!(compared["slices"][0]["delta_rel"], json!(50.0));
+        assert_eq!(compared["slices"][0]["status"], json!("regression"));
+        assert_eq!(compared["has_regression"], json!(true));
+        // Zero baseline: unbounded improvement serializes delta_rel as null.
+        let empty = slice_report(json!([]));
+        let credit = slice_report(json!([{"name": "credit", "pct": -5.0, "frames": []}]));
+        let improved = compare_slice_json(&empty, &credit, &CompareOptions::default())
+            .expect("new negative rows compare");
+        assert_eq!(improved["slices"][0]["delta_rel"], Value::Null);
+        assert_eq!(improved["slices"][0]["status"], json!("improvement"));
+    }
+
+    #[test]
+    fn duplicate_rows_are_validation_errors() {
+        let clean = slice_report(json!([{"name": "hot", "pct": 10.0, "frames": []}]));
+        let duplicated = slice_report(json!([
+            {"name": "hot", "pct": 30.0, "frames": []},
+            {"name": "hot", "pct": 10.0, "frames": []},
+        ]));
+        let error = compare_slice_json(&clean, &duplicated, &CompareOptions::default())
+            .expect_err("duplicate slice rows must be rejected");
+        assert_eq!(error, "Duplicate Slice row 'hot' in comparison input.");
+        let boundary = json!({
+            "tool": "clankerprof_boundaries",
+            "summary": {"total_time_ns": 100},
+            "boundaries": [
+                {"name": "web", "pct_of_profile": 10.0},
+                {"name": "web", "pct_of_profile": 30.0},
+            ],
+        });
+        let error = compare_boundary_json(&boundary, &boundary, &CompareOptions::default())
+            .expect_err("duplicate boundary rows must be rejected");
+        assert_eq!(error, "Duplicate Boundary row 'web' in comparison input.");
     }
 
     #[test]

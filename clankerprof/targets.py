@@ -42,9 +42,16 @@ def load_json_mapping(path: str | Path) -> dict[str, dict[str, str]]:
         if not isinstance(categories, dict):
             raise ValueError(f"Target config for {parent} must be an object.")
         raw_categories = cast(dict[object, object], categories)
-        result[str(parent)] = {
-            str(category): str(pattern) for category, pattern in raw_categories.items()
-        }
+        parent_map: dict[str, str] = {}
+        for category, pattern in raw_categories.items():
+            if not isinstance(pattern, str):
+                # Adopt the Rust core's existing message: str() coercion would
+                # spell non-string patterns differently across languages.
+                raise ValueError(
+                    f"Target config pattern for {category} must be a string."
+                )
+            parent_map[str(category)] = pattern
+        result[str(parent)] = parent_map
     return result
 
 

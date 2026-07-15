@@ -259,11 +259,13 @@ struct CompareArgs {
     #[arg(long)]
     after: PathBuf,
     /// Absolute percentage-point regression threshold.
-    #[arg(long, default_value_t = 2.0)]
-    threshold_abs: f64,
+    // String, not f64: the strict shared grammar (f64::from_str + finiteness,
+    // mirrored by Python's strict_float) owns the error message.
+    #[arg(long, default_value = "2", allow_negative_numbers = true)]
+    threshold_abs: String,
     /// Relative percentage regression threshold.
-    #[arg(long, default_value_t = 15.0)]
-    threshold_rel: f64,
+    #[arg(long, default_value = "15", allow_negative_numbers = true)]
+    threshold_rel: String,
     /// Comma-delimited slice names to gate on.
     #[arg(long, overrides_with = "focus_slices")]
     focus_slices: Option<String>,
@@ -418,6 +420,7 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
         );
     }
     clankerprof_core::targets::take_pattern_error()?;
+    clankerprof_core::scopes::take_attributable_error()?;
     let rendered = clankerprof_core::pyjson::dumps_pretty(&serde_json::Value::Object(payload));
     emit(&rendered, args.output.as_ref(), "clankerprof_report")
 }
@@ -462,6 +465,7 @@ fn run_scopes(args: ScopesArgs) -> Result<(), String> {
         int64_flag(args.top.as_deref(), TOP_INT_MESSAGE)?,
     );
     clankerprof_core::targets::take_pattern_error()?;
+    clankerprof_core::scopes::take_attributable_error()?;
     let rendered = clankerprof_core::pyjson::dumps_pretty(&payload);
     emit(&rendered, args.output.as_ref(), "clankerprof_boundaries")
 }
@@ -644,6 +648,7 @@ fn run_targets(args: TargetsArgs) -> Result<(), String> {
     let results = analyze_target_facts_with_options(&facts, &config, &options);
     // Fail closed on invalid user patterns before writing any artifact.
     clankerprof_core::targets::take_pattern_error()?;
+    clankerprof_core::scopes::take_attributable_error()?;
     if let Some(semantic_csv_path) = &args.semantic_callers_csv {
         if !args.track_semantic_callers {
             return Err("--semantic-callers-csv requires --track-semantic-callers.".to_string());
@@ -658,6 +663,7 @@ fn run_targets(args: TargetsArgs) -> Result<(), String> {
     if args.format == "json" {
         let payload = render_target_json(&results);
         clankerprof_core::targets::take_pattern_error()?;
+        clankerprof_core::scopes::take_attributable_error()?;
         let rendered = clankerprof_core::pyjson::dumps_pretty(&payload);
         return emit(&rendered, args.output.as_ref(), "clankerprof_targets");
     }
@@ -683,6 +689,7 @@ fn run_targets(args: TargetsArgs) -> Result<(), String> {
         )
     };
     clankerprof_core::targets::take_pattern_error()?;
+    clankerprof_core::scopes::take_attributable_error()?;
     emit(&rendered, args.output.as_ref(), "clankerprof_targets")
 }
 
@@ -835,6 +842,7 @@ fn run_slices(args: SlicesArgs) -> Result<(), String> {
     validate_slice_options(&options, args.allow_virtual_attribute_slices)?;
     let payload = render_slice_json(&analyze_slice_facts(&facts, &options), &options)?;
     clankerprof_core::targets::take_pattern_error()?;
+    clankerprof_core::scopes::take_attributable_error()?;
     let rendered = clankerprof_core::pyjson::dumps_pretty(&payload);
     emit(&rendered, args.output.as_ref(), "clankerprof_slices")
 }
@@ -1212,10 +1220,19 @@ fn validate_slice_options(
     Ok(())
 }
 
+fn parse_compare_threshold(raw: &str) -> Result<f64, String> {
+    let message = "Compare thresholds must be finite numbers.";
+    let value: f64 = raw.parse().map_err(|_| message.to_string())?;
+    if !value.is_finite() {
+        return Err(message.to_string());
+    }
+    Ok(value)
+}
+
 fn run_compare(args: CompareArgs) -> Result<i32, String> {
     let options = CompareOptions {
-        threshold_abs: args.threshold_abs,
-        threshold_rel: args.threshold_rel,
+        threshold_abs: parse_compare_threshold(&args.threshold_abs)?,
+        threshold_rel: parse_compare_threshold(&args.threshold_rel)?,
         focus_slices: split_focus(args.focus_slices.as_deref()),
         focus_boundaries: split_focus(args.focus_boundaries.as_deref()),
     };

@@ -15,8 +15,45 @@ use crate::targets::{
 };
 use indexmap::IndexMap;
 use serde_json::{json, Map, Value};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+
+thread_local! {
+    // Python raises on the first non-finite attributable estimate it builds;
+    // the render helpers here return plain `Value`s, so instead of threading
+    // Results through every nested `json!` the first offender is parked in
+    // this slot and the CLI fails closed (exit 2) before emitting or writing
+    // any artifact — mirroring the pattern-error slot in `targets.rs`.
+    static ATTRIBUTABLE_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+fn record_attributable_error(message: String) {
+    ATTRIBUTABLE_ERROR.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(message);
+        }
+    });
+}
+
+/// Fail closed on any non-finite attributable estimate recorded during
+/// rendering. Must be checked before emitting or writing any artifact.
+pub fn take_attributable_error() -> Result<(), String> {
+    ATTRIBUTABLE_ERROR
+        .with(|slot| slot.borrow_mut().take())
+        .map_or(Ok(()), Err)
+}
+
+/// Attributable estimates — input or scaled — must stay JSON-representable;
+/// a non-finite value records a fail-closed error naming the metric (the
+/// placeholder null below is never emitted because the runner errors first).
+fn finite_attributable(name: &str, estimate: f64) -> Value {
+    if !estimate.is_finite() {
+        record_attributable_error(format!("Attributable estimate for '{name}' is not finite."));
+    }
+    json!(estimate)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FramePredicate {
@@ -585,17 +622,19 @@ fn scale_attributables(
     for (name, metric_value) in attributables {
         scaled.insert(
             name.clone(),
-            json!(metric_value * (value as f64 / total as f64)),
+            finite_attributable(name, metric_value * (value as f64 / total as f64)),
         );
     }
     Value::Object(scaled)
 }
 
-fn pct(value: TimeNs, total: TimeNs) -> f64 {
+/// Zero-total percentages serialize as integer `0`, matching Python's
+/// `... if total else 0` arms byte-for-byte.
+fn pct(value: TimeNs, total: TimeNs) -> Value {
     if total == 0 {
-        0.0
+        json!(0)
     } else {
-        value as f64 / total as f64 * 100.0
+        json!(value as f64 / total as f64 * 100.0)
     }
 }
 
@@ -674,7 +713,7 @@ fn render_boundary(boundary: &BoundaryStats, profile_total: TimeNs, top: Option<
     let attributable_estimates: Map<String, Value> = boundary
         .attributables
         .iter()
-        .map(|(name, value)| (name.clone(), json!(value)))
+        .map(|(name, value)| (name.clone(), finite_attributable(name, *value)))
         .collect();
 
     json!({

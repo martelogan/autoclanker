@@ -60,6 +60,7 @@ from clankerprof.render import (
     render_target_csv,
     render_target_json,
     render_target_text,
+    strict_float,
     strict_int64,
 )
 from clankerprof.stats import CategoryStats
@@ -485,11 +486,17 @@ def _load_slices(path: str | None) -> tuple[SliceDefinition, ...]:
             raise ValueError("Slice paths must be an array.")
         if "name" not in raw_item:
             raise ValueError("Each slice entry must include a name.")
+        slice_name = raw_item["name"]
+        if not isinstance(slice_name, str):
+            raise ValueError("Slice name must be a string.")
+        for path_pattern in cast(list[object], paths):
+            if not isinstance(path_pattern, str):
+                raise ValueError("Slice paths values must be strings.")
         metadata = _slice_metadata(raw_item)
         slices.append(
             SliceDefinition(
-                name=str(raw_item["name"]),
-                path_patterns=tuple(str(path) for path in cast(list[object], paths)),
+                name=slice_name,
+                path_patterns=tuple(cast(list[str], paths)),
                 is_default=bool(raw_item.get("default", False)),
                 metadata=metadata,
             )
@@ -853,9 +860,7 @@ def _require_string_selector_entries(
     # spellings, so both implementations reject them here.
     if not isinstance(raw_predicates, list):
         return
-    if not all(
-        isinstance(entry, str) for entry in cast(list[object], raw_predicates)
-    ):
+    if not all(isinstance(entry, str) for entry in cast(list[object], raw_predicates)):
         raise ValueError(f"{section_name} selector values must be strings.")
 
 
@@ -1238,6 +1243,15 @@ def run_boundaries(args: argparse.Namespace) -> dict[str, Any]:
     return payload
 
 
+_COMPARE_THRESHOLD_MESSAGE = "Compare thresholds must be finite numbers."
+
+
+def _compare_threshold(raw: object) -> float:
+    if isinstance(raw, str):
+        return strict_float(raw, message=_COMPARE_THRESHOLD_MESSAGE)
+    return float(cast(float, raw))
+
+
 def run_compare(args: argparse.Namespace) -> dict[str, Any]:
     before = parse_strict_json(Path(args.before).read_text(encoding="utf-8"))
     after = parse_strict_json(Path(args.after).read_text(encoding="utf-8"))
@@ -1247,8 +1261,8 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
         cast(dict[str, Any], before),
         cast(dict[str, Any], after),
         CompareOptions(
-            threshold_abs=float(args.threshold_abs),
-            threshold_rel=float(args.threshold_rel),
+            threshold_abs=_compare_threshold(args.threshold_abs),
+            threshold_rel=_compare_threshold(args.threshold_rel),
             focus_slices=_focus_slices(args.focus_slices),
             focus_boundaries=_focus_slices(args.focus_boundaries),
         ),
@@ -1495,8 +1509,10 @@ def register_commands(subparsers: Any) -> None:
     )
     compare.add_argument("--before", required=True)
     compare.add_argument("--after", required=True)
-    compare.add_argument("--threshold-abs", type=float, default=2.0)
-    compare.add_argument("--threshold-rel", type=float, default=15.0)
+    # Strings, not type=float: the strict shared grammar (Rust f64::from_str)
+    # rejects spellings like '1_0' and ' 2 ' that bare float() accepts.
+    compare.add_argument("--threshold-abs", default=2.0)
+    compare.add_argument("--threshold-rel", default=15.0)
     compare.add_argument("--focus-slices")
     compare.add_argument(
         "--focus-boundaries",
