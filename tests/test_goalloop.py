@@ -692,3 +692,29 @@ def test_umbrella_rejects_global_output_flag_for_goalloop(
     )
     assert "shell redirection" in capsys.readouterr().err
     assert not (tmp_path / "copy.json").exists()
+
+
+def test_goalloop_init_defaults_to_ten_audit_rounds(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # No --max-audit-rounds: audits run as long as needed for convergence,
+    # with the cap as a runaway backstop (default 10, not 3).
+    assert (
+        goalloop_main(
+            [
+                "init",
+                "--name",
+                "demo",
+                "--root",
+                str(tmp_path),
+                "--gate",
+                "true",
+                "--auditor",
+                "codex exec",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    assert goalloop_main(["audit", "status", "--root", str(tmp_path)]) == 0
+    assert _last_json(capsys)["max_rounds"] == 10
