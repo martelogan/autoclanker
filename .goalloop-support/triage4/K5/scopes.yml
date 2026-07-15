@@ -1,0 +1,8 @@
+cost_kind:
+  Work: "name:Leaf"
+scope:
+  - function: T
+    rollup:
+      All: ["Work"]
+    attributables:
+      p90: 100.0

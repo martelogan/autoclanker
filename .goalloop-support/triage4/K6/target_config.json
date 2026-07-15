@@ -1,0 +1,6 @@
+{
+  "T": {
+    "Positive": "app/pos/**",
+    "Negative": "app/neg/**"
+  }
+}

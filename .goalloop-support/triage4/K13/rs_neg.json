@@ -1,0 +1,27 @@
+{
+  "after_total_ns": 7,
+  "before_total_ns": 7,
+  "has_regression": true,
+  "slices": [
+    {
+      "after_pct": 100.0,
+      "before_pct": 100.0,
+      "delta_abs": 0.0,
+      "delta_rel": 0.0,
+      "frame_deltas": [
+        {
+          "after_pct": 100.0,
+          "before_pct": 100.0,
+          "delta_abs": 0.0,
+          "function": "Leaf",
+          "slice": "app"
+        }
+      ],
+      "name": "app",
+      "status": "regression"
+    }
+  ],
+  "tool": "clankerprof_compare",
+  "top_improvements": [],
+  "top_regressions": []
+}

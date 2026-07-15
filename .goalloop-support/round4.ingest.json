@@ -1,0 +1,72 @@
+[
+ {
+  "title": "Python compare accepts null nested rows and fails open",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Python _optional_rows conflates present null with absent for frames/buckets/categories/domains -> real regression becomes 'improvement' exit 0; Rust already rejects. Python-only fix. Evidence: .goalloop-support/round4.triage.json#K1"
+ },
+ {
+  "title": "Duplicate JSON member names are an order-dependent compare-gate bypass",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Duplicate JSON member names last-wins in both loaders -> same multiset reordered flips the gate (object-level cousin of R3-02). Fix: duplicate-member rejection in parse_strict_json + custom serde visitor. #K2"
+ },
+ {
+  "title": "Zero-total target renderers crash or emit infinities",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Zero-total signed targets: Python ZeroDivisionError traceback exit 1, Rust inf%/NaN% exit 0, text TOTAL says 100%. Fix: define zero-total pct as 0.0, both languages. #K3"
+ },
+ {
+  "title": "Target attributables bypass the finite-estimate contract",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Target attributables lack the R3 finite guard: finite 1.7e308 scaled by 110% share emits literal inf exit 0 both; 1e309 diverges load-time. Fix: finite checks at load + scaling, shared envelope. #K4"
+ },
+ {
+  "title": "Negative scope totals erase proportional attributable estimates",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. total <= 0 guard erases proportional estimates for valid negative boundary totals (6 call sites per language). Fix: signed division, guard only total == 0. #K5"
+ },
+ {
+  "title": "simple-csv silently drops negative target categories",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. simple-csv filter pct < 0.1 silently drops ALL negative categories. Fix: magnitude-aware abs(pct) < 0.1, both languages. #K6"
+ },
+ {
+  "title": "Meaningful application callers are ignored beyond an undocumented nine-frame window",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Undocumented 9-frame window: app caller at depth 10 loses to first native frame, contradicting documented field meaning. Fix: scan whole stack for eligible app caller, keep native fallback, document. #K7"
+ },
+ {
+  "title": "Negated descendant filters do not negate descendant existence",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Negated descendant filters compute any(not match) instead of not any(match) -> forbidden-descendant stacks pass whenever any other frame exists. Boolean-logic bug, both languages. #K8"
+ },
+ {
+  "title": "Rust misparses valid quoted core-class CSV",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Rust splits core-class CSV on commas keeping quotes; Python csv.reader unquotes -> quoted 'Array' changes categorization. Fix: proper CSV field parse in Rust. #K9"
+ },
+ {
+  "title": "Compare frame aggregation can overflow to null only in Rust",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Duplicate-frame pct summation can overflow: Python contracted-but-raw message exit 2, Rust nulls then ranks null-as-zero exit 0 corrupt report. Fix: shared finite check + typed message. #K10"
+ },
+ {
+  "title": "Empty by-slice values bypass Python validation",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Python truthiness guard lets --by-slice '' silently disable filtering; Rust rejects. Fix: validate every present value. #K11"
+ },
+ {
+  "title": "Non-finite slice metadata silently becomes null in Rust",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Non-finite YAML slice metadata: Python exit 2 raw json message, Rust silently null. Fix: shared rejection with typed message. #K12"
+ },
+ {
+  "title": "Negative compare thresholds classify identical reports as regressions",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Negative thresholds make identical reports 'regress' (0 > -1) in both. Contract hole. Fix: thresholds must be finite AND non-negative. #K13"
+ },
+ {
+  "title": "Facts-v2 accepts a present summary with the wrong type",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Non-object summary ([] or string) treated as absent in both importers despite spec distinguishing present-vs-absent; a test codifies the weakness. Fix: present summary must be an object. #K14"
+ }
+]

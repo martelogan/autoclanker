@@ -1,0 +1,6 @@
+slices:
+  - name: app
+    paths:
+      - /srv/app
+    metadata:
+      score: .nan

@@ -1,0 +1,27 @@
+{
+  "parents": {
+    "T": {
+      "categories": [
+        {
+          "files": [
+            "<cfunc>"
+          ],
+          "folded_from": {},
+          "leaf_functions": {
+            "Array#map": {
+              "count": 1,
+              "cpu_time": 7
+            }
+          },
+          "name": "Ruby Core (Native)",
+          "pct": 100.0,
+          "samples": 1,
+          "semantic_callers": {},
+          "time_ns": 7
+        }
+      ],
+      "total_time_ns": 7
+    }
+  },
+  "tool": "clankerprof_targets"
+}

@@ -1,0 +1,8 @@
+{
+  "tool": "clankerprof_slices",
+  "summary": {"total_time_ns": 1000},
+  "slices": [{"name": "A", "pct": 10.0, "frames": [
+    {"function": "f", "pct": 1e308},
+    {"function": "f", "pct": 1e308}
+  ]}]
+}

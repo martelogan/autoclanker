@@ -1,0 +1,11 @@
+{
+  "tool": "clankerprof_boundaries",
+  "summary": {"total_time_ns": 1000000000},
+  "boundaries": [
+    {
+      "name": "B",
+      "pct_of_profile": 40.0,
+      "buckets": [{"name": "X", "pct": 30.0}]
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "after_total_ns": 1000000000,
+  "before_total_ns": 1000000000,
+  "has_regression": false,
+  "slices": [
+    {
+      "after_pct": 10.0,
+      "before_pct": 10.0,
+      "delta_abs": 0.0,
+      "delta_rel": 0.0,
+      "frame_deltas": [
+        {
+          "after_pct": 0.0,
+          "before_pct": 10.0,
+          "delta_abs": -10.0,
+          "function": "f",
+          "slice": "S"
+        }
+      ],
+      "name": "S",
+      "status": "stable"
+    }
+  ],
+  "tool": "clankerprof_compare",
+  "top_improvements": [
+    {
+      "after_pct": 0.0,
+      "before_pct": 10.0,
+      "delta_abs": -10.0,
+      "function": "f",
+      "slice": "S"
+    }
+  ],
+  "top_regressions": []
+}

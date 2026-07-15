@@ -1,0 +1,1 @@
+{"tool":"clankerprof_slices","summary":{"total_time_ns":1000000000},"slices":[{"name":"S","pct":10.0,"frames":[{"function":"f","pct":10.0}]}]}
