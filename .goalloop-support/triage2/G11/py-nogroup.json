@@ -1,0 +1,39 @@
+{
+  "slices": [
+    {
+      "frames": [
+        {
+          "filename": "/gems/bar/file.rb",
+          "function": "Work",
+          "line": 1,
+          "pct": 100.0,
+          "time_ns": 7
+        }
+      ],
+      "is_default": true,
+      "name": "(all)",
+      "pct": 100.0,
+      "time_ns": 7,
+      "unattributed_gems": [
+        {
+          "name": "gems/bar",
+          "pct": 100.0,
+          "time_ns": 7
+        }
+      ],
+      "unattributed_libraries": [
+        {
+          "name": "gems/bar",
+          "pct": 100.0,
+          "time_ns": 7
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "matching_pct": 100.0,
+    "matching_time_ns": 7,
+    "total_time_ns": 7
+  },
+  "tool": "clankerprof_slices"
+}

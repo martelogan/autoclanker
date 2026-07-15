@@ -1,0 +1,6 @@
+schema_version: clankerprof.runtime_rules.v1
+name: lookahead-pack
+semantic_rules:
+  - category: Lookahead
+    name_patterns:
+      - "^(?=.*Leaf)Leaf$"

@@ -1,0 +1,5 @@
+cost_kind:
+  ZFirst: "path:/srv/app"
+  ASecond: "path:/srv/app"
+scope:
+  - function: T

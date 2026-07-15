@@ -1,0 +1,44 @@
+{
+  "parents": {
+    "T": {
+      "categories": [
+        {
+          "files": [
+            "/srv/b/leaf.py"
+          ],
+          "folded_from": {},
+          "leaf_functions": {
+            "LeafB": {
+              "count": 1,
+              "cpu_time": 99999999
+            }
+          },
+          "name": "B",
+          "pct": 99.99999899999999,
+          "samples": 1,
+          "semantic_callers": {},
+          "time_ns": 99999999
+        },
+        {
+          "files": [
+            "/srv/a/leaf.py"
+          ],
+          "folded_from": {},
+          "leaf_functions": {
+            "LeafA": {
+              "count": 1,
+              "cpu_time": 1
+            }
+          },
+          "name": "A",
+          "pct": 1e-06,
+          "samples": 1,
+          "semantic_callers": {},
+          "time_ns": 1
+        }
+      ],
+      "total_time_ns": 100000000
+    }
+  },
+  "tool": "clankerprof_targets"
+}

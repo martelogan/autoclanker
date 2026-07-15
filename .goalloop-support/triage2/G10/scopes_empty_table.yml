@@ -1,0 +1,4 @@
+cost_kind:
+  Empty: {}
+scope:
+  - function: T

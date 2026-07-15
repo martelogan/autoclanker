@@ -1,0 +1,54 @@
+{
+  "boundaries": [
+    {
+      "attributable_estimates": {},
+      "buckets": [
+        {
+          "attributable_estimates": {},
+          "categories": [
+            {
+              "attributable_estimates": {},
+              "caller_leaf_pairs": [
+                {
+                  "attributable_estimates": {},
+                  "pair": "Leaf -> Leaf",
+                  "pct": 100.0,
+                  "samples": 2,
+                  "time_ns": 18446744073709551614
+                }
+              ],
+              "files": [
+                "/srv/app/leaf.py"
+              ],
+              "folded_from": {},
+              "leaf_functions": {
+                "Leaf": {
+                  "count": 2,
+                  "cpu_time": 18446744073709551614
+                }
+              },
+              "name": "AppWork",
+              "pct": 100.0,
+              "samples": 2,
+              "time_ns": 18446744073709551614
+            }
+          ],
+          "name": "Other",
+          "pct": 100.0,
+          "samples": 2,
+          "time_ns": 18446744073709551614
+        }
+      ],
+      "domains": [],
+      "name": "T",
+      "pct_of_profile": 100.0,
+      "samples": 2,
+      "total_time_ns": 18446744073709551614
+    }
+  ],
+  "summary": {
+    "total_time_ns": 18446744073709551614,
+    "unique_frame_count": 2
+  },
+  "tool": "clankerprof_boundaries"
+}

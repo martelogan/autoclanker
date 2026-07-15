@@ -1,0 +1,1 @@
+{"error":"error: unexpected argument '--no-enhanced' found\n\nUsage: clankerprof-rs scopes --config <CONFIG> --facts <FACTS>\n\nFor more information, try '--help'.","ok":false}

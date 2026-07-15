@@ -1,0 +1,26 @@
+Traceback (most recent call last):
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/.venv/bin/clankerprof", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1493, in main
+    payload = cast(dict[str, Any], args.handler(args))
+                                   ^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 91, in wrapped
+    return handler(args)
+           ^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1111, in run_slices
+    result = analyze_slice_facts(
+             ^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/slices.py", line 405, in analyze_slice_facts
+    library_name = extract_library_name(bottom.filename, options.runtime_rules)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/patterns.py", line 248, in extract_library_name
+    library_path = extract_library_path(path, rules, selector=selector)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/patterns.py", line 222, in extract_library_path
+    name=_normalize_library_component(component, rules),
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/patterns.py", line 186, in _normalize_library_component
+    normalized = component.strip("/")
+                 ^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'strip'

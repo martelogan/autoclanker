@@ -1,0 +1,14 @@
+schema_version: clankerprof.runtime_rules.v1
+name: doc-example
+native_name_category_rules:
+  - category: Presentation Model
+    name_patterns:
+      - '^(?=.*View)[A-Z][A-Za-z0-9_]*(::[A-Z][A-Za-z0-9_]*)*\.new$'
+  - category: Application
+    name_patterns:
+      - '^[A-Z][A-Za-z0-9_]*(::[A-Z][A-Za-z0-9_]*)*\.new$'
+library_selector_path_patterns:
+  plugin:
+    - regex:/plugins/([^/]+)/
+caller_fallback_name_prefixes:
+  - Delegator.

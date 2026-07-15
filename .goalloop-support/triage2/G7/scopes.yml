@@ -1,0 +1,5 @@
+cost_kind:
+  Pos: "name:Pos"
+  Neg: "name:Neg"
+scope:
+  - function: T

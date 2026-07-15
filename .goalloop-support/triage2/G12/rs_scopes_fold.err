@@ -1,0 +1,1 @@
+{"error":"error: unexpected argument '--fold-runtime-internals' found\n\n  tip: a similar argument exists: '--runtime'\n\nUsage: clankerprof-rs scopes --config <CONFIG> --facts <FACTS> --runtime <RUNTIME>\n\nFor more information, try '--help'.","ok":false}

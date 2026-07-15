@@ -1,0 +1,3 @@
+Parent Function,Category,CPU Time (ns),CPU Time,%,Samples,Leaf Functions,Files,Top 3 Callsites,Top Leaf Functions,Top Caller->Leaf Pair,Rank-2 Caller->Leaf Pair,Rank-3 Caller->Leaf Pair
+ATarget,Other,10000000,10.00 ms,100.00,1,1,1,ZTarget (100.0%),Leaf (100.0%),"ZTarget -> Leaf (1 samples, 100.0%)",,
+ZTarget,Other,10000000,10.00 ms,100.00,1,1,1,ZTarget (100.0%),Leaf (100.0%),"ZTarget -> Leaf (1 samples, 100.0%)",,

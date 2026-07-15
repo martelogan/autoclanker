@@ -1,0 +1,8 @@
+cost_kind:
+  Pos: "name:Pos"
+  Neg: "name:Neg"
+owner:
+  NegOwner: "path:/srv/app/neg.py"
+  PosOwner: "path:/srv/app/pos.py"
+scope:
+  - function: T
