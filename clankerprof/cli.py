@@ -48,6 +48,7 @@ from clankerprof.facts import (
     sample_facts_to_jsonable,
     write_sample_facts,
 )
+from clankerprof.jsonio import parse_strict_json
 from clankerprof.proto import load_profile
 from clankerprof.render import (
     render_boundary_json,
@@ -85,7 +86,7 @@ def _contracted(
 def _load_attributables(path: str | None) -> dict[str, dict[str, float]] | None:
     if path is None:
         return None
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    payload = parse_strict_json(Path(path).read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("Attributables must be a JSON object.")
     result: dict[str, dict[str, float]] = {}
@@ -1111,8 +1112,8 @@ def run_boundaries(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def run_compare(args: argparse.Namespace) -> dict[str, Any]:
-    before = json.loads(Path(args.before).read_text(encoding="utf-8"))
-    after = json.loads(Path(args.after).read_text(encoding="utf-8"))
+    before = parse_strict_json(Path(args.before).read_text(encoding="utf-8"))
+    after = parse_strict_json(Path(args.after).read_text(encoding="utf-8"))
     if not isinstance(before, dict) or not isinstance(after, dict):
         raise ValueError("Compare inputs must be JSON objects.")
     return compare_json(

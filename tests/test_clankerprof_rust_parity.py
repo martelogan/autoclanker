@@ -1612,3 +1612,199 @@ def test_clankerprof_sample_facts_schema_version_is_symmetric() -> None:
         f'pub const SAMPLE_FACTS_SCHEMA_VERSION_V1: &str = "{SAMPLE_FACTS_SCHEMA_VERSION_V1}";'
         in rust_source
     )
+
+
+def _uint64_id_profile_bytes() -> bytes:
+    """A raw pprof profile whose location/function IDs are 2**63 (valid uint64)."""
+    from tests.fixtures.pprof_builder import (
+        field_bytes,
+        field_string,
+        field_varint,
+    )
+
+    big_id = 2**63
+    payload = bytearray()
+    payload.extend(field_bytes(1, field_varint(1, 1) + field_varint(2, 2)))
+    payload.extend(field_bytes(2, field_varint(1, big_id) + field_varint(2, 7)))
+    line_message = field_varint(1, big_id) + field_varint(2, 1)
+    payload.extend(
+        field_bytes(4, field_varint(1, big_id) + field_bytes(4, line_message))
+    )
+    payload.extend(
+        field_bytes(
+            5,
+            field_varint(1, big_id) + field_varint(2, 3) + field_varint(4, 4),
+        )
+    )
+    for value in ("", "cpu", "nanoseconds", "Target#render", "/app/target.rb"):
+        payload.extend(field_string(6, value))
+    return bytes(payload)
+
+
+def _big_aggregate_profile_bytes(sample_count: int) -> bytes:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("Target#render", "/srv/app/target.py"))
+    for _ in range(sample_count):
+        builder.sample((target,), 2**63 - 1)
+    return builder.encode()
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_facts_uint64_ids_round_trip(tmp_path: Path) -> None:
+    profile_path = tmp_path / "bigid.pb"
+    profile_path.write_bytes(_uint64_id_profile_bytes())
+    config_path = tmp_path / "targets.json"
+    config_path.write_text(
+        json.dumps({"Target#render": {"Application": "path:/app/**"}}),
+        encoding="utf-8",
+    )
+
+    python_facts = tmp_path / "python-facts.json"
+    rust_facts = tmp_path / "rust-facts.json"
+    _run_python_cli(
+        ["facts", "--profile", str(profile_path), "--output", str(python_facts)]
+    )
+    _run_rust_cli(
+        ["facts", "--profile", str(profile_path), "--output", str(rust_facts)]
+    )
+    assert python_facts.read_bytes() == rust_facts.read_bytes()
+    assert "9223372036854775808" in python_facts.read_text(encoding="utf-8")
+
+    python_replay = tmp_path / "python-replay.json"
+    rust_replay = tmp_path / "rust-replay.json"
+    shared = [
+        "targets",
+        "--facts",
+        str(python_facts),
+        "--config",
+        str(config_path),
+        "--format",
+        "json",
+    ]
+    _run_python_cli([*shared, "--output", str(python_replay)])
+    _run_rust_cli([*shared, "--output", str(rust_replay)])
+    assert python_replay.read_bytes() == rust_replay.read_bytes()
+    payload = json.loads(python_replay.read_text(encoding="utf-8"))
+    assert payload["parents"]["Target#render"]["total_time_ns"] == 7
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_big_aggregates_match_python_exactly(tmp_path: Path) -> None:
+    profile_path = tmp_path / "big-aggregate.pb"
+    profile_path.write_bytes(_big_aggregate_profile_bytes(2))
+    config_path = tmp_path / "targets.json"
+    config_path.write_text(
+        json.dumps({"Target#render": {"Application": "path:/srv/app/**"}}),
+        encoding="utf-8",
+    )
+
+    python_report = tmp_path / "python-report.json"
+    rust_report = tmp_path / "rust-report.json"
+    shared = [
+        "targets",
+        "--profile",
+        str(profile_path),
+        "--config",
+        str(config_path),
+        "--format",
+        "json",
+    ]
+    _run_python_cli([*shared, "--output", str(python_report)])
+    _run_rust_cli([*shared, "--output", str(rust_report)])
+    assert python_report.read_bytes() == rust_report.read_bytes()
+    # 2 * i64::MAX is exact in both languages: no panic, no float rounding.
+    assert "18446744073709551614" in python_report.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_facts_numeric_contract_matches_python(
+    tmp_path: Path,
+) -> None:
+    from clankerprof.facts import dumps_sample_facts, loads_sample_facts
+
+    repo_root = Path(__file__).resolve().parents[1]
+    valid = json.loads(
+        dumps_sample_facts(
+            decode_profile_bytes(_big_aggregate_profile_bytes(1)).to_sample_facts()
+        )
+    )
+
+    float_values = json.loads(json.dumps(valid))
+    float_values["samples"][0]["values"] = [7.9]
+    float_values.pop("summary", None)
+    beyond_bound = json.loads(json.dumps(valid))
+    template = beyond_bound["samples"][0]
+    beyond_bound["samples"] = [dict(template, sample_index=index) for index in range(3)]
+    beyond_bound.pop("summary", None)
+    cases = [
+        (
+            float_values,
+            "Sample fact values entries must be signed 64-bit integers.",
+        ),
+        (
+            beyond_bound,
+            "Aggregate sample values exceed the supported integer range.",
+        ),
+    ]
+    for index, (payload, message) in enumerate(cases):
+        with pytest.raises(ValueError, match=re.escape(message)):
+            loads_sample_facts(json.dumps(payload))
+        facts_path = tmp_path / f"invalid-{index}.json"
+        facts_path.write_text(json.dumps(payload), encoding="utf-8")
+        completed = subprocess.run(
+            [
+                "cargo",
+                "run",
+                "--quiet",
+                "-p",
+                "clankerprof-core",
+                "--bin",
+                "clankerprof-rs",
+                "--",
+                "targets",
+                "--facts",
+                str(facts_path),
+                "--target",
+                "Target#render",
+            ],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 2, (message, completed.stderr)
+        assert message in completed.stderr, completed.stderr
+        assert '"ok":false' in completed.stderr, completed.stderr
+
+    # Non-finite JSON tokens fail closed in both languages (RFC 8259 strict).
+    infinity_path = tmp_path / "infinity.json"
+    infinity_path.write_text(
+        '{"schema_version": "clankerprof.sample_facts.v2", "samples": [], '
+        '"strings": [], "frames": [], "profile": {"period": Infinity}}',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="non-finite token 'Infinity'"):
+        loads_sample_facts(infinity_path.read_text(encoding="utf-8"))
+    completed = subprocess.run(
+        [
+            "cargo",
+            "run",
+            "--quiet",
+            "-p",
+            "clankerprof-core",
+            "--bin",
+            "clankerprof-rs",
+            "--",
+            "targets",
+            "--facts",
+            str(infinity_path),
+            "--target",
+            "Target#render",
+        ],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 2, completed.stderr
+    assert '"ok":false' in completed.stderr, completed.stderr

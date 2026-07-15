@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TypeAlias
 
@@ -82,6 +83,33 @@ class SampleFact:
     @property
     def is_empty(self) -> bool:
         return not self.stack
+
+
+AGGREGATE_MAX = 2**64 - 1
+AGGREGATE_MIN = -(2**63)
+
+AGGREGATE_BOUNDS_ERROR = "Aggregate sample values exceed the supported integer range."
+
+
+def check_aggregate_bounds(samples: Iterable[SampleFact]) -> None:
+    """Enforce the facts aggregate bound shared with the Rust port.
+
+    The sum of positive primary values must fit ``u64`` and the sum of
+    negative primary values must fit ``i64``; every subset sum any projection
+    can produce then lies in ``[AGGREGATE_MIN, AGGREGATE_MAX]``, so all
+    derived aggregates are exact and representable as JSON integers in both
+    languages.
+    """
+    positive = 0
+    negative = 0
+    for fact in samples:
+        value = fact.primary_value
+        if value > 0:
+            positive += value
+        else:
+            negative += value
+    if positive > AGGREGATE_MAX or negative < AGGREGATE_MIN:
+        raise ValueError(AGGREGATE_BOUNDS_ERROR)
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,6 +216,7 @@ class Profile:
             )
             for index, sample in enumerate(self.samples)
         )
+        check_aggregate_bounds(facts)
         result = ProfileFacts(
             samples=facts,
             total_primary_value=sum(fact.primary_value for fact in facts),

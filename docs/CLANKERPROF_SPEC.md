@@ -117,8 +117,26 @@ primary-value selection) and `is_empty = stack == []`. Importers must validate
 frame and string indexes, reject non-integer stack entries, and reject
 summaries that disagree with the reconstructed samples.
 
+Numeric domains are strict and shared by both implementations. Location and
+function IDs (in `location_ids` and frame rows) are unsigned 64-bit integers;
+sample values, lines, and `period` are signed 64-bit integers; floats,
+booleans, strings, and out-of-range numbers are validation errors, never
+coerced or truncated. All JSON inputs are strict RFC 8259: the non-standard
+`Infinity`/`-Infinity`/`NaN` tokens are validation errors in both languages.
+
+Aggregates over sample values are exact, with a documented bound enforced at
+import and at profile decode: the sum of positive primary values must fit
+`u64` and the sum of negative primary values must fit `i64` (error:
+"Aggregate sample values exceed the supported integer range."). Every subset
+sum a projection can produce then lies in `[i64::MIN, u64::MAX]`, so derived
+totals (which may exceed `i64::MAX`, e.g. two `i64::MAX` samples totalling
+`18446744073709551614`) serialize as exact JSON integers in both languages —
+never a panic, wrap, or float approximation.
+
 Round-tripping this JSON through `loads_sample_facts` must preserve target and
-slice projection outputs.
+slice projection outputs, including exports whose IDs exceed `i64::MAX`: each
+implementation must be able to replay its own export of any decodable
+profile.
 
 ### Legacy v1 imports
 

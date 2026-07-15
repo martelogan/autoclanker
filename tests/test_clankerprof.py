@@ -4636,7 +4636,7 @@ _INVALID_V2_CASES: list[tuple[Callable[[dict[str, Any]], object], str]] = [
     ),
     (
         lambda p: p["frames"][0].__setitem__(0, "loc"),
-        "location_id must be an integer",
+        "location_id must be an unsigned 64-bit integer",
     ),
     (
         lambda p: p["frames"][0].__setitem__(4, True),
@@ -4695,6 +4695,121 @@ def test_clankerprof_facts_import_rejects_each_invalid_v2_shape(
     mutate(payload)
     with pytest.raises(ValueError, match=match):
         loads_sample_facts(json.dumps(payload))
+
+
+def test_clankerprof_facts_import_accepts_uint64_ids() -> None:
+    big_id = 2**63
+    payload = _valid_facts_export()
+    payload["frames"][0][0] = big_id
+    payload["frames"][0][1] = big_id
+    payload["samples"][0]["location_ids"] = [big_id]
+    facts = loads_sample_facts(json.dumps(payload))
+    assert facts.samples[0].stack[0].location_id == big_id
+    assert facts.samples[0].stack[0].function_id == big_id
+    assert facts.samples[0].sample.location_ids == (big_id,)
+
+
+def test_clankerprof_facts_import_rejects_non_integral_numeric_fields() -> None:
+    cases: list[tuple[Callable[[dict[str, Any]], object], str]] = [
+        (
+            lambda p: p["samples"][0].__setitem__("values", [7.9]),
+            "values entries must be signed 64-bit integers",
+        ),
+        (
+            lambda p: p["samples"][0].__setitem__("values", [2**63]),
+            "values entries must be signed 64-bit integers",
+        ),
+        (
+            lambda p: p["samples"][0].__setitem__("values", [True]),
+            "values entries must be signed 64-bit integers",
+        ),
+        (
+            lambda p: p["samples"][0].__setitem__("location_ids", [-1]),
+            "location_ids entries must be unsigned 64-bit integers",
+        ),
+        (
+            lambda p: p["samples"][0].__setitem__("location_ids", [2**64]),
+            "location_ids entries must be unsigned 64-bit integers",
+        ),
+        (
+            lambda p: p["samples"][0].__setitem__("sample_index", 1.5),
+            "sample_index must be a non-negative integer",
+        ),
+        (
+            lambda p: p["frames"][0].__setitem__(0, -1),
+            "location_id must be an unsigned 64-bit integer",
+        ),
+        (
+            lambda p: p["profile"].__setitem__("period", 1.25),
+            "profile period must be an integer",
+        ),
+        (
+            lambda p: p["summary"].__setitem__("total_primary_value", 30.0),
+            "summary total_primary_value must be an integer",
+        ),
+    ]
+    for mutate, match in cases:
+        payload = _valid_facts_export()
+        mutate(payload)
+        with pytest.raises(ValueError, match=match):
+            loads_sample_facts(json.dumps(payload))
+
+
+def test_clankerprof_facts_aggregate_bounds() -> None:
+    i64_max = 2**63 - 1
+
+    def artifact(sample_count: int) -> dict[str, Any]:
+        payload = _valid_facts_export()
+        template = cast(dict[str, Any], payload["samples"][0])
+        template["values"] = [i64_max]
+        payload["samples"] = [
+            dict(template, sample_index=index) for index in range(sample_count)
+        ]
+        payload.pop("summary", None)
+        return payload
+
+    # Two i64::MAX samples stay within the aggregate bound: the exact total
+    # (2**64 - 2) is representable in both languages.
+    facts = loads_sample_facts(json.dumps(artifact(2)))
+    assert facts.total_primary_value == 2**64 - 2
+
+    with pytest.raises(
+        ValueError,
+        match="Aggregate sample values exceed the supported integer range",
+    ):
+        loads_sample_facts(json.dumps(artifact(3)))
+
+
+def test_clankerprof_json_inputs_reject_non_finite_tokens(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(
+        '{"schema_version": "clankerprof.sample_facts.v2", "samples": [], '
+        '"strings": [], "frames": [], "profile": {"period": Infinity}}',
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"Target#render": {}}), encoding="utf-8")
+    exit_code = clankerprof_main(
+        ["targets", "--facts", str(facts_path), "--config", str(config_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert "non-finite token 'Infinity'" in cast(str, envelope["error"])
+
+    report_path = tmp_path / "report.json"
+    report_path.write_text(
+        '{"tool": "clankerprof_slices", "slices": [{"name": "A", "pct": NaN}]}',
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["compare", "--before", str(report_path), "--after", str(report_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert "non-finite token 'NaN'" in cast(str, envelope["error"])
 
 
 def test_clankerprof_facts_import_rejects_invalid_v1_shapes() -> None:

@@ -653,9 +653,17 @@ fn render_bucket(boundary: &BoundaryStats, label: &str, categories: &[String]) -
                 .map(|stats| render_category(boundary, category, stats))
         })
         .collect();
+    // Rendered totals may exceed i64 (aggregate bound allows up to u64::MAX),
+    // so read them back through both integer views before widening.
     let cpu_time: TimeNs = category_rows
         .iter()
-        .map(|row| row["time_ns"].as_i64().unwrap_or(0))
+        .map(|row| {
+            row["time_ns"]
+                .as_i64()
+                .map(TimeNs::from)
+                .or_else(|| row["time_ns"].as_u64().map(TimeNs::from))
+                .unwrap_or(0)
+        })
         .sum();
     let samples: u64 = category_rows
         .iter()

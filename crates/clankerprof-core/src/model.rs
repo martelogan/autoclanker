@@ -2,7 +2,42 @@ use indexmap::IndexMap;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub type TimeNs = i64;
+/// Aggregate time type. Individual pprof sample values are signed 64-bit
+/// integers, but aggregates over them may exceed `i64`; accumulating in
+/// `i128` (with the aggregate bound enforced at every input boundary by
+/// [`check_aggregate_bounds`]) keeps every derived total exact,
+/// JSON-serializable, and panic-free on adversarial input.
+pub type TimeNs = i128;
+
+/// Largest positive aggregate either language may emit as a JSON integer.
+pub const AGGREGATE_MAX: i128 = u64::MAX as i128;
+/// Most negative aggregate either language may emit as a JSON integer.
+pub const AGGREGATE_MIN: i128 = i64::MIN as i128;
+
+pub const AGGREGATE_BOUNDS_ERROR: &str =
+    "Aggregate sample values exceed the supported integer range.";
+
+/// Enforce the facts aggregate bound: the sum of positive primary values must
+/// fit `u64` and the sum of negative primary values must fit `i64`. Every
+/// subset sum any projection can produce then lies in
+/// `[AGGREGATE_MIN, AGGREGATE_MAX]`, so all derived aggregates are exact and
+/// representable as JSON integers in both languages.
+pub fn check_aggregate_bounds(samples: &[SampleFact]) -> Result<(), String> {
+    let mut positive: i128 = 0;
+    let mut negative: i128 = 0;
+    for fact in samples {
+        let value = fact.primary_value();
+        if value > 0 {
+            positive += value;
+        } else {
+            negative += value;
+        }
+    }
+    if positive > AGGREGATE_MAX || negative < AGGREGATE_MIN {
+        return Err(AGGREGATE_BOUNDS_ERROR.to_string());
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Function {
@@ -269,7 +304,7 @@ impl Profile {
         frames
     }
 
-    pub fn to_sample_facts(&self) -> ProfileFacts {
+    pub fn to_sample_facts(&self) -> Result<ProfileFacts, String> {
         let samples: Vec<SampleFact> = self
             .samples
             .iter()
@@ -280,9 +315,10 @@ impl Profile {
                 stack: self.stack_for_sample(sample),
             })
             .collect();
+        check_aggregate_bounds(&samples)?;
         let total_primary_value = samples.iter().map(SampleFact::primary_value).sum();
         let empty_sample_count = samples.iter().filter(|sample| sample.is_empty()).count();
-        ProfileFacts {
+        Ok(ProfileFacts {
             samples,
             total_primary_value,
             empty_sample_count,
@@ -291,6 +327,6 @@ impl Profile {
             period: self.period,
             default_sample_type: self.default_sample_type.clone(),
             primary_value_index: self.primary_value_index,
-        }
+        })
     }
 }

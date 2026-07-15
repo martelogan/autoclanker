@@ -193,3 +193,9 @@ class PprofFixtureBuilder:
             payload.extend(_field_string(6, value))
         data = bytes(payload)
         return gzip.compress(data) if gzipped else data
+
+
+# Public aliases for tests that hand-encode raw pprof messages directly.
+field_bytes = _field_bytes
+field_string = _field_string
+field_varint = _field_varint

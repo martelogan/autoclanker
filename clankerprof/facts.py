@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, TypeAlias, cast
 
+from clankerprof.jsonio import parse_strict_json
 from clankerprof.model import (
     Frame,
     ProfileFacts,
@@ -14,6 +15,7 @@ from clankerprof.model import (
     SampleFact,
     TimeNs,
     ValueType,
+    check_aggregate_bounds,
 )
 
 JsonValue: TypeAlias = (
@@ -24,6 +26,10 @@ JsonObject: TypeAlias = dict[str, Any]
 
 SAMPLE_FACTS_SCHEMA_VERSION: Final = "clankerprof.sample_facts.v2"
 SAMPLE_FACTS_SCHEMA_VERSION_V1: Final = "clankerprof.sample_facts.v1"
+
+_I64_MIN: Final = -(2**63)
+_I64_MAX: Final = 2**63 - 1
+_U64_MAX: Final = 2**64 - 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,7 +255,7 @@ def dumps_sample_facts(facts: ProfileFacts, *, pretty: bool = False) -> str:
 
 
 def loads_sample_facts(payload: str) -> ProfileFacts:
-    raw = json.loads(payload)
+    raw = parse_strict_json(payload)
     if not isinstance(raw, dict):
         raise ValueError("Sample facts JSON must be an object.")
     return sample_facts_from_jsonable(cast(JsonObject, raw))
@@ -299,13 +305,13 @@ def _sample_facts_from_v2(payload: JsonObject) -> ProfileFacts:
             stack.append(frames[frame_index])
         samples.append(
             SampleFact(
-                sample_index=int(entry["sample_index"]),
+                sample_index=_sample_index(entry),
                 sample=Sample(
-                    location_ids=_int_tuple(
+                    location_ids=_u64_tuple(
                         entry.get("location_ids", []),
                         field_name="location_ids",
                     ),
-                    values=_int_tuple(entry.get("values", []), field_name="values"),
+                    values=_i64_tuple(entry.get("values", []), field_name="values"),
                     primary_index=primary_value_index,
                 ),
                 stack=tuple(stack),
@@ -313,6 +319,7 @@ def _sample_facts_from_v2(payload: JsonObject) -> ProfileFacts:
         )
 
     facts_samples = tuple(samples)
+    check_aggregate_bounds(facts_samples)
     total_primary_value = sum(fact.primary_value for fact in facts_samples)
     empty_sample_count = sum(1 for fact in facts_samples if fact.is_empty)
     _validate_summary(
@@ -358,17 +365,20 @@ def _validated_profile_meta(raw: object) -> _ProfileMeta:
         if raw_period_type is not None
         else None
     )
-    primary_value_index = payload.get("primary_value_index", 0)
-    if isinstance(primary_value_index, bool) or not isinstance(
-        primary_value_index, int
-    ):
+    raw_primary_value_index = payload.get("primary_value_index", 0)
+    primary_value_index = _strict_int(raw_primary_value_index)
+    if primary_value_index is None or primary_value_index > _I64_MAX:
         raise ValueError("Sample facts primary_value_index must be an integer.")
     if primary_value_index < 0:
         raise ValueError("Sample facts primary_value_index must be non-negative.")
+    raw_period = payload.get("period", 0)
+    period = _strict_int(raw_period)
+    if period is None or period < _I64_MIN or period > _I64_MAX:
+        raise ValueError("Sample facts profile period must be an integer.")
     return _ProfileMeta(
         value_types=value_types,
         period_type=period_type,
-        period=int(payload.get("period", 0)),
+        period=period,
         default_sample_type=str(payload.get("default_sample_type", "")),
         primary_value_index=primary_value_index,
     )
@@ -407,19 +417,31 @@ def _validated_frames(raw: object, strings: list[str]) -> list[Frame]:
             )
         row = cast(list[object], item)
         location_id, function_id, name_index, filename_index, line, folded = row
+        parsed_ids: dict[str, int] = {}
         for label, value in (
             ("location_id", location_id),
             ("function_id", function_id),
+        ):
+            parsed = _strict_int(value)
+            if parsed is None or parsed < 0 or parsed > _U64_MAX:
+                raise ValueError(
+                    f"Sample facts frame {label} must be an unsigned 64-bit integer."
+                )
+            parsed_ids[label] = parsed
+        parsed_cells: dict[str, int] = {}
+        for label, value in (
             ("name index", name_index),
             ("filename index", filename_index),
             ("line", line),
         ):
-            if isinstance(value, bool) or not isinstance(value, int):
+            parsed = _strict_int(value)
+            if parsed is None or parsed < _I64_MIN or parsed > _I64_MAX:
                 raise ValueError(f"Sample facts frame {label} must be an integer.")
+            parsed_cells[label] = parsed
         if not isinstance(folded, bool):
             raise ValueError("Sample facts frame folded flag must be a boolean.")
-        name_position = cast(int, name_index)
-        filename_position = cast(int, filename_index)
+        name_position = parsed_cells["name index"]
+        filename_position = parsed_cells["filename index"]
         for position in (name_position, filename_position):
             if position < 0 or position >= len(strings):
                 raise ValueError(
@@ -427,11 +449,11 @@ def _validated_frames(raw: object, strings: list[str]) -> list[Frame]:
                 )
         frames.append(
             Frame(
-                location_id=cast(int, location_id),
-                function_id=cast(int, function_id),
+                location_id=parsed_ids["location_id"],
+                function_id=parsed_ids["function_id"],
                 name=strings[name_position],
                 filename=strings[filename_position],
-                line=cast(int, line),
+                line=parsed_cells["line"],
                 location_is_folded=folded,
             )
         )
@@ -448,19 +470,29 @@ def _validate_summary(
     if not isinstance(raw, dict):
         return
     summary_payload = cast(JsonObject, raw)
-    expected_count = summary_payload.get("sample_count")
-    if expected_count is not None and int(expected_count) != sample_count:
+
+    def summary_int(key: str) -> int | None:
+        value = summary_payload.get(key)
+        if value is None:
+            return None
+        parsed = _strict_int(value)
+        if parsed is None or parsed < _I64_MIN or parsed > _U64_MAX:
+            raise ValueError(f"Sample facts summary {key} must be an integer.")
+        return parsed
+
+    expected_count = summary_int("sample_count")
+    if expected_count is not None and expected_count != sample_count:
         raise ValueError("Sample facts summary sample count does not match samples.")
-    expected_total = summary_payload.get("total_primary_value")
-    if expected_total is not None and int(expected_total) != total_primary_value:
+    expected_total = summary_int("total_primary_value")
+    if expected_total is not None and expected_total != total_primary_value:
         raise ValueError("Sample facts summary total does not match samples.")
-    expected_empty = summary_payload.get("empty_sample_count")
-    if expected_empty is not None and int(expected_empty) != empty_sample_count:
+    expected_empty = summary_int("empty_sample_count")
+    if expected_empty is not None and expected_empty != empty_sample_count:
         raise ValueError("Sample facts empty count does not match samples.")
-    expected_non_empty = summary_payload.get("non_empty_sample_count")
+    expected_non_empty = summary_int("non_empty_sample_count")
     if (
         expected_non_empty is not None
-        and int(expected_non_empty) != sample_count - empty_sample_count
+        and expected_non_empty != sample_count - empty_sample_count
     ):
         raise ValueError("Sample facts non-empty count does not match samples.")
 
@@ -477,6 +509,7 @@ def _sample_facts_from_v1(payload: JsonObject) -> ProfileFacts:
     )
     if len(samples) != len(raw_sample_items):
         raise ValueError("Each sample facts entry must be an object.")
+    check_aggregate_bounds(samples)
     total_primary_value = sum(fact.primary_value for fact in samples)
     empty_sample_count = sum(1 for fact in samples if fact.is_empty)
     _validate_summary(
@@ -497,13 +530,13 @@ def _sample_fact_from_v1_jsonable(payload: JsonObject) -> SampleFact:
     if not isinstance(raw_stack, list):
         raise ValueError("Sample fact stack must be an array.")
     raw_stack_items = cast(list[object], raw_stack)
-    raw_values = _int_tuple(payload.get("values", []), field_name="values")
-    raw_locations = _int_tuple(
+    raw_values = _i64_tuple(payload.get("values", []), field_name="values")
+    raw_locations = _u64_tuple(
         payload.get("location_ids", []),
         field_name="location_ids",
     )
     result = SampleFact(
-        sample_index=int(payload["sample_index"]),
+        sample_index=_sample_index(payload),
         sample=Sample(
             location_ids=raw_locations,
             values=raw_values,
@@ -517,26 +550,93 @@ def _sample_fact_from_v1_jsonable(payload: JsonObject) -> SampleFact:
     if len(result.stack) != len(raw_stack_items):
         raise ValueError("Each sample fact frame must be an object.")
     raw_primary_value = payload.get("primary_value")
-    if raw_primary_value is not None and int(raw_primary_value) != result.primary_value:
-        raise ValueError("Sample fact primary value does not match values.")
+    if raw_primary_value is not None:
+        expected_primary = _strict_int(raw_primary_value)
+        if (
+            expected_primary is None
+            or expected_primary < _I64_MIN
+            or expected_primary > _I64_MAX
+        ):
+            raise ValueError("Sample fact primary_value must be an integer.")
+        if expected_primary != result.primary_value:
+            raise ValueError("Sample fact primary value does not match values.")
     raw_is_empty = payload.get("is_empty")
-    if raw_is_empty is not None and bool(raw_is_empty) != result.is_empty:
-        raise ValueError("Sample fact is_empty does not match stack.")
+    if raw_is_empty is not None:
+        if not isinstance(raw_is_empty, bool):
+            raise ValueError("Sample fact is_empty must be a boolean.")
+        if raw_is_empty != result.is_empty:
+            raise ValueError("Sample fact is_empty does not match stack.")
     return result
 
 
 def _frame_from_v1_jsonable(payload: JsonObject) -> Frame:
+    parsed_ids: dict[str, int] = {}
+    for key in ("location_id", "function_id"):
+        parsed = _strict_int(payload[key])
+        if parsed is None or parsed < 0 or parsed > _U64_MAX:
+            raise ValueError(
+                f"Sample facts frame {key} must be an unsigned 64-bit integer."
+            )
+        parsed_ids[key] = parsed
+    strings: dict[str, str] = {}
+    for key in ("name", "filename"):
+        raw = payload[key]
+        if not isinstance(raw, str):
+            raise ValueError(f"Sample fact frame {key} must be a string.")
+        strings[key] = raw
+    raw_line = payload.get("line", 0)
+    line = _strict_int(raw_line)
+    if line is None or line < _I64_MIN or line > _I64_MAX:
+        raise ValueError("Sample facts frame line must be an integer.")
+    raw_folded = payload.get("location_is_folded", False)
+    if not isinstance(raw_folded, bool):
+        raise ValueError("Sample facts frame folded flag must be a boolean.")
     return Frame(
-        location_id=int(payload["location_id"]),
-        function_id=int(payload["function_id"]),
-        name=str(payload["name"]),
-        filename=str(payload["filename"]),
-        line=int(payload.get("line", 0)),
-        location_is_folded=bool(payload.get("location_is_folded", False)),
+        location_id=parsed_ids["location_id"],
+        function_id=parsed_ids["function_id"],
+        name=strings["name"],
+        filename=strings["filename"],
+        line=line,
+        location_is_folded=raw_folded,
     )
 
 
-def _int_tuple(value: object, *, field_name: str) -> tuple[int, ...]:
+def _strict_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _i64_tuple(value: object, *, field_name: str) -> tuple[int, ...]:
     if not isinstance(value, Sequence) or isinstance(value, str | bytes):
         raise ValueError(f"Sample fact {field_name} must be an array.")
-    return tuple(int(cast(Any, item)) for item in cast(Sequence[object], value))
+    items: list[int] = []
+    for item in cast(Sequence[object], value):
+        parsed = _strict_int(item)
+        if parsed is None or parsed < _I64_MIN or parsed > _I64_MAX:
+            raise ValueError(
+                f"Sample fact {field_name} entries must be signed 64-bit integers."
+            )
+        items.append(parsed)
+    return tuple(items)
+
+
+def _u64_tuple(value: object, *, field_name: str) -> tuple[int, ...]:
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+        raise ValueError(f"Sample fact {field_name} must be an array.")
+    items: list[int] = []
+    for item in cast(Sequence[object], value):
+        parsed = _strict_int(item)
+        if parsed is None or parsed < 0 or parsed > _U64_MAX:
+            raise ValueError(
+                f"Sample fact {field_name} entries must be unsigned 64-bit integers."
+            )
+        items.append(parsed)
+    return tuple(items)
+
+
+def _sample_index(entry: JsonObject) -> int:
+    parsed = _strict_int(entry["sample_index"])
+    if parsed is None or parsed < 0 or parsed > _U64_MAX:
+        raise ValueError("Sample fact sample_index must be a non-negative integer.")
+    return parsed

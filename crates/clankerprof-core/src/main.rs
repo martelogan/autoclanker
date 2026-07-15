@@ -350,9 +350,9 @@ fn load_projection_input(
     match (profile, facts) {
         (Some(_), Some(_)) => Err("--profile and --facts are mutually exclusive.".to_string()),
         (None, None) => Err("--profile or --facts is required.".to_string()),
-        (Some(profile_path), None) => Ok(load_profile(profile_path)
+        (Some(profile_path), None) => load_profile(profile_path)
             .map_err(|error| error.to_string())?
-            .to_sample_facts()),
+            .to_sample_facts(),
         (None, Some(facts_path)) => {
             let payload: serde_json::Value = serde_json::from_str(
                 &std::fs::read_to_string(facts_path).map_err(|error| error.to_string())?,
@@ -387,7 +387,7 @@ fn emit(rendered: &str, output: Option<&PathBuf>) -> Result<(), String> {
 
 fn run_facts(args: FactsArgs) -> Result<(), String> {
     let profile = load_profile(&args.profile).map_err(|error| error.to_string())?;
-    let facts = profile.to_sample_facts();
+    let facts = profile.to_sample_facts()?;
     let rendered = if args.pretty {
         sample_facts_to_pretty_json(&facts).map_err(|error| error.to_string())?
     } else {

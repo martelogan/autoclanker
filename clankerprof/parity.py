@@ -19,6 +19,7 @@ from typing import Any, cast
 import yaml
 
 from clankerprof.cli import main as clankerprof_main
+from clankerprof.jsonio import parse_strict_json
 
 OPT_IN_ENV = "CLANKERPROF_REAL_PROFILE_PARITY"
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +36,7 @@ def _pushd(path: Path) -> Generator[None]:
 
 
 def _json(path: str | Path) -> dict[str, Any]:
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    payload = parse_strict_json(Path(path).read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"{path} must contain a JSON object.")
     return cast(dict[str, Any], payload)

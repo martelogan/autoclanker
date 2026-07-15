@@ -1,4 +1,6 @@
-use crate::model::{Frame, ProfileFacts, Sample, SampleFact, TimeNs, ValueType};
+use crate::model::{
+    check_aggregate_bounds, Frame, ProfileFacts, Sample, SampleFact, TimeNs, ValueType,
+};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -137,21 +139,41 @@ fn unsupported_schema(found: Option<&str>) -> String {
     )
 }
 
-fn int_field(payload: &Value, key: &str) -> Result<i64, String> {
-    payload
-        .get(key)
-        .and_then(Value::as_i64)
-        .ok_or_else(|| format!("Sample facts payload missing required key: '{key}'."))
+fn sample_index_field(payload: &Value) -> Result<usize, String> {
+    let Some(raw) = payload.get("sample_index") else {
+        return Err("Sample facts payload missing required key: 'sample_index'.".to_string());
+    };
+    raw.as_u64()
+        .map(|value| value as usize)
+        .ok_or_else(|| "Sample fact sample_index must be a non-negative integer.".to_string())
 }
 
-fn int_list(payload: &Value, key: &str, field_name: &str) -> Result<Vec<i64>, String> {
+/// Signed 64-bit entries (pprof sample values); missing key means empty.
+fn i64_list(payload: &Value, key: &str, field_name: &str) -> Result<Vec<i64>, String> {
     match payload.get(key) {
         None => Ok(Vec::new()),
         Some(Value::Array(items)) => items
             .iter()
             .map(|item| {
-                item.as_i64()
-                    .ok_or_else(|| format!("Sample fact {field_name} must be an array."))
+                item.as_i64().ok_or_else(|| {
+                    format!("Sample fact {field_name} entries must be signed 64-bit integers.")
+                })
+            })
+            .collect(),
+        Some(_) => Err(format!("Sample fact {field_name} must be an array.")),
+    }
+}
+
+/// Unsigned 64-bit entries (pprof location IDs); missing key means empty.
+fn u64_list(payload: &Value, key: &str, field_name: &str) -> Result<Vec<u64>, String> {
+    match payload.get(key) {
+        None => Ok(Vec::new()),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| {
+                item.as_u64().ok_or_else(|| {
+                    format!("Sample fact {field_name} entries must be unsigned 64-bit integers.")
+                })
             })
             .collect(),
         Some(_) => Err(format!("Sample fact {field_name} must be an array.")),
@@ -218,7 +240,12 @@ fn sample_facts_from_v2(payload: &Value) -> Result<ProfileFacts, String> {
     if primary_value_index < 0 {
         return Err("Sample facts primary_value_index must be non-negative.".to_string());
     }
-    let period = profile.get("period").and_then(Value::as_i64).unwrap_or(0);
+    let period = match profile.get("period") {
+        None => 0,
+        Some(value) => value
+            .as_i64()
+            .ok_or("Sample facts profile period must be an integer.")?,
+    };
     let default_sample_type = profile
         .get("default_sample_type")
         .and_then(Value::as_str)
@@ -260,33 +287,37 @@ fn sample_facts_from_v2(payload: &Value) -> Result<ProfileFacts, String> {
         };
         let mut stack = Vec::with_capacity(raw_stack.len());
         for frame_index in raw_stack {
-            let index = match frame_index {
-                Value::Number(number) if number.is_i64() || number.is_u64() => {
-                    number.as_i64().unwrap_or(-1)
-                }
+            let index_number = match frame_index {
+                Value::Number(number) if number.is_i64() || number.is_u64() => number,
                 _ => {
                     return Err("Sample fact stack entries must be frame indexes.".to_string());
                 }
             };
-            if index < 0 || index as usize >= frames.len() {
-                return Err(format!("Sample fact frame index {index} is out of range."));
-            }
-            stack.push(frames[index as usize].clone());
+            let index = match index_number.as_u64() {
+                Some(value) if (value as usize) < frames.len() => value as usize,
+                _ => {
+                    return Err(format!(
+                        "Sample fact frame index {index_number} is out of range."
+                    ));
+                }
+            };
+            stack.push(frames[index].clone());
         }
         samples.push(SampleFact {
-            sample_index: int_field(entry, "sample_index")? as usize,
+            sample_index: sample_index_field(entry)?,
             sample: Sample {
-                location_ids: int_list(entry, "location_ids", "location_ids")?
+                location_ids: u64_list(entry, "location_ids", "location_ids")?,
+                values: i64_list(entry, "values", "values")?
                     .into_iter()
-                    .map(|value| value as u64)
+                    .map(TimeNs::from)
                     .collect(),
-                values: int_list(entry, "values", "values")?,
                 primary_index: primary_value_index as usize,
             },
             stack,
         });
     }
 
+    check_aggregate_bounds(&samples)?;
     let total_primary_value: TimeNs = samples.iter().map(SampleFact::primary_value).sum();
     let empty_sample_count = samples.iter().filter(|fact| fact.is_empty()).count();
     validate_summary(
@@ -315,15 +346,17 @@ fn frame_from_row(row: &Value, strings: &[String]) -> Result<Frame, String> {
         return Err(frame_row_error());
     }
     let int_cell = |index: usize, label: &str| -> Result<i64, String> {
-        match &cells[index] {
-            Value::Number(number) if number.is_i64() || number.is_u64() => {
-                Ok(number.as_i64().unwrap_or(0))
-            }
-            _ => Err(format!("Sample facts frame {label} must be an integer.")),
-        }
+        cells[index]
+            .as_i64()
+            .ok_or_else(|| format!("Sample facts frame {label} must be an integer."))
     };
-    let location_id = int_cell(0, "location_id")?;
-    let function_id = int_cell(1, "function_id")?;
+    let u64_cell = |index: usize, label: &str| -> Result<u64, String> {
+        cells[index].as_u64().ok_or_else(|| {
+            format!("Sample facts frame {label} must be an unsigned 64-bit integer.")
+        })
+    };
+    let location_id = u64_cell(0, "location_id")?;
+    let function_id = u64_cell(1, "function_id")?;
     let name_index = int_cell(2, "name index")?;
     let filename_index = int_cell(3, "filename index")?;
     let line = int_cell(4, "line")?;
@@ -338,8 +371,8 @@ fn frame_from_row(row: &Value, strings: &[String]) -> Result<Frame, String> {
         }
     }
     Ok(Frame {
-        location_id: location_id as u64,
-        function_id: function_id as u64,
+        location_id,
+        function_id,
         name: strings[name_index as usize].clone(),
         filename: strings[filename_index as usize].clone(),
         line,
@@ -360,15 +393,26 @@ fn validate_summary(
     let Some(Value::Object(summary)) = raw else {
         return Ok(());
     };
-    let check = |key: &str, expected: i64, message: &str| -> Result<(), String> {
-        match summary.get(key).and_then(Value::as_i64) {
+    let summary_int = |key: &str| -> Result<Option<i128>, String> {
+        match summary.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(value) => value
+                .as_i64()
+                .map(i128::from)
+                .or_else(|| value.as_u64().map(i128::from))
+                .map(Some)
+                .ok_or_else(|| format!("Sample facts summary {key} must be an integer.")),
+        }
+    };
+    let check = |key: &str, expected: i128, message: &str| -> Result<(), String> {
+        match summary_int(key)? {
             Some(found) if found != expected => Err(message.to_string()),
             _ => Ok(()),
         }
     };
     check(
         "sample_count",
-        sample_count as i64,
+        sample_count as i128,
         "Sample facts summary sample count does not match samples.",
     )?;
     check(
@@ -378,12 +422,12 @@ fn validate_summary(
     )?;
     check(
         "empty_sample_count",
-        empty_sample_count as i64,
+        empty_sample_count as i128,
         "Sample facts empty count does not match samples.",
     )?;
     check(
         "non_empty_sample_count",
-        (sample_count - empty_sample_count) as i64,
+        (sample_count - empty_sample_count) as i128,
         "Sample facts non-empty count does not match samples.",
     )
 }
@@ -407,56 +451,80 @@ fn sample_facts_from_v1(payload: &Value) -> Result<ProfileFacts, String> {
             let Value::Object(frame_entry) = item else {
                 return Err("Each sample fact frame must be an object.".to_string());
             };
+            let required = |key: &str| -> Result<&Value, String> {
+                frame_entry
+                    .get(key)
+                    .ok_or_else(|| format!("Sample facts payload missing required key: '{key}'."))
+            };
+            let frame_u64 = |key: &str| -> Result<u64, String> {
+                required(key)?.as_u64().ok_or_else(|| {
+                    format!("Sample facts frame {key} must be an unsigned 64-bit integer.")
+                })
+            };
+            let frame_str = |key: &str| -> Result<String, String> {
+                required(key)?
+                    .as_str()
+                    .map(String::from)
+                    .ok_or_else(|| format!("Sample fact frame {key} must be a string."))
+            };
+            let line = match frame_entry.get("line") {
+                None => 0,
+                Some(value) => value
+                    .as_i64()
+                    .ok_or("Sample facts frame line must be an integer.")?,
+            };
+            let location_is_folded = match frame_entry.get("location_is_folded") {
+                None => false,
+                Some(value) => value
+                    .as_bool()
+                    .ok_or("Sample facts frame folded flag must be a boolean.")?,
+            };
             stack.push(Frame {
-                location_id: frame_entry
-                    .get("location_id")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0),
-                function_id: frame_entry
-                    .get("function_id")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0),
-                name: frame_entry
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
-                filename: frame_entry
-                    .get("filename")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
-                line: frame_entry.get("line").and_then(Value::as_i64).unwrap_or(0),
-                location_is_folded: frame_entry
-                    .get("location_is_folded")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
+                location_id: frame_u64("location_id")?,
+                function_id: frame_u64("function_id")?,
+                name: frame_str("name")?,
+                filename: frame_str("filename")?,
+                line,
+                location_is_folded,
             });
         }
         let fact = SampleFact {
-            sample_index: int_field(entry, "sample_index")? as usize,
+            sample_index: sample_index_field(entry)?,
             sample: Sample {
-                location_ids: int_list(entry, "location_ids", "location_ids")?
+                location_ids: u64_list(entry, "location_ids", "location_ids")?,
+                values: i64_list(entry, "values", "values")?
                     .into_iter()
-                    .map(|value| value as u64)
+                    .map(TimeNs::from)
                     .collect(),
-                values: int_list(entry, "values", "values")?,
                 primary_index: 0,
             },
             stack,
         };
-        if let Some(raw_primary) = entry.get("primary_value").and_then(Value::as_i64) {
-            if raw_primary != fact.primary_value() {
-                return Err("Sample fact primary value does not match values.".to_string());
+        match entry.get("primary_value") {
+            None | Some(Value::Null) => {}
+            Some(raw_primary) => {
+                let expected = raw_primary
+                    .as_i64()
+                    .ok_or("Sample fact primary_value must be an integer.")?;
+                if TimeNs::from(expected) != fact.primary_value() {
+                    return Err("Sample fact primary value does not match values.".to_string());
+                }
             }
         }
-        if let Some(raw_is_empty) = entry.get("is_empty").and_then(Value::as_bool) {
-            if raw_is_empty != fact.is_empty() {
-                return Err("Sample fact is_empty does not match stack.".to_string());
+        match entry.get("is_empty") {
+            None | Some(Value::Null) => {}
+            Some(raw_is_empty) => {
+                let expected = raw_is_empty
+                    .as_bool()
+                    .ok_or("Sample fact is_empty must be a boolean.")?;
+                if expected != fact.is_empty() {
+                    return Err("Sample fact is_empty does not match stack.".to_string());
+                }
             }
         }
         samples.push(fact);
     }
+    check_aggregate_bounds(&samples)?;
     let total_primary_value: TimeNs = samples.iter().map(SampleFact::primary_value).sum();
     let empty_sample_count = samples.iter().filter(|fact| fact.is_empty()).count();
     validate_summary(
@@ -537,6 +605,83 @@ mod tests {
         assert!(sample_facts_from_json(&bad)
             .unwrap_err()
             .contains("must be non-negative"));
+    }
+
+    #[test]
+    fn import_accepts_uint64_ids_and_rejects_non_integral_numbers() {
+        let big_id: u64 = 1 << 63;
+        let base = json!({
+            "schema_version": SAMPLE_FACTS_SCHEMA_VERSION,
+            "profile": {
+                "value_types": [{"type": "cpu", "unit": "nanoseconds"}],
+                "period_type": null,
+                "period": 0,
+                "default_sample_type": "",
+                "primary_value_index": 0,
+            },
+            "strings": ["Target#render", "/app/target.rb"],
+            "frames": [[big_id, big_id, 0, 1, 1, false]],
+            "samples": [
+                {"sample_index": 0, "values": [7], "location_ids": [big_id], "stack": [0]}
+            ],
+        });
+        let facts = sample_facts_from_json(&base).expect("uint64 ids are valid");
+        assert_eq!(facts.samples[0].stack[0].location_id, big_id);
+        assert_eq!(facts.samples[0].sample.location_ids, vec![big_id]);
+        assert_eq!(facts.total_primary_value, 7);
+
+        let mut bad = base.clone();
+        bad["samples"][0]["values"] = json!([7.9]);
+        assert_eq!(
+            sample_facts_from_json(&bad).unwrap_err(),
+            "Sample fact values entries must be signed 64-bit integers."
+        );
+
+        let mut bad = base.clone();
+        bad["samples"][0]["location_ids"] = json!([-1]);
+        assert_eq!(
+            sample_facts_from_json(&bad).unwrap_err(),
+            "Sample fact location_ids entries must be unsigned 64-bit integers."
+        );
+
+        let mut bad = base.clone();
+        bad["frames"][0][0] = json!(-1);
+        assert_eq!(
+            sample_facts_from_json(&bad).unwrap_err(),
+            "Sample facts frame location_id must be an unsigned 64-bit integer."
+        );
+    }
+
+    #[test]
+    fn import_enforces_the_aggregate_bound_exactly() {
+        let sample = |index: usize| json!({"sample_index": index, "values": [i64::MAX], "location_ids": [], "stack": []});
+        let mut payload = json!({
+            "schema_version": SAMPLE_FACTS_SCHEMA_VERSION,
+            "profile": {
+                "value_types": [{"type": "cpu", "unit": "nanoseconds"}],
+                "period_type": null,
+                "period": 0,
+                "default_sample_type": "",
+                "primary_value_index": 0,
+            },
+            "strings": [],
+            "frames": [],
+            "samples": [sample(0), sample(1)],
+        });
+        let facts = sample_facts_from_json(&payload).expect("two i64::MAX samples fit");
+        assert_eq!(facts.total_primary_value, (u64::MAX - 1) as i128);
+        assert_eq!(
+            sample_facts_to_compact_json(&facts)
+                .expect("exact big total serializes")
+                .contains("18446744073709551614"),
+            true
+        );
+
+        payload["samples"] = json!([sample(0), sample(1), sample(2)]);
+        assert_eq!(
+            sample_facts_from_json(&payload).unwrap_err(),
+            "Aggregate sample values exceed the supported integer range."
+        );
     }
 
     #[test]

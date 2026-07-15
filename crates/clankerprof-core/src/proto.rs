@@ -1,4 +1,6 @@
-use crate::model::{select_primary_value_index, Function, Location, Profile, Sample, ValueType};
+use crate::model::{
+    select_primary_value_index, Function, Location, Profile, Sample, TimeNs, ValueType,
+};
 use flate2::read::GzDecoder;
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
@@ -363,11 +365,11 @@ fn parse_sample(payload: &[u8]) -> DecodeResult<Sample> {
                 _ => reader.skip(wire)?,
             },
             2 => match wire {
-                0 => values.push(int64_from_varint(reader.read_varint()?)),
+                0 => values.push(TimeNs::from(int64_from_varint(reader.read_varint()?))),
                 2 => values.extend(
                     read_packed_varints(reader.read_length_delimited()?)?
                         .into_iter()
-                        .map(int64_from_varint),
+                        .map(|raw| TimeNs::from(int64_from_varint(raw))),
                 ),
                 _ => reader.skip(wire)?,
             },
