@@ -599,7 +599,7 @@ fn pct(value: TimeNs, total: TimeNs) -> f64 {
     }
 }
 
-pub fn render_boundary_json(result: &BoundaryAnalysisResult, top: Option<usize>) -> Value {
+pub fn render_boundary_json(result: &BoundaryAnalysisResult, top: Option<i64>) -> Value {
     json!({
         "boundaries": result
             .boundaries
@@ -614,11 +614,11 @@ pub fn render_boundary_json(result: &BoundaryAnalysisResult, top: Option<usize>)
     })
 }
 
-fn truncated<T>(items: Vec<T>, top: Option<usize>) -> Vec<T> {
-    match top {
-        Some(limit) => items.into_iter().take(limit).collect(),
-        None => items,
-    }
+fn truncated<T>(mut items: Vec<T>, top: Option<i64>) -> Vec<T> {
+    // Python renders ranked sections with list[:top], so a negative limit
+    // drops entries from the tail instead of rejecting.
+    crate::slices::apply_python_limit(&mut items, top);
+    items
 }
 
 /// Rendered totals may exceed i64 (aggregate bound allows up to u64::MAX),
@@ -631,7 +631,7 @@ fn time_ns_of(value: &Value) -> TimeNs {
         .unwrap_or(0)
 }
 
-fn render_boundary(boundary: &BoundaryStats, profile_total: TimeNs, top: Option<usize>) -> Value {
+fn render_boundary(boundary: &BoundaryStats, profile_total: TimeNs, top: Option<i64>) -> Value {
     let total = boundary.total_time;
     let bucketed: HashSet<&str> = boundary
         .buckets
@@ -759,7 +759,7 @@ fn render_domain(
     boundary: &BoundaryStats,
     name: &str,
     stats: &DomainStats,
-    top: Option<usize>,
+    top: Option<i64>,
 ) -> Value {
     let total = boundary.total_time;
     let mut cost_kinds_sorted: Vec<_> = stats.cost_kinds.iter().collect();
@@ -840,6 +840,7 @@ fn config_to_json(path: &Path) -> Result<(Value, HashMap<String, Vec<String>>), 
     } else {
         let value: serde_yaml::Value =
             serde_yaml::from_str(&payload).map_err(|error| error.to_string())?;
+        crate::rules::require_string_keys(&value)?;
         if let serde_yaml::Value::Mapping(mapping) = &value {
             for section in ORDERED_CONFIG_SECTIONS {
                 let key = serde_yaml::Value::String(section.to_string());
@@ -874,18 +875,18 @@ fn ordered_entries<'a>(
 }
 
 fn string_values(value: &Value, field_name: &str) -> Result<Vec<String>, String> {
+    let message = || format!("{field_name} must be a string or array of strings.");
     match value {
         Value::String(text) => Ok(vec![text.clone()]),
-        Value::Array(items) => Ok(items
+        Value::Array(items) => items
             .iter()
-            .map(|item| match item {
-                Value::String(text) => text.clone(),
-                other => other.to_string(),
+            .map(|item| {
+                // Python str() and serde's Display disagree on bool/number
+                // spellings, so non-string items fail closed in both.
+                item.as_str().map(String::from).ok_or_else(message)
             })
-            .collect()),
-        _ => Err(format!(
-            "{field_name} must be a string or array of strings."
-        )),
+            .collect(),
+        _ => Err(message()),
     }
 }
 
@@ -1172,10 +1173,11 @@ fn boundary_label(
     }
     Ok(match raw_predicates {
         Value::String(text) => text.clone(),
+        // Array entries are validated as strings before this fallback runs.
         Value::Array(items) => items
             .first()
-            .map(|item| item.as_str().map_or_else(|| item.to_string(), String::from))
-            .unwrap_or_else(|| "boundary".to_string()),
+            .and_then(Value::as_str)
+            .map_or_else(|| "boundary".to_string(), String::from),
         _ => "boundary".to_string(),
     })
 }
@@ -1204,6 +1206,14 @@ fn load_boundaries(
             return Err("Each boundary entry must be an object.".to_string());
         };
         let raw_predicates = boundary_predicate_value(raw_boundary, section_name)?;
+        // Validated before the label fallback, which derives the label from
+        // the first entry: Python str() and serde Display disagree on
+        // non-string spellings, so both implementations reject them here.
+        if let Value::Array(entries) = &raw_predicates {
+            if entries.iter().any(|entry| !entry.is_string()) {
+                return Err(format!("{section_name} selector values must be strings."));
+            }
+        }
         let label = boundary_label(raw_boundary, &raw_predicates, section_name)?;
         if !seen.insert(label.clone()) {
             return Err(format!("Duplicate boundary label: {label}"));

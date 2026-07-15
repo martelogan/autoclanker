@@ -811,19 +811,24 @@ _BY_SLICE_INT_MESSAGE = "--by-slice values must be integers."
 _BY_SLICE_THRESHOLD_MESSAGE = "--by-slice percentage thresholds must be finite numbers."
 
 
-def _by_slice_limit(raw: str) -> int:
-    """Strict shared grammar with the Rust core: optional sign, digits,
-    int64 range — bare int() would also accept whitespace and underscores."""
-    if re.fullmatch(r"[+-]?\d+", raw) is None:
-        raise ValueError(_BY_SLICE_INT_MESSAGE)
+def strict_int64(raw: str, *, message: str) -> int:
+    """Strict shared grammar with the Rust core (`i64::from_str`): optional
+    sign, ASCII digits, int64 range — bare int() would also accept
+    whitespace, underscores, and non-ASCII digits."""
+    if re.fullmatch(r"[+-]?\d+", raw, re.ASCII) is None:
+        raise ValueError(message)
     value = int(raw)
     if not -(2**63) <= value <= 2**63 - 1:
-        raise ValueError(_BY_SLICE_INT_MESSAGE)
+        raise ValueError(message)
     return value
 
 
+def _by_slice_limit(raw: str) -> int:
+    return strict_int64(raw, message=_BY_SLICE_INT_MESSAGE)
+
+
 def _by_slice_threshold(raw: str) -> float:
-    if raw != raw.strip() or "_" in raw:
+    if raw != raw.strip() or "_" in raw or not raw.isascii():
         raise ValueError(_BY_SLICE_THRESHOLD_MESSAGE)
     try:
         threshold = float(raw)

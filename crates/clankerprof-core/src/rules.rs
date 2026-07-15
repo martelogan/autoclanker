@@ -412,6 +412,34 @@ pub fn runtime_rules_from_mapping(
     })
 }
 
+/// Shared with Python's strict YAML loader: clankerprof YAML inputs reject
+/// non-string mapping keys (bool/number/null keys have no shared spelling
+/// between str() and serde's Display, so neither implementation coerces).
+pub const YAML_KEY_MESSAGE: &str = "YAML mapping keys must be strings.";
+
+/// Walk a parsed YAML tree and reject any non-string mapping key.
+pub fn require_string_keys(value: &Value) -> Result<(), String> {
+    match value {
+        Value::Mapping(mapping) => {
+            for (key, item) in mapping {
+                if !key.is_string() {
+                    return Err(YAML_KEY_MESSAGE.to_string());
+                }
+                require_string_keys(item)?;
+            }
+            Ok(())
+        }
+        Value::Sequence(items) => {
+            for item in items {
+                require_string_keys(item)?;
+            }
+            Ok(())
+        }
+        Value::Tagged(tagged) => require_string_keys(&tagged.value),
+        _ => Ok(()),
+    }
+}
+
 pub fn load_runtime_rules_str(
     payload: &str,
     name: &str,
@@ -419,6 +447,7 @@ pub fn load_runtime_rules_str(
     verbose: bool,
 ) -> Result<RuntimeRuleSet, String> {
     let value: Value = serde_yaml::from_str(payload).map_err(|error| error.to_string())?;
+    require_string_keys(&value)?;
     let Value::Mapping(mapping) = value else {
         return Err(format!("Runtime rule pack {name} must be a YAML object."));
     };

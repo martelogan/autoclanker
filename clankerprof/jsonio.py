@@ -25,8 +25,17 @@ def parse_strict_json(text: str) -> Any:
     return json.loads(text, parse_constant=_reject_constant)
 
 
+YAML_KEY_MESSAGE = "YAML mapping keys must be strings."
+
+
 class _StrictYamlLoader(yaml.SafeLoader):
-    """SafeLoader that rejects duplicate mapping keys instead of last-wins."""
+    """SafeLoader that rejects duplicate and non-string mapping keys.
+
+    serde_yaml (YAML 1.2 core schema) has no timestamp type, so the 1.1
+    timestamp resolver is removed: `2026-01-01` stays a plain string in both
+    implementations instead of becoming a Python date (which would then be
+    rejected as a non-string key that Rust cannot even observe).
+    """
 
     def construct_mapping(
         self, node: yaml.MappingNode, deep: bool = False
@@ -39,12 +48,12 @@ class _StrictYamlLoader(yaml.SafeLoader):
         )
         for key_node, _value_node in node.value:
             key: Any = construct_object(key_node, deep=deep)
-            try:
-                duplicate = key in seen
-            except TypeError:
-                # Unhashable keys fail construct_mapping's own validation.
-                continue
-            if duplicate:
+            if not isinstance(key, str):
+                # Rust walks the parsed tree with the same message; PyYAML's
+                # bool/None/number key objects have no shared spelling with
+                # serde_yaml, so neither implementation coerces them.
+                raise ValueError(YAML_KEY_MESSAGE)
+            if key in seen:
                 # Matches serde_yaml's duplicate-key error text so the two
                 # implementations emit the same envelope.
                 raise ValueError(f'duplicate entry with key "{key}"')
@@ -52,6 +61,16 @@ class _StrictYamlLoader(yaml.SafeLoader):
         return super().construct_mapping(node, deep=deep)
 
 
+_StrictYamlLoader.yaml_implicit_resolvers = {
+    prefix: [
+        (tag, regexp)
+        for tag, regexp in resolvers
+        if tag != "tag:yaml.org,2002:timestamp"
+    ]
+    for prefix, resolvers in _StrictYamlLoader.yaml_implicit_resolvers.items()
+}
+
+
 def parse_strict_yaml(text: str) -> Any:
-    """`yaml.safe_load` with duplicate mapping keys rejected."""
+    """`yaml.safe_load` with duplicate or non-string mapping keys rejected."""
     return yaml.load(text, Loader=_StrictYamlLoader)

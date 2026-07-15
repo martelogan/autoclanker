@@ -118,6 +118,7 @@ pub fn load_slices_file(path: impl AsRef<Path>) -> Result<Vec<SliceDefinition>, 
     let payload = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let value: serde_yaml::Value =
         serde_yaml::from_str(&payload).map_err(|error| error.to_string())?;
+    crate::rules::require_string_keys(&value)?;
     let Some(raw_slices) = value.get("slices").and_then(serde_yaml::Value::as_sequence) else {
         return Err("Slices file must contain a slices array.".to_string());
     };
@@ -324,7 +325,7 @@ fn parse_by_slice_threshold(raw: &str) -> Result<f64, String> {
 /// Python list-slice truncation: a non-negative limit keeps the head
 /// (`list[:n]`), a negative limit drops that many entries from the tail
 /// (`list[:-n]`).
-fn apply_python_limit<T>(items: &mut Vec<T>, limit: Option<i64>) {
+pub(crate) fn apply_python_limit<T>(items: &mut Vec<T>, limit: Option<i64>) {
     let Some(limit) = limit else {
         return;
     };

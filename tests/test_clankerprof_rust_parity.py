@@ -2885,3 +2885,132 @@ def test_clankerprof_rust_lexical_json_matches_python(tmp_path: Path) -> None:
             label,
             run.stderr,
         )
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_value_domain_grammar_matches_python(tmp_path: Path) -> None:
+    facts_path = _order_scope_facts(tmp_path)
+    slices_path = tmp_path / "grammar-slices.yml"
+    slices_path.write_text(
+        "slices:\n  - name: app\n    paths:\n      - /srv/app\n",
+        encoding="utf-8",
+    )
+    scopes_path = tmp_path / "grammar-scopes.yml"
+    scopes_path.write_text(
+        'cost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - function: T\n',
+        encoding="utf-8",
+    )
+    slice_base = ["slices", "--facts", str(facts_path), "--slices", str(slices_path)]
+    scope_base = ["scopes", "--facts", str(facts_path), "--config", str(scopes_path)]
+
+    # H-01: one strict int64 grammar (sign + ASCII digits + range) per flag.
+    envelope = _assert_identical_envelope([*slice_base, "--top", "1_0"], "top-grammar")
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "--top values must be integers.",
+    }
+    _assert_identical_envelope(
+        [*slice_base, "--top", "99999999999999999999"], "top-range"
+    )
+    _assert_identical_envelope(
+        [*slice_base, "--unattributed-libraries", "1_0"], "unattributed-grammar"
+    )
+    _assert_identical_envelope([*scope_base, "--top", "1_0"], "scopes-top-grammar")
+    # Signed scope limits keep Python's list[:top] tail semantics.
+    _assert_identical_success([*scope_base, "--top", "-1"], "scopes-top-negative")
+    _assert_identical_success(
+        [*slice_base, "--top", "-9223372036854775808"], "slices-top-i64-min"
+    )
+
+    # H-02: focus flags take one comma-delimited value; repeats keep the last.
+    report_path = tmp_path / "focus-report.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "a", "pct": 10}, {"name": "b", "pct": 5}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    compare_base = ["compare", "--before", str(report_path), "--after", str(report_path)]
+    focus_last_wins = _assert_identical_success(
+        [*compare_base, "--focus-slices", "zzz", "--focus-slices", "a,b"],
+        "focus-last-wins",
+    )
+    assert [row["name"] for row in json.loads(focus_last_wins)["slices"]] == ["a", "b"]
+
+    # H-03: non-string YAML mapping keys fail closed on every YAML surface.
+    key_cases: list[tuple[str, str, list[str]]] = [
+        (
+            "scope-config",
+            'cost_kind:\n  true: "name:Leaf"\nscope:\n  - function: T\n',
+            ["scopes", "--facts", str(facts_path), "--config"],
+        ),
+        (
+            "slices-config",
+            "profile: /dev/null\n1: x\n",
+            ["slices", "--config"],
+        ),
+        (
+            "slice-definitions",
+            "slices:\n  - name: app\n    1: x\n",
+            ["slices", "--facts", str(facts_path), "--slices"],
+        ),
+        (
+            "rule-pack",
+            "schema_version: clankerprof.runtime_rules.v1\nname: t\n1: x\n",
+            [
+                "slices",
+                "--facts",
+                str(facts_path),
+                "--slices",
+                str(slices_path),
+                "--runtime-rules",
+            ],
+        ),
+    ]
+    for name, text, argv_prefix in key_cases:
+        bad_path = tmp_path / f"badkey-{name}.yml"
+        bad_path.write_text(text, encoding="utf-8")
+        envelope = _assert_identical_envelope(
+            [*argv_prefix, str(bad_path)], f"non-string-key-{name}"
+        )
+        assert json.loads(envelope) == {
+            "ok": False,
+            "error": "YAML mapping keys must be strings.",
+        }
+    # Date-like keys stay plain strings in both YAML dialects (no 1.1
+    # timestamp resolution) and render byte-identically.
+    date_config = tmp_path / "date-key.yml"
+    date_config.write_text(
+        'cost_kind:\n  2026-01-01: "name:Leaf"\nscope:\n  - function: T\n',
+        encoding="utf-8",
+    )
+    date_output = _assert_identical_success(
+        ["scopes", "--facts", str(facts_path), "--config", str(date_config)],
+        "date-key",
+    )
+    assert '"2026-01-01"' in date_output
+
+    # H-04: predicate/selector arrays require string entries.
+    for name, text, message in (
+        (
+            "selector",
+            'cost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - selector: [true]\n',
+            "scope selector values must be strings.",
+        ),
+        (
+            "cost-kind-items",
+            'cost_kind:\n  AppWork: ["name:Leaf", true]\nscope:\n  - function: T\n',
+            "cost_kind AppWork must be a string or array of strings.",
+        ),
+    ):
+        bad_items = tmp_path / f"string-items-{name}.yml"
+        bad_items.write_text(text, encoding="utf-8")
+        envelope = _assert_identical_envelope(
+            ["scopes", "--facts", str(facts_path), "--config", str(bad_items)],
+            f"string-items-{name}",
+        )
+        assert json.loads(envelope) == {"ok": False, "error": message}

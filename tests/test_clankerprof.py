@@ -5579,3 +5579,202 @@ def test_clankerprof_yaml_inputs_reject_duplicate_keys(
     assert exit_code == 2
     envelope = _error_envelope(capsys)
     assert envelope["error"] == 'duplicate entry with key "semantic_rules"'
+
+
+def _grammar_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/app/leaf.rb"))
+    parent = builder.location(builder.function("T", "/app/t.rb"))
+    builder.sample((leaf, parent), 7)
+    facts_path = tmp_path / "grammar-facts.json"
+    facts_path.write_text(
+        dumps_sample_facts(decode_profile_bytes(builder.encode()).to_sample_facts()),
+        encoding="utf-8",
+    )
+    slices_path = tmp_path / "grammar-slices.yml"
+    slices_path.write_text(
+        "slices:\n  - name: app\n    paths:\n      - /app\n",
+        encoding="utf-8",
+    )
+    scopes_path = tmp_path / "grammar-scopes.yml"
+    scopes_path.write_text(
+        'cost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - function: T\n',
+        encoding="utf-8",
+    )
+    return facts_path, slices_path, scopes_path
+
+
+def test_clankerprof_cli_integer_flags_use_strict_int64_grammar(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path, slices_path, scopes_path = _grammar_fixture(tmp_path)
+    slice_base = ["slices", "--facts", str(facts_path), "--slices", str(slices_path)]
+    scope_base = ["scopes", "--facts", str(facts_path), "--config", str(scopes_path)]
+    cases = [
+        ([*slice_base, "--top", "1_0"], "--top values must be integers."),
+        ([*slice_base, "--top", " 10 "], "--top values must be integers."),
+        ([*slice_base, "--top", "١٢"], "--top values must be integers."),
+        (
+            [*slice_base, "--top", "99999999999999999999"],
+            "--top values must be integers.",
+        ),
+        (
+            [*slice_base, "--unattributed-libraries", "1_0"],
+            "--unattributed-libraries values must be integers.",
+        ),
+        ([*scope_base, "--top", "1_0"], "--top values must be integers."),
+    ]
+    for argv, message in cases:
+        assert clankerprof_main(argv) == 2, argv
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == message, argv
+    # int64 boundary values and the bare-flag const stay accepted.
+    for argv in (
+        [*slice_base, "--top", "-9223372036854775808"],
+        [*scope_base, "--top", "-1"],
+        [*slice_base, "--unattributed-libraries"],
+    ):
+        assert clankerprof_main(argv) == 0, argv
+        capsys.readouterr()
+
+
+def test_clankerprof_scopes_negative_top_drops_from_tail(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/app/leaf.rb"))
+    zeaf = builder.location(builder.function("Zeaf", "/lib/z.rb"))
+    parent = builder.location(builder.function("T", "/app/t.rb"))
+    builder.sample((leaf, parent), 7)
+    builder.sample((zeaf, parent), 3)
+    facts_path = tmp_path / "negative-top-facts.json"
+    facts_path.write_text(
+        dumps_sample_facts(decode_profile_bytes(builder.encode()).to_sample_facts()),
+        encoding="utf-8",
+    )
+    scopes_path = tmp_path / "negative-top-scopes.yml"
+    scopes_path.write_text(
+        'cost_kind:\n  AppWork: "name:Leaf"\n'
+        'domain:\n  DomA: "path:/app"\n  DomB: "path:/lib"\n'
+        "scope:\n  - function: T\n",
+        encoding="utf-8",
+    )
+    base = ["scopes", "--facts", str(facts_path), "--config", str(scopes_path)]
+    assert clankerprof_main(base) == 0
+    unlimited = json.loads(capsys.readouterr().out)
+    assert clankerprof_main([*base, "--top", "-1"]) == 0
+    tail_dropped = json.loads(capsys.readouterr().out)
+    domains = unlimited["boundaries"][0]["domains"]
+    dropped_domains = tail_dropped["boundaries"][0]["domains"]
+    # list[:-1] semantics: the ranked domain list loses its final row.
+    assert len(domains) == 2
+    assert len(dropped_domains) == 1
+    assert dropped_domains[0]["name"] == domains[0]["name"]
+
+
+def test_clankerprof_compare_focus_flags_take_one_comma_delimited_value(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    report_path = tmp_path / "focus-report.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "a", "pct": 10}, {"name": "b", "pct": 5}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    base = ["compare", "--before", str(report_path), "--after", str(report_path)]
+    # Space-separated multi-value lists are no longer part of the grammar.
+    assert clankerprof_main([*base, "--focus-slices", "a", "b"]) == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "unrecognized arguments: b"
+    # Focus gates regression detection; a repeated flag keeps the last
+    # occurrence (argparse store), so which rows can trip the gate follows
+    # the final value.
+    regressed = tmp_path / "focus-report-after.json"
+    regressed.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "a", "pct": 10}, {"name": "b", "pct": 20}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    gated = ["compare", "--before", str(report_path), "--after", str(regressed)]
+    assert clankerprof_main([*gated, "--focus-slices", "a"]) == 0
+    capsys.readouterr()
+    assert (
+        clankerprof_main([*gated, "--focus-slices", "b", "--focus-slices", "a"]) == 0
+    )
+    capsys.readouterr()
+    assert (
+        clankerprof_main([*gated, "--focus-slices", "a", "--focus-slices", "b"]) == 2
+    )
+    last_wins = json.loads(capsys.readouterr().out)
+    assert last_wins["has_regression"] is True
+
+
+def test_clankerprof_yaml_inputs_reject_non_string_mapping_keys(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from clankerprof.jsonio import parse_strict_yaml
+
+    facts_path, _slices_path, _scopes_path = _grammar_fixture(tmp_path)
+    for key in ("1", "true", "1.5", "null", "[a, b]"):
+        with pytest.raises(ValueError, match="YAML mapping keys must be strings."):
+            parse_strict_yaml(f"{key}: x\n")
+    # The YAML 1.1 timestamp resolver is removed to match serde_yaml: date-like
+    # scalars stay plain strings in keys and values.
+    assert parse_strict_yaml("2026-01-01: 2026-01-02") == {
+        "2026-01-01": "2026-01-02"
+    }
+    scope_config = tmp_path / "badkey-scopes.yml"
+    scope_config.write_text(
+        'cost_kind:\n  true: "name:Leaf"\nscope:\n  - function: T\n',
+        encoding="utf-8",
+    )
+    assert (
+        clankerprof_main(
+            ["scopes", "--facts", str(facts_path), "--config", str(scope_config)]
+        )
+        == 2
+    )
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "YAML mapping keys must be strings."
+
+
+def test_clankerprof_scope_selector_arrays_require_string_entries(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path, _slices_path, _scopes_path = _grammar_fixture(tmp_path)
+    cases = [
+        (
+            'cost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - selector: [true]\n',
+            "scope selector values must be strings.",
+        ),
+        (
+            'cost_kind:\n  AppWork: ["name:Leaf", true]\nscope:\n  - function: T\n',
+            "cost_kind AppWork must be a string or array of strings.",
+        ),
+    ]
+    for index, (config_text, message) in enumerate(cases):
+        config_path = tmp_path / f"string-items-{index}.yml"
+        config_path.write_text(config_text, encoding="utf-8")
+        assert (
+            clankerprof_main(
+                ["scopes", "--facts", str(facts_path), "--config", str(config_path)]
+            )
+            == 2
+        )
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == message

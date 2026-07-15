@@ -59,6 +59,7 @@ from clankerprof.render import (
     render_target_csv,
     render_target_json,
     render_target_text,
+    strict_int64,
 )
 from clankerprof.stats import CategoryStats
 
@@ -216,11 +217,31 @@ def _optional_unattributed_libraries(payload: dict[str, object]) -> int | None:
         raise ValueError(message) from exc
 
 
-def _focus_slices(values: Sequence[str]) -> frozenset[str]:
-    result: set[str] = set()
-    for value in values:
-        result.update(part for part in value.split(",") if part)
-    return frozenset(result)
+def _focus_slices(value: str | None) -> frozenset[str]:
+    # The documented grammar is one comma-delimited value; a repeated flag
+    # keeps the last occurrence (argparse store), mirrored by clap's
+    # overrides_with in the Rust CLI.
+    if not value:
+        return frozenset()
+    return frozenset(part for part in value.split(",") if part)
+
+
+_TOP_INT_MESSAGE = "--top values must be integers."
+_UNATTRIBUTED_LIBRARIES_INT_MESSAGE = (
+    "--unattributed-libraries values must be integers."
+)
+
+
+def _int64_flag(raw: object, *, message: str) -> int | None:
+    """Strict CLI integer grammar shared with the Rust core (i64::from_str);
+    argparse type=int would also accept underscores, whitespace, non-ASCII
+    digits, and unbounded magnitude. Non-string values (an argparse const)
+    pass through unchanged."""
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        return cast(int, raw)
+    return strict_int64(raw, message=message)
 
 
 def _merge_single_value(
@@ -500,11 +521,17 @@ def _aliased_mapping_value(
 
 
 def _string_values(value: object, *, field_name: str) -> tuple[str, ...]:
+    message = f"{field_name} must be a string or array of strings."
     if isinstance(value, str):
         return (value,)
     if isinstance(value, list):
-        return tuple(str(item) for item in cast(list[object], value))
-    raise ValueError(f"{field_name} must be a string or array of strings.")
+        items = cast(list[object], value)
+        # Python str() and Rust's Display disagree on bool/number spellings,
+        # so non-string items fail closed in both implementations.
+        if not all(isinstance(item, str) for item in items):
+            raise ValueError(message)
+        return tuple(cast(list[str], items))
+    raise ValueError(message)
 
 
 def _predicate_expr_children(
@@ -799,13 +826,28 @@ def _boundary_predicate_value(
     raise ValueError("Each scope must define selector, matcher, match, or function.")
 
 
+def _require_string_selector_entries(
+    raw_predicates: object, *, section_name: str
+) -> None:
+    # Validated before the label fallback, which derives the label from the
+    # first entry: Python str() and Rust's Display disagree on non-string
+    # spellings, so both implementations reject them here.
+    if not isinstance(raw_predicates, list):
+        return
+    if not all(
+        isinstance(entry, str) for entry in cast(list[object], raw_predicates)
+    ):
+        raise ValueError(f"{section_name} selector values must be strings.")
+
+
 def _boundary_label_fallback(raw_predicates: object) -> str:
     if isinstance(raw_predicates, str):
         return raw_predicates
     if isinstance(raw_predicates, list):
+        # Entries are validated as strings before this fallback runs.
         raw_values = cast(list[object], raw_predicates)
-        if raw_values:
-            return str(raw_values[0])
+        if raw_values and isinstance(raw_values[0], str):
+            return raw_values[0]
     return "boundary"
 
 
@@ -825,6 +867,7 @@ def _load_boundaries(
         raw_predicates = _boundary_predicate_value(
             raw_boundary, section_name=section_name
         )
+        _require_string_selector_entries(raw_predicates, section_name=section_name)
         for key in ("label", "name"):
             value = raw_boundary.get(key)
             if value is not None and not isinstance(value, str):
@@ -1055,10 +1098,11 @@ def run_slices(args: argparse.Namespace) -> dict[str, Any]:
     raw_facts = _merge_single_value(args.facts, config.get("facts"), name="facts")
     sample_facts = _load_projection_input(raw_profile, raw_facts)
     raw_slices = _merge_single_value(args.slices, config.get("slices"), name="slices")
+    cli_top = _int64_flag(args.top, message=_TOP_INT_MESSAGE)
     raw_top = _optional_int(config, "top")
-    if args.top is not None and raw_top is not None:
+    if cli_top is not None and raw_top is not None:
         raise ValueError("top specified both on command line and in config file.")
-    top = args.top if args.top is not None else raw_top
+    top = cli_top if cli_top is not None else raw_top
     raw_by_slice = _optional_by_slice(config)
     if args.by_slice is not None and raw_by_slice is not None:
         raise ValueError("by_slice specified both on command line and in config file.")
@@ -1079,9 +1123,12 @@ def run_slices(args: argparse.Namespace) -> dict[str, Any]:
         if args.no_collapse_native
         else bool(raw_no_collapse_native)
     )
+    cli_unattributed_libraries = _int64_flag(
+        args.unattributed_libraries, message=_UNATTRIBUTED_LIBRARIES_INT_MESSAGE
+    )
     raw_unattributed_libraries = _optional_unattributed_libraries(config)
     if (
-        args.unattributed_libraries is not None
+        cli_unattributed_libraries is not None
         and raw_unattributed_libraries is not None
     ):
         raise ValueError(
@@ -1089,8 +1136,8 @@ def run_slices(args: argparse.Namespace) -> dict[str, Any]:
             "(--unattributed-gems is a compatibility alias)."
         )
     unattributed_libraries = (
-        args.unattributed_libraries
-        if args.unattributed_libraries is not None
+        cli_unattributed_libraries
+        if cli_unattributed_libraries is not None
         else raw_unattributed_libraries
     )
     raw_filters = (
@@ -1160,7 +1207,7 @@ def run_boundaries(args: argparse.Namespace) -> dict[str, Any]:
         dict[str, Any],
         render_boundary_json(
             analyze_boundary_facts(sample_facts, options),
-            top=args.top,
+            top=_int64_flag(args.top, message=_TOP_INT_MESSAGE),
         ),
     )
     if args.output:
@@ -1340,7 +1387,7 @@ def register_commands(subparsers: Any) -> None:
             ),
         )
         parser.add_argument("--output")
-        parser.add_argument("--top", type=int)
+        parser.add_argument("--top")
         parser.add_argument("--runtime", choices=("generic", "ruby"), default="generic")
         parser.add_argument(
             "--runtime-rules",
@@ -1391,7 +1438,7 @@ def register_commands(subparsers: Any) -> None:
     slices.add_argument("--filter", dest="filters", action="append", default=[])
     slices.add_argument("--collapse", action="append", default=[])
     slices.add_argument("--attribute", action="append", default=[])
-    slices.add_argument("--top", type=int)
+    slices.add_argument("--top")
     slices.add_argument("--by-slice", nargs="?", const="0.1%")
     slices.add_argument("--show-paths", action="store_true")
     slices.add_argument("--no-collapse-native", action="store_true")
@@ -1401,7 +1448,6 @@ def register_commands(subparsers: Any) -> None:
         dest="unattributed_libraries",
         nargs="?",
         const=2**63 - 1,
-        type=int,
     )
     slices.add_argument("--runtime", choices=("generic", "ruby"), default="generic")
     slices.add_argument(
@@ -1432,13 +1478,11 @@ def register_commands(subparsers: Any) -> None:
     compare.add_argument("--after", required=True)
     compare.add_argument("--threshold-abs", type=float, default=2.0)
     compare.add_argument("--threshold-rel", type=float, default=15.0)
-    compare.add_argument("--focus-slices", nargs="*", default=[])
+    compare.add_argument("--focus-slices")
     compare.add_argument(
         "--focus-boundaries",
         "--focus-scopes",
         dest="focus_boundaries",
-        nargs="*",
-        default=[],
     )
     compare.add_argument("--output")
     compare.set_defaults(handler=_contracted(run_compare))

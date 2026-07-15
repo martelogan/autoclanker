@@ -179,6 +179,10 @@ semantics.
 | `facts` stdout carries the artifact bytes: compact by default, `--pretty` opt-in | covered | `test_clankerprof_facts_stdout_matches_artifact_bytes`, `test_clankerprof_rust_output_receipts_and_usage_envelopes_match_python` |
 | Non-facts JSON artifacts, receipts, and envelopes use Python `json.dumps` lexical form (`\uXXXX` escapes, CPython float repr) byte-identically | covered | `test_clankerprof_rust_lexical_json_matches_python`, Rust `pyjson` unit tests |
 | Duplicate YAML mapping keys rejected in both languages with the shared `duplicate entry with key` message | covered | `test_clankerprof_yaml_inputs_reject_duplicate_keys`, `test_clankerprof_rust_scope_declaration_order_matches_python` |
+| Integer CLI flags (`--top`, `--unattributed-libraries`) share the strict signed-64 ASCII grammar; signed limits keep Python `list[:n]` tail semantics incl. `scopes --top` | covered | `test_clankerprof_cli_integer_flags_use_strict_int64_grammar`, `test_clankerprof_scopes_negative_top_drops_from_tail`, `test_clankerprof_rust_value_domain_grammar_matches_python` |
+| Focus flags take one comma-delimited value; a repeated flag keeps the last occurrence in both CLIs | covered | `test_clankerprof_compare_focus_flags_take_one_comma_delimited_value`, `test_clankerprof_rust_value_domain_grammar_matches_python` |
+| Non-string YAML mapping keys rejected on every YAML surface with the shared message; no YAML 1.1 timestamp resolution | covered | `test_clankerprof_yaml_inputs_reject_non_string_mapping_keys`, `test_clankerprof_rust_value_domain_grammar_matches_python` |
+| Selector and string-or-array config fields require string entries in both languages | covered | `test_clankerprof_scope_selector_arrays_require_string_entries`, `test_clankerprof_rust_value_domain_grammar_matches_python` |
 
 ## Remaining confidence boundary
 

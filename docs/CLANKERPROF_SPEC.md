@@ -335,7 +335,17 @@ validation errors in both implementations, because Python `str()` and Rust
 rule packs) reject duplicate mapping keys in both implementations — never
 silent last-wins. The envelope message contains
 `duplicate entry with key "<key>"`; surrounding context or line/column
-detail is engine-specific and not part of the byte contract.
+detail is engine-specific and not part of the byte contract. YAML mapping
+keys must be strings (`YAML mapping keys must be strings.`): bool, number,
+null, and sequence keys are validation errors on every YAML surface, because
+Python `str()` and serde's `Display` have no shared spelling for them. The
+YAML 1.1 timestamp resolver is not applied — date-like scalars such as
+`2026-01-01` stay plain strings, matching serde_yaml's YAML 1.2 core schema.
+Selector and predicate arrays require string entries: a non-string entry in
+a scope `selector`/`matcher`/`match` list is
+`<section> selector values must be strings.`, and a non-string entry in any
+string-or-array field (cost-kind patterns, rollup categories) is
+`<field> must be a string or array of strings.` in both implementations.
 Supported selector keys are intentionally generic: function name contains,
 function name equality, path/glob, regex, native frame, dependency selectors,
 optional slice label, configured cost-kind label, and runtime-rule label.
@@ -524,10 +534,20 @@ collapse shape validation always runs, with or without a slices config.
 signed 64-bit integers (negative limits drop slices from the tail,
 Python-slice style) and `%`-suffixed thresholds must be finite numbers —
 unparsable or non-finite values are validation errors, never ignored.
+Every integer-valued CLI flag (`--top`, `--unattributed-libraries`,
+`--by-slice` bare values) shares one strict grammar in both implementations:
+an optional sign followed by ASCII digits, within the signed 64-bit range.
+Underscores, surrounding whitespace, non-ASCII digits, and out-of-range
+magnitudes are validation errors (`--top values must be integers.`), never
+lenient `int()` coercion. Signed limits keep Python `list[:n]` semantics
+everywhere they rank rows, including `scopes --top`.
 `slices --config` (TOML or YAML) is part of the shared CLI surface: config
 and command line merge with identical duplicate-scalar rejection, value
 coercion, and error ordering in both languages, and `compare` accepts
 `--focus-scopes` as an alias of `--focus-boundaries` in both.
+`--focus-slices` and `--focus-boundaries` each take a single comma-delimited
+value; repeating a focus flag keeps the last occurrence in both
+implementations rather than accumulating.
 
 ## Compatibility and validation
 

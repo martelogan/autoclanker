@@ -156,7 +156,7 @@ struct SlicesArgs {
     collapse: Vec<String>,
     /// Limit frames per slice (negative drops from the tail, Python-style).
     #[arg(long, allow_negative_numbers = true)]
-    top: Option<i64>,
+    top: Option<String>,
     /// Slice count limit or percentage threshold (bare flag means 0.1%).
     /// Negative-number values must parse as values, mirroring argparse.
     #[arg(long, num_args = 0..=1, default_missing_value = "0.1%", allow_negative_numbers = true)]
@@ -170,7 +170,7 @@ struct SlicesArgs {
     /// Report unattributed dependency libraries for the default slice
     /// (optionally limited to N entries).
     #[arg(long, visible_alias = "unattributed-gems", num_args = 0..=1, default_missing_value = "9223372036854775807", allow_negative_numbers = true)]
-    unattributed_libraries: Option<i64>,
+    unattributed_libraries: Option<String>,
     /// Write the report to this path instead of stdout.
     #[arg(long, overrides_with = "output")]
     output: Option<PathBuf>,
@@ -187,9 +187,9 @@ struct ScopesArgs {
     /// Scope config (TOML or YAML).
     #[arg(long)]
     config: PathBuf,
-    /// Limit ranked rows per section.
-    #[arg(long)]
-    top: Option<usize>,
+    /// Limit ranked rows per section (negative drops from the tail, Python-style).
+    #[arg(long, allow_negative_numbers = true)]
+    top: Option<String>,
     /// Runtime rule pack to apply (generic or ruby).
     #[arg(long, default_value = "generic")]
     runtime: String,
@@ -233,9 +233,9 @@ struct ReportArgs {
     /// Include the sample-facts payload as a facts section.
     #[arg(long)]
     include_facts: bool,
-    /// Limit ranked scope rows per section.
-    #[arg(long)]
-    top: Option<usize>,
+    /// Limit ranked scope rows per section (negative drops from the tail, Python-style).
+    #[arg(long, allow_negative_numbers = true)]
+    top: Option<String>,
     /// Runtime rule pack to apply (generic or ruby).
     #[arg(long, default_value = "generic")]
     runtime: String,
@@ -265,10 +265,14 @@ struct CompareArgs {
     #[arg(long, default_value_t = 15.0)]
     threshold_rel: f64,
     /// Comma-delimited slice names to gate on.
-    #[arg(long)]
+    #[arg(long, overrides_with = "focus_slices")]
     focus_slices: Option<String>,
     /// Comma-delimited boundary names to gate on.
-    #[arg(long, visible_alias = "focus-scopes")]
+    #[arg(
+        long,
+        visible_alias = "focus-scopes",
+        overrides_with = "focus_boundaries"
+    )]
     focus_boundaries: Option<String>,
     /// Write the comparison to this path instead of stdout.
     #[arg(long, overrides_with = "output")]
@@ -407,7 +411,10 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
         let options = load_boundary_options(scopes_config_path, runtime_rules)?;
         payload.insert(
             "scopes".to_string(),
-            render_boundary_json(&analyze_boundary_facts(&facts, &options)?, args.top),
+            render_boundary_json(
+                &analyze_boundary_facts(&facts, &options)?,
+                int64_flag(args.top.as_deref(), TOP_INT_MESSAGE)?,
+            ),
         );
     }
     clankerprof_core::targets::take_pattern_error()?;
@@ -450,10 +457,30 @@ fn run_scopes(args: ScopesArgs) -> Result<(), String> {
     options.fold_runtime_internals = args.fold_runtime_internals;
     options.caller_fallback_when_uncategorized = args.no_enhanced;
     let facts = load_projection_input(args.profile.as_ref(), args.facts.as_ref())?;
-    let payload = render_boundary_json(&analyze_boundary_facts(&facts, &options)?, args.top);
+    let payload = render_boundary_json(
+        &analyze_boundary_facts(&facts, &options)?,
+        int64_flag(args.top.as_deref(), TOP_INT_MESSAGE)?,
+    );
     clankerprof_core::targets::take_pattern_error()?;
     let rendered = clankerprof_core::pyjson::dumps_pretty(&payload);
     emit(&rendered, args.output.as_ref(), "clankerprof_boundaries")
+}
+
+const TOP_INT_MESSAGE: &str = "--top values must be integers.";
+const UNATTRIBUTED_LIBRARIES_INT_MESSAGE: &str =
+    "--unattributed-libraries values must be integers.";
+
+/// Strict CLI integer grammar shared with Python's strict_int64: optional
+/// sign, ASCII digits, i64 range. clap's typed i64 parse would reject the
+/// same strings but with engine-specific wording.
+fn int64_flag(raw: Option<&str>, message: &str) -> Result<Option<i64>, String> {
+    match raw {
+        None => Ok(None),
+        Some(text) => text
+            .parse::<i64>()
+            .map(Some)
+            .map_err(|_| message.to_string()),
+    }
 }
 
 fn receipt_value(tool: &str, output: &std::path::Path) -> serde_json::Value {
@@ -723,11 +750,12 @@ fn run_slices(args: SlicesArgs) -> Result<(), String> {
         config.get("slices"),
         "slices",
     )?;
+    let cli_top = int64_flag(args.top.as_deref(), TOP_INT_MESSAGE)?;
     let raw_top = optional_config_int(&config, "top")?;
-    if args.top.is_some() && raw_top.is_some() {
+    if cli_top.is_some() && raw_top.is_some() {
         return Err("top specified both on command line and in config file.".to_string());
     }
-    let top = args.top.or(raw_top);
+    let top = cli_top.or(raw_top);
     let raw_by_slice = optional_config_by_slice(&config)?;
     if args.by_slice.is_some() && raw_by_slice.is_some() {
         return Err("by_slice specified both on command line and in config file.".to_string());
@@ -745,15 +773,19 @@ fn run_slices(args: SlicesArgs) -> Result<(), String> {
         );
     }
     let no_collapse_native = args.no_collapse_native || raw_no_collapse_native.unwrap_or(false);
+    let cli_unattributed_libraries = int64_flag(
+        args.unattributed_libraries.as_deref(),
+        UNATTRIBUTED_LIBRARIES_INT_MESSAGE,
+    )?;
     let raw_unattributed_libraries = optional_config_unattributed(&config)?;
-    if args.unattributed_libraries.is_some() && raw_unattributed_libraries.is_some() {
+    if cli_unattributed_libraries.is_some() && raw_unattributed_libraries.is_some() {
         return Err(
             "unattributed_libraries specified both on command line and in config file \
              (--unattributed-gems is a compatibility alias)."
                 .to_string(),
         );
     }
-    let unattributed_libraries = args.unattributed_libraries.or(raw_unattributed_libraries);
+    let unattributed_libraries = cli_unattributed_libraries.or(raw_unattributed_libraries);
     let mut filters = config_string_array(&config, "filters")?;
     filters.extend(config_string_array(&config, "filter")?);
     filters.extend(args.filter.iter().cloned());
@@ -828,6 +860,7 @@ fn load_slices_config(
     } else {
         let parsed: serde_yaml::Value =
             serde_yaml::from_str(&payload).map_err(|error| error.to_string())?;
+        clankerprof_core::rules::require_string_keys(&parsed)?;
         yaml_to_json(parsed)
     };
     match value {
