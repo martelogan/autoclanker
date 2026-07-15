@@ -1,0 +1,60 @@
+{
+  "after_total_ns": 100,
+  "before_total_ns": 100,
+  "has_regression": false,
+  "slices": [
+    {
+      "after_pct": -5.0,
+      "before_pct": -10.0,
+      "delta_abs": 5.0,
+      "delta_rel": 0.0,
+      "frame_deltas": [
+        {
+          "after_pct": -5.0,
+          "before_pct": -10.0,
+          "delta_abs": 5.0,
+          "function": "neg_func",
+          "slice": "negative"
+        }
+      ],
+      "name": "negative",
+      "status": "stable"
+    },
+    {
+      "after_pct": 105.0,
+      "before_pct": 110.0,
+      "delta_abs": -5.0,
+      "delta_rel": -4.545454545454546,
+      "frame_deltas": [
+        {
+          "after_pct": 105.0,
+          "before_pct": 110.0,
+          "delta_abs": -5.0,
+          "function": "pos_func",
+          "slice": "positive"
+        }
+      ],
+      "name": "positive",
+      "status": "stable"
+    }
+  ],
+  "tool": "clankerprof_compare",
+  "top_improvements": [
+    {
+      "after_pct": 105.0,
+      "before_pct": 110.0,
+      "delta_abs": -5.0,
+      "function": "pos_func",
+      "slice": "positive"
+    }
+  ],
+  "top_regressions": [
+    {
+      "after_pct": -5.0,
+      "before_pct": -10.0,
+      "delta_abs": 5.0,
+      "function": "neg_func",
+      "slice": "negative"
+    }
+  ]
+}

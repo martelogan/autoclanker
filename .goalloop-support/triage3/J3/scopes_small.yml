@@ -1,0 +1,10 @@
+cost_kind:
+  Pos: "name_eq:PosLeaf"
+  Neg: "name_eq:NegLeaf"
+scope:
+  - function: ScopeFn
+    rollup:
+      Positive: ["Pos"]
+      Negative: ["Neg"]
+    attributables:
+      huge: 2.0

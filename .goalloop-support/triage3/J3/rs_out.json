@@ -1,0 +1,103 @@
+{
+  "boundaries": [
+    {
+      "attributable_estimates": {
+        "huge": 1.7e+308
+      },
+      "buckets": [
+        {
+          "attributable_estimates": {
+            "huge": null
+          },
+          "categories": [
+            {
+              "attributable_estimates": {
+                "huge": null
+              },
+              "caller_leaf_pairs": [
+                {
+                  "attributable_estimates": {
+                    "huge": null
+                  },
+                  "pair": "PosLeaf -> PosLeaf",
+                  "pct": 110.00000000000001,
+                  "samples": 1,
+                  "time_ns": 110
+                }
+              ],
+              "files": [
+                "/srv/app/pos.py"
+              ],
+              "folded_from": {},
+              "leaf_functions": {
+                "PosLeaf": {
+                  "count": 1,
+                  "cpu_time": 110
+                }
+              },
+              "name": "Pos",
+              "pct": 110.00000000000001,
+              "samples": 1,
+              "time_ns": 110
+            }
+          ],
+          "name": "Positive",
+          "pct": 110.00000000000001,
+          "samples": 1,
+          "time_ns": 110
+        },
+        {
+          "attributable_estimates": {
+            "huge": -1.7000000000000001e+307
+          },
+          "categories": [
+            {
+              "attributable_estimates": {
+                "huge": -1.7000000000000001e+307
+              },
+              "caller_leaf_pairs": [
+                {
+                  "attributable_estimates": {
+                    "huge": -1.7000000000000001e+307
+                  },
+                  "pair": "NegLeaf -> NegLeaf",
+                  "pct": -10.0,
+                  "samples": 1,
+                  "time_ns": -10
+                }
+              ],
+              "files": [
+                "/srv/app/neg.py"
+              ],
+              "folded_from": {},
+              "leaf_functions": {
+                "NegLeaf": {
+                  "count": 1,
+                  "cpu_time": -10
+                }
+              },
+              "name": "Neg",
+              "pct": -10.0,
+              "samples": 1,
+              "time_ns": -10
+            }
+          ],
+          "name": "Negative",
+          "pct": -10.0,
+          "samples": 1,
+          "time_ns": -10
+        }
+      ],
+      "domains": [],
+      "name": "ScopeFn",
+      "pct_of_profile": 100.0,
+      "samples": 2,
+      "total_time_ns": 100
+    }
+  ],
+  "summary": {
+    "total_time_ns": 100,
+    "unique_frame_count": 3
+  },
+  "tool": "clankerprof_boundaries"
+}

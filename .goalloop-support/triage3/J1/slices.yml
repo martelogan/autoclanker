@@ -1,0 +1,7 @@
+slices:
+  - name: negative
+    paths:
+      - /neg
+  - name: positive
+    paths:
+      - /pos

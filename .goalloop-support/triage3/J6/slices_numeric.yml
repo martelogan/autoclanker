@@ -1,0 +1,5 @@
+slices:
+  - name: numeric
+    paths: [123]
+  - name: fallback
+    default: true

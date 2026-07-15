@@ -1,0 +1,6 @@
+slices:
+  - name: a
+    paths:
+      - /srv/a
+  - name: b
+    default: true

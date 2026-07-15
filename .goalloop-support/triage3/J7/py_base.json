@@ -1,0 +1,41 @@
+{
+  "after_total_ns": 7,
+  "before_total_ns": 7,
+  "has_regression": false,
+  "projection": "boundaries",
+  "rows": [
+    {
+      "after_pct": 100.0,
+      "before_pct": 100.0,
+      "boundary": "T",
+      "delta_abs": 0.0,
+      "delta_rel": 0.0,
+      "kind": "boundary",
+      "name": "T",
+      "status": "stable"
+    },
+    {
+      "after_pct": 100.0,
+      "before_pct": 100.0,
+      "boundary": "T",
+      "delta_abs": 0.0,
+      "delta_rel": 0.0,
+      "kind": "bucket",
+      "name": "Other",
+      "status": "stable"
+    },
+    {
+      "after_pct": 100.0,
+      "before_pct": 100.0,
+      "boundary": "T",
+      "delta_abs": 0.0,
+      "delta_rel": 0.0,
+      "kind": "category",
+      "name": "AppWork",
+      "status": "stable"
+    }
+  ],
+  "tool": "clankerprof_compare",
+  "top_improvements": [],
+  "top_regressions": []
+}
