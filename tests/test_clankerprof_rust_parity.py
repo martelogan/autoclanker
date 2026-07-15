@@ -613,6 +613,143 @@ def test_clankerprof_rust_cli_rejects_malformed_flags(tmp_path: Path) -> None:
         )
         assert completed.returncode == 2, argv
         assert completed.stdout == "", argv
+        envelope = json.loads(completed.stderr)
+        assert envelope["ok"] is False, argv
+        assert envelope["error"], argv
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_output_receipts_and_usage_envelopes_match_python(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from clankerprof.cli import main as clankerprof_main
+
+    repo_root = Path(__file__).resolve().parents[1]
+    profile_path = tmp_path / "receipts.pb"
+    profile_path.write_bytes(_profile_bytes(gzipped=False))
+    config_path = tmp_path / "targets.json"
+    config_path.write_text(
+        json.dumps({"Target#render": {"App": "path:app/**"}}),
+        encoding="utf-8",
+    )
+
+    def run_rust(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                "cargo",
+                "run",
+                "--quiet",
+                "-p",
+                "clankerprof-core",
+                "--bin",
+                "clankerprof-rs",
+                "--",
+                *argv,
+            ],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    # facts stdout carries the artifact bytes: compact default, --pretty opt-in.
+    for extra in ([], ["--pretty"]):
+        assert clankerprof_main(["facts", "--profile", str(profile_path), *extra]) == 0
+        python_stdout = capsys.readouterr().out
+        completed = run_rust(["facts", "--profile", str(profile_path), *extra])
+        assert completed.returncode == 0, completed.stderr
+        assert completed.stdout == python_stdout, extra
+
+    # --output prints the same receipt bytes (modulo the path value) and
+    # writes identical artifacts.
+    python_targets = tmp_path / "targets-python.json"
+    rust_targets = tmp_path / "targets-rust.json"
+    targets_argv = [
+        "targets",
+        "--profile",
+        str(profile_path),
+        "--config",
+        str(config_path),
+    ]
+    assert clankerprof_main([*targets_argv, "--output", str(python_targets)]) == 0
+    python_receipt = capsys.readouterr().out
+    completed = run_rust([*targets_argv, "--output", str(rust_targets)])
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.replace(
+        str(rust_targets), "<path>"
+    ) == python_receipt.replace(str(python_targets), "<path>")
+    assert rust_targets.read_bytes() == python_targets.read_bytes()
+
+    # compare accepts --output through the global placement in both CLIs,
+    # prints a has_regression receipt, and keeps the regression exit code.
+    before_path = tmp_path / "before.json"
+    after_path = tmp_path / "after.json"
+    before_path.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "A", "pct": 10.0}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    after_path.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "A", "pct": 50.0}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    python_compare = tmp_path / "compare-python.json"
+    rust_compare = tmp_path / "compare-rust.json"
+    assert (
+        clankerprof_main(
+            [
+                "--output",
+                str(python_compare),
+                "compare",
+                "--before",
+                str(before_path),
+                "--after",
+                str(after_path),
+            ]
+        )
+        == 2
+    )
+    python_receipt = capsys.readouterr().out
+    completed = run_rust(
+        [
+            "--output",
+            str(rust_compare),
+            "compare",
+            "--before",
+            str(before_path),
+            "--after",
+            str(after_path),
+        ]
+    )
+    assert completed.returncode == 2, completed.stderr
+    assert completed.stdout.replace(
+        str(rust_compare), "<path>"
+    ) == python_receipt.replace(str(python_compare), "<path>")
+    assert rust_compare.read_bytes() == python_compare.read_bytes()
+
+    # Usage errors exit 2 with an empty stdout and a JSON envelope on stderr.
+    assert clankerprof_main(["targets", "--bogus"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    python_envelope = json.loads(captured.err)
+    assert python_envelope["ok"] is False
+    completed = run_rust(["targets", "--bogus"])
+    assert completed.returncode == 2
+    assert completed.stdout == ""
+    rust_envelope = json.loads(completed.stderr)
+    assert rust_envelope["ok"] is False
 
 
 @pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")

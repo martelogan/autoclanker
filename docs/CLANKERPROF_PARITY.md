@@ -147,6 +147,15 @@ semantics.
 | Frames sharing a function name aggregate (sum) in per-function deltas, byte-identically across languages | covered | `test_clankerprof_compare_aggregates_duplicate_function_frames`, `test_clankerprof_rust_compare_aggregates_duplicate_functions_like_python` |
 | Text compare report wording from older slice tools | not claimed | JSON gate compatibility is the stable contract. |
 
+## CLI stream contract
+
+| Capability | Status | Test coverage |
+| --- | --- | --- |
+| Usage/option errors exit 2 with the JSON error envelope in both standalone CLIs | covered | `test_clankerprof_cli_rejects_malformed_flags`, `test_clankerprof_rust_cli_rejects_malformed_flags`, `test_clankerprof_rust_output_receipts_and_usage_envelopes_match_python` |
+| Successful `--output` writes print the JSON receipt, byte-identically across languages | covered | `test_clankerprof_output_writes_print_json_receipts`, `test_clankerprof_rust_output_receipts_and_usage_envelopes_match_python` |
+| `compare --output` (local or hoisted global placement) writes the report, prints a `has_regression` receipt, and keeps the regression exit code | covered | `test_clankerprof_compare_output_receipt_preserves_regression_exit`, `test_clankerprof_rust_output_receipts_and_usage_envelopes_match_python` |
+| `facts` stdout carries the artifact bytes: compact by default, `--pretty` opt-in | covered | `test_clankerprof_facts_stdout_matches_artifact_bytes`, `test_clankerprof_rust_output_receipts_and_usage_envelopes_match_python` |
+
 ## Remaining confidence boundary
 
 The self-contained tests now cover the mined target-attribution surface plus

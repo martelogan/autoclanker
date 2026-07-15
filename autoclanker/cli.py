@@ -33,6 +33,7 @@ _LOCAL_OUTPUT_COMMAND_PREFIXES = (
     ("bigbets", "emit"),
     ("bigbets", "issues", "merge"),
     ("pprof", "boundaries"),
+    ("pprof", "compare"),
     ("pprof", "facts"),
     ("pprof", "scopes"),
     ("pprof", "slices"),
@@ -71,6 +72,19 @@ def _normalize_global_output_position(argv: Sequence[str]) -> list[str]:
             del normalized[index]
             continue
         index += 1
+    if not extracted:
+        return normalized
+    # Commands with a local --output must consume the flag themselves:
+    # argparse subparsers copy a fresh namespace over the parent's, so a
+    # root-consumed --output would be clobbered by the subparser default.
+    # Relocating the global flag to the end (mirroring the standalone
+    # clankerprof hoist) hands it to the subcommand instead.
+    command_parts = tuple(item for item in normalized if not item.startswith("-"))
+    if any(
+        command_parts[: len(prefix)] == prefix
+        for prefix in _LOCAL_OUTPUT_COMMAND_PREFIXES
+    ):
+        return normalized + extracted
     return extracted + normalized
 
 

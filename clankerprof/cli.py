@@ -8,7 +8,7 @@ import zlib
 
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 import yaml
 
@@ -44,6 +44,7 @@ from clankerprof.analysis import (
 from clankerprof.compare import CompareOptions, compare_json
 from clankerprof.facts import (
     SampleFactsInput,
+    dumps_sample_facts,
     read_sample_facts,
     sample_facts_to_jsonable,
     write_sample_facts,
@@ -62,14 +63,27 @@ from clankerprof.render import (
 from clankerprof.stats import CategoryStats
 
 
+class _JsonArgumentParser(argparse.ArgumentParser):
+    """Route argparse usage errors through the JSON error envelope.
+
+    argparse would otherwise print prose usage text and SystemExit before the
+    ValueError-to-envelope boundary in main(); subparsers inherit this class
+    via add_subparsers' parser_class default. --help/--version use
+    parser.exit(), not error(), so they stay human-readable with exit 0.
+    """
+
+    def error(self, message: str) -> NoReturn:
+        raise ValueError(message)
+
+
 def _contracted(
     handler: Callable[[argparse.Namespace], dict[str, Any]],
 ) -> Callable[[argparse.Namespace], dict[str, Any]]:
     """Map environment failures onto the exit-2 validation contract.
 
-    Missing/corrupt inputs (files, gzip streams, YAML configs) must surface as
-    the JSON error envelope through both the standalone and umbrella CLIs,
-    never as tracebacks.
+    Missing/corrupt inputs (files, gzip streams, YAML configs) and numeric
+    conversion failures must surface as the JSON error envelope through both
+    the standalone and umbrella CLIs, never as tracebacks.
     """
 
     def wrapped(args: argparse.Namespace) -> dict[str, Any]:
@@ -77,7 +91,7 @@ def _contracted(
             return handler(args)
         except ValueError:
             raise
-        except (OSError, EOFError, zlib.error, yaml.YAMLError) as exc:
+        except (OSError, EOFError, zlib.error, yaml.YAMLError, OverflowError) as exc:
             raise ValueError(str(exc) or exc.__class__.__name__) from exc
 
     return wrapped
@@ -94,9 +108,14 @@ def _load_attributables(path: str | None) -> dict[str, dict[str, float]] | None:
         if not isinstance(values, dict):
             raise ValueError(f"Attributable column {name} must be an object.")
         raw_values = cast(dict[object, object], values)
-        result[str(name)] = {
-            str(key): float(cast(Any, value)) for key, value in raw_values.items()
-        }
+        try:
+            result[str(name)] = {
+                str(key): float(cast(Any, value)) for key, value in raw_values.items()
+            }
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Attributable column {name} values must be numbers."
+            ) from exc
     return result
 
 
@@ -148,9 +167,15 @@ def _optional_int(payload: dict[str, object], key: str) -> int | None:
     value = payload.get(key)
     if value is None:
         return None
+    message = f"{key} in slice config must be an integer."
     if isinstance(value, bool):
-        raise ValueError(f"{key} in slice config must be an integer.")
-    return int(cast(Any, value))
+        raise ValueError(message)
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError(message)
+    try:
+        return int(cast(Any, value))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(message) from exc
 
 
 def _optional_by_slice(payload: dict[str, object]) -> str | None:
@@ -178,10 +203,17 @@ def _optional_unattributed_libraries(payload: dict[str, object]) -> int | None:
         raise ValueError(
             "unattributed_gems and unattributed_libraries are aliases; use only one."
         )
-    value = next(iter(values.values()))
+    key = next(iter(values))
+    value = values[key]
     if isinstance(value, bool):
         return 2**63 - 1 if value else None
-    return int(cast(Any, value))
+    message = f"{key} in slice config must be an integer."
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError(message)
+    try:
+        return int(cast(Any, value))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(message) from exc
 
 
 def _focus_slices(values: Sequence[str]) -> frozenset[str]:
@@ -730,7 +762,10 @@ def _load_boundary_attributables(
         raise ValueError(f"{field_name} must be an object.")
     result: dict[str, float] = {}
     for raw_name, raw_metric in cast(dict[object, object], raw_value).items():
-        metric = float(cast(Any, raw_metric))
+        try:
+            metric = float(cast(Any, raw_metric))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field_name} values must be numbers.") from exc
         if metric < 0:
             raise ValueError(f"Boundary attributable {raw_name} cannot be negative.")
         result[str(raw_name)] = metric
@@ -960,7 +995,13 @@ def run_targets(args: argparse.Namespace) -> dict[str, Any]:
             encoding="utf-8",
         )
     if args.format == "json":
-        return cast(dict[str, Any], render_target_json(results))
+        payload = cast(dict[str, Any], render_target_json(results))
+        if args.output:
+            Path(args.output).write_text(
+                render_json_payload(payload) + "\n", encoding="utf-8"
+            )
+            return {"tool": "clankerprof_targets", "ok": True, "output": args.output}
+        return payload
     if compat_target_csv_layout:
         return _write_legacy_target_csv_artifacts(
             args.output,
@@ -1116,7 +1157,7 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
     after = parse_strict_json(Path(args.after).read_text(encoding="utf-8"))
     if not isinstance(before, dict) or not isinstance(after, dict):
         raise ValueError("Compare inputs must be JSON objects.")
-    return compare_json(
+    payload = compare_json(
         cast(dict[str, Any], before),
         cast(dict[str, Any], after),
         CompareOptions(
@@ -1126,13 +1167,26 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
             focus_boundaries=_focus_slices(args.focus_boundaries),
         ),
     )
+    if args.output:
+        Path(args.output).write_text(
+            render_json_payload(payload) + "\n", encoding="utf-8"
+        )
+        # The receipt keeps the regression gate intact: main() reads the tool
+        # and has_regression keys to decide the exit code.
+        return {
+            "tool": "clankerprof_compare",
+            "ok": True,
+            "output": args.output,
+            "has_regression": payload["has_regression"],
+        }
+    return payload
 
 
 def run_facts(args: argparse.Namespace) -> dict[str, Any]:
     profile = load_profile(args.profile)
     facts = profile.to_sample_facts()
-    payload = sample_facts_to_jsonable(facts)
     if args.output:
+        payload = sample_facts_to_jsonable(facts)
         write_sample_facts(args.output, facts, pretty=bool(args.pretty))
         return {
             "tool": "clankerprof_facts",
@@ -1141,7 +1195,13 @@ def run_facts(args: argparse.Namespace) -> dict[str, Any]:
             "schema_version": payload["schema_version"],
             "summary": payload["summary"],
         }
-    return cast(dict[str, Any], payload)
+    # stdout carries exactly the artifact bytes: compact by default,
+    # --pretty opt-in, matching clankerprof-rs.
+    return {
+        "tool": "clankerprof_facts",
+        "ok": True,
+        "raw_output": dumps_sample_facts(facts, pretty=bool(args.pretty)),
+    }
 
 
 def register_pprof_commands(subparsers: Any) -> None:
@@ -1360,6 +1420,7 @@ def register_commands(subparsers: Any) -> None:
         nargs="*",
         default=[],
     )
+    compare.add_argument("--output")
     compare.set_defaults(handler=_contracted(run_compare))
 
     facts = subparsers.add_parser(
@@ -1377,7 +1438,7 @@ def register_commands(subparsers: Any) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _JsonArgumentParser(
         prog="clankerprof",
         description="Language-agnostic pprof analyzer with runtime-specific rule packs.",
     )
@@ -1389,15 +1450,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _emit_json(payload: dict[str, Any], output_path: str | None) -> None:
+def _emit_json(payload: dict[str, Any]) -> None:
     raw_output = payload.pop("raw_output", None)
     if raw_output is not None:
         print(raw_output)
         return
-    rendered = render_json_payload(payload)
-    if output_path:
-        Path(output_path).write_text(rendered + "\n", encoding="utf-8")
-    print(rendered)
+    print(render_json_payload(payload))
 
 
 def _hoist_global_output(argv: Sequence[str]) -> list[str]:
@@ -1433,7 +1491,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         resolved_argv = list(sys.argv[1:]) if argv is None else list(argv)
         args = parser.parse_args(_hoist_global_output(resolved_argv))
         payload = cast(dict[str, Any], args.handler(args))
-        _emit_json(payload, None if payload.get("output") else args.output)
+        _emit_json(payload)
         if payload.get("tool") == "clankerprof_compare" and payload.get(
             "has_regression"
         ):

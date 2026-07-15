@@ -54,7 +54,7 @@ struct FactsArgs {
     #[arg(long)]
     profile: PathBuf,
     /// Write the facts artifact to this path instead of stdout.
-    #[arg(long)]
+    #[arg(long, overrides_with = "output")]
     output: Option<PathBuf>,
     /// Indent the facts artifact for humans (default is compact JSON).
     #[arg(long)]
@@ -100,7 +100,7 @@ struct TargetsArgs {
     #[arg(long)]
     cpu_attributables: Option<PathBuf>,
     /// Write the report to this path instead of stdout.
-    #[arg(long)]
+    #[arg(long, overrides_with = "output")]
     output: Option<PathBuf>,
     /// Output format: json, csv, simple-csv, or text.
     #[arg(long, default_value = "json")]
@@ -159,7 +159,7 @@ struct SlicesArgs {
     #[arg(long, visible_alias = "unattributed-gems", num_args = 0..=1, default_missing_value = "9223372036854775807")]
     unattributed_libraries: Option<usize>,
     /// Write the report to this path instead of stdout.
-    #[arg(long)]
+    #[arg(long, overrides_with = "output")]
     output: Option<PathBuf>,
 }
 
@@ -187,7 +187,7 @@ struct ScopesArgs {
     #[arg(long)]
     core_classes: Option<PathBuf>,
     /// Write the report to this path instead of stdout.
-    #[arg(long)]
+    #[arg(long, overrides_with = "output")]
     output: Option<PathBuf>,
 }
 
@@ -224,7 +224,7 @@ struct ReportArgs {
     #[arg(long)]
     core_classes: Option<PathBuf>,
     /// Write the report to this path instead of stdout.
-    #[arg(long)]
+    #[arg(long, overrides_with = "output")]
     output: Option<PathBuf>,
 }
 
@@ -249,25 +249,73 @@ struct CompareArgs {
     #[arg(long)]
     focus_boundaries: Option<String>,
     /// Write the comparison to this path instead of stdout.
-    #[arg(long)]
+    #[arg(long, overrides_with = "output")]
     output: Option<PathBuf>,
 }
 
 fn main() {
-    let cli = Cli::parse();
+    let argv = match hoist_global_output(std::env::args().collect()) {
+        Ok(argv) => argv,
+        Err(error) => exit_with_envelope(&error),
+    };
+    // try_parse keeps usage errors inside the JSON error contract; clap's
+    // default parse() would print prose usage text and exit on its own.
+    let cli = match Cli::try_parse_from(argv) {
+        Ok(cli) => cli,
+        Err(error) => {
+            if matches!(
+                error.kind(),
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+            ) {
+                error.exit();
+            }
+            exit_with_envelope(error.render().to_string().trim_end())
+        }
+    };
     match run(cli) {
         Ok(exit_code) => std::process::exit(exit_code),
-        Err(error) => {
-            eprintln!(
-                "{}",
-                serde_json::json!({
-                    "error": error,
-                    "ok": false,
-                })
-            );
-            std::process::exit(2);
-        }
+        Err(error) => exit_with_envelope(&error),
     }
+}
+
+fn exit_with_envelope(error: &str) -> ! {
+    eprintln!(
+        "{}",
+        serde_json::json!({
+            "error": error,
+            "ok": false,
+        })
+    );
+    std::process::exit(2);
+}
+
+/// Treat a global --output before the subcommand as the subcommand's own,
+/// mirroring the Python CLI's hoist (the moved token lands last, so it wins
+/// over an earlier local --output).
+fn hoist_global_output(argv: Vec<String>) -> Result<Vec<String>, String> {
+    let mut tokens = argv;
+    let mut moved: Vec<String> = Vec::new();
+    let mut index = 1.min(tokens.len());
+    while index < tokens.len() {
+        let item = tokens[index].clone();
+        if !item.starts_with('-') {
+            break;
+        }
+        if item == "--output" {
+            if index + 1 >= tokens.len() {
+                return Err("--output requires a path argument.".to_string());
+            }
+            moved = tokens.drain(index..index + 2).collect();
+            continue;
+        }
+        if item.starts_with("--output=") {
+            moved = vec![tokens.remove(index)];
+            continue;
+        }
+        index += 1;
+    }
+    tokens.extend(moved);
+    Ok(tokens)
 }
 
 fn run(cli: Cli) -> Result<i32, String> {
@@ -340,7 +388,7 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
     }
     let rendered = serde_json::to_string_pretty(&serde_json::Value::Object(payload))
         .map_err(|error| error.to_string())?;
-    emit(&rendered, args.output.as_ref())
+    emit(&rendered, args.output.as_ref(), "clankerprof_report")
 }
 
 fn load_projection_input(
@@ -373,12 +421,37 @@ fn run_scopes(args: ScopesArgs) -> Result<(), String> {
     let facts = load_projection_input(args.profile.as_ref(), args.facts.as_ref())?;
     let payload = render_boundary_json(&analyze_boundary_facts(&facts, &options)?, args.top);
     let rendered = serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?;
-    emit(&rendered, args.output.as_ref())
+    emit(&rendered, args.output.as_ref(), "clankerprof_boundaries")
 }
 
-fn emit(rendered: &str, output: Option<&PathBuf>) -> Result<(), String> {
+fn receipt_value(tool: &str, output: &std::path::Path) -> serde_json::Value {
+    serde_json::json!({
+        "ok": true,
+        "output": output.to_string_lossy(),
+        "tool": tool,
+    })
+}
+
+/// Write the artifact and print the standard JSON receipt (byte-identical to
+/// the Python CLI's), or print the rendered payload when no --output was
+/// given.
+fn emit(rendered: &str, output: Option<&PathBuf>, tool: &str) -> Result<(), String> {
+    let receipt = output
+        .map(|path| receipt_value(tool, path))
+        .unwrap_or(serde_json::Value::Null);
+    emit_with_receipt(rendered, output, receipt)
+}
+
+fn emit_with_receipt(
+    rendered: &str,
+    output: Option<&PathBuf>,
+    receipt: serde_json::Value,
+) -> Result<(), String> {
     if let Some(output_path) = output {
         std::fs::write(output_path, format!("{rendered}\n")).map_err(|error| error.to_string())?;
+        let receipt_rendered =
+            serde_json::to_string_pretty(&receipt).map_err(|error| error.to_string())?;
+        println!("{receipt_rendered}");
     } else {
         println!("{rendered}");
     }
@@ -393,7 +466,22 @@ fn run_facts(args: FactsArgs) -> Result<(), String> {
     } else {
         sample_facts_to_compact_json(&facts).map_err(|error| error.to_string())?
     };
-    emit(&rendered, args.output.as_ref())
+    let receipt = match args.output.as_ref() {
+        Some(output_path) => {
+            // The facts receipt carries schema_version and summary like the
+            // Python CLI's.
+            let payload = clankerprof_core::sample_facts_to_json_value(&facts);
+            serde_json::json!({
+                "ok": true,
+                "output": output_path.to_string_lossy(),
+                "schema_version": payload.get("schema_version"),
+                "summary": payload.get("summary"),
+                "tool": "clankerprof_facts",
+            })
+        }
+        None => serde_json::Value::Null,
+    };
+    emit_with_receipt(&rendered, args.output.as_ref(), receipt)
 }
 
 fn resolve_runtime_rules(
@@ -499,7 +587,7 @@ fn run_targets(args: TargetsArgs) -> Result<(), String> {
     if args.format == "json" {
         let payload = render_target_json(&results);
         let rendered = serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?;
-        return emit(&rendered, args.output.as_ref());
+        return emit(&rendered, args.output.as_ref(), "clankerprof_targets");
     }
     if compat_layout {
         return write_compat_target_csv_artifacts(
@@ -522,7 +610,7 @@ fn run_targets(args: TargetsArgs) -> Result<(), String> {
             args.track_semantic_callers,
         )
     };
-    emit(&rendered, args.output.as_ref())
+    emit(&rendered, args.output.as_ref(), "clankerprof_targets")
 }
 
 fn write_compat_target_csv_artifacts(
@@ -537,16 +625,33 @@ fn write_compat_target_csv_artifacts(
     let output_dir = std::path::Path::new("output");
     let verbose_dir = output_dir.join("verbose");
     std::fs::create_dir_all(&verbose_dir).map_err(|error| error.to_string())?;
+    let simplified_path = output_dir.join(base_name);
+    let verbose_path = verbose_dir.join(base_name);
     std::fs::write(
-        output_dir.join(base_name),
+        &simplified_path,
         render_target_csv(results, attributables, true, true),
     )
     .map_err(|error| error.to_string())?;
     std::fs::write(
-        verbose_dir.join(base_name),
+        &verbose_path,
         render_target_csv(results, attributables, false, true),
     )
     .map_err(|error| error.to_string())?;
+    // Rich receipt matching the Python CLI's compat-layout payload.
+    let receipt = serde_json::json!({
+        "compat_target_csv_layout": true,
+        "legacy_target_csv_layout": true,
+        "ok": true,
+        "output": simplified_path.to_string_lossy(),
+        "outputs": {
+            "simplified_csv": simplified_path.to_string_lossy(),
+            "verbose_csv": verbose_path.to_string_lossy(),
+        },
+        "tool": "clankerprof_targets",
+    });
+    let receipt_rendered =
+        serde_json::to_string_pretty(&receipt).map_err(|error| error.to_string())?;
+    println!("{receipt_rendered}");
     Ok(())
 }
 
@@ -594,7 +699,7 @@ fn run_slices(args: SlicesArgs) -> Result<(), String> {
     let facts = load_projection_input(args.profile.as_ref(), args.facts.as_ref())?;
     let payload = render_slice_json(&analyze_slice_facts(&facts, &options), &options);
     let rendered = serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?;
-    emit(&rendered, args.output.as_ref())
+    emit(&rendered, args.output.as_ref(), "clankerprof_slices")
 }
 
 fn parse_attribute(raw: &str) -> Result<clankerprof_core::slices::AttributionRule, String> {
@@ -742,7 +847,18 @@ fn run_compare(args: CompareArgs) -> Result<i32, String> {
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
     let rendered = serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?;
-    emit(&rendered, args.output.as_ref())?;
+    // The receipt keeps the regression gate intact: has_regression rides
+    // along and the exit code is unchanged by --output.
+    let receipt = match args.output.as_ref() {
+        Some(output_path) => serde_json::json!({
+            "has_regression": has_regression,
+            "ok": true,
+            "output": output_path.to_string_lossy(),
+            "tool": "clankerprof_compare",
+        }),
+        None => serde_json::Value::Null,
+    };
+    emit_with_receipt(&rendered, args.output.as_ref(), receipt)?;
     Ok(if has_regression { 2 } else { 0 })
 }
 
@@ -755,4 +871,59 @@ fn split_focus(value: Option<&str>) -> BTreeSet<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hoist_global_output;
+
+    fn args(items: &[&str]) -> Vec<String> {
+        items.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn hoist_moves_leading_global_output_after_the_subcommand() {
+        let hoisted = hoist_global_output(args(&[
+            "bin", "--output", "out.json", "targets", "--target", "T",
+        ]))
+        .expect("hoist");
+        assert_eq!(
+            hoisted,
+            args(&["bin", "targets", "--target", "T", "--output", "out.json"])
+        );
+    }
+
+    #[test]
+    fn hoist_supports_equals_form_and_leaves_local_flags_alone() {
+        let hoisted = hoist_global_output(args(&[
+            "bin",
+            "--output=global.json",
+            "compare",
+            "--before",
+            "b.json",
+        ]))
+        .expect("hoist");
+        assert_eq!(
+            hoisted,
+            args(&[
+                "bin",
+                "compare",
+                "--before",
+                "b.json",
+                "--output=global.json"
+            ])
+        );
+        let untouched = hoist_global_output(args(&["bin", "targets", "--output", "local.json"]))
+            .expect("hoist");
+        assert_eq!(
+            untouched,
+            args(&["bin", "targets", "--output", "local.json"])
+        );
+    }
+
+    #[test]
+    fn hoist_rejects_global_output_without_a_path() {
+        let error = hoist_global_output(args(&["bin", "--output"])).expect_err("must fail");
+        assert_eq!(error, "--output requires a path argument.");
+    }
 }

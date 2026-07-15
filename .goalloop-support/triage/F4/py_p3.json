@@ -1,0 +1,27 @@
+{
+  "parents": {
+    "Target#render": {
+      "categories": [
+        {
+          "files": [
+            "/app/target.rb"
+          ],
+          "folded_from": {},
+          "leaf_functions": {
+            "Target#render": {
+              "count": 2,
+              "cpu_time": 18446744073709551614
+            }
+          },
+          "name": "Other",
+          "pct": 100.0,
+          "samples": 2,
+          "semantic_callers": {},
+          "time_ns": 18446744073709551614
+        }
+      ],
+      "total_time_ns": 18446744073709551614
+    }
+  },
+  "tool": "clankerprof_targets"
+}

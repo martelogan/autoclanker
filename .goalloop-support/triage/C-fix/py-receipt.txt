@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "output": "py-targets.json",
+  "tool": "clankerprof_targets"
+}

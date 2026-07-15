@@ -1,0 +1,27 @@
+{
+  "parents": {
+    "T": {
+      "categories": [
+        {
+          "files": [
+            "/srv/app/child.py"
+          ],
+          "folded_from": {},
+          "leaf_functions": {
+            "Child#work": {
+              "count": 1,
+              "cpu_time": 10000000
+            }
+          },
+          "name": "Other",
+          "pct": 100.0,
+          "samples": 1,
+          "semantic_callers": {},
+          "time_ns": 10000000
+        }
+      ],
+      "total_time_ns": 10000000
+    }
+  },
+  "tool": "clankerprof_targets"
+}

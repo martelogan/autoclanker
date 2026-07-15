@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "output": "rs-targets.json",
+  "tool": "clankerprof_targets"
+}

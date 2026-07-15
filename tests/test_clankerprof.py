@@ -1030,7 +1030,10 @@ def test_clankerprof_public_api_exports() -> None:
     assert "Target#render" in results
 
 
-def test_clankerprof_cli_rejects_malformed_flags(tmp_path: Path) -> None:
+def test_clankerprof_cli_rejects_malformed_flags(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     profile_path = tmp_path / "profile.pb"
     profile_path.write_bytes(_target_profile_bytes())
     cases: list[list[str]] = [
@@ -1040,9 +1043,9 @@ def test_clankerprof_cli_rejects_malformed_flags(tmp_path: Path) -> None:
         ["unknown-subcommand"],
     ]
     for argv in cases:
-        with pytest.raises(SystemExit) as excinfo:
-            clankerprof_main(argv)
-        assert excinfo.value.code == 2, argv
+        assert clankerprof_main(argv) == 2, argv
+        envelope = _error_envelope(capsys)
+        assert envelope["error"], argv
 
 
 def test_clankerprof_decoder_rejects_truncated_and_overlong_fields() -> None:
@@ -1257,6 +1260,216 @@ def test_clankerprof_standalone_global_output_is_honored(tmp_path: Path) -> None
     assert exit_code == 0
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["tool"] == "clankerprof_targets"
+
+
+def test_clankerprof_output_writes_print_json_receipts(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    config_path = tmp_path / "config.json"
+    output_path = tmp_path / "targets.json"
+    profile_path.write_bytes(_target_profile_bytes())
+    config_path.write_text(
+        json.dumps({"Target#render": {"Application": "path:app/**"}}),
+        encoding="utf-8",
+    )
+
+    exit_code = clankerprof_main(
+        [
+            "targets",
+            "--profile",
+            str(profile_path),
+            "--config",
+            str(config_path),
+            "--format",
+            "json",
+            "--output",
+            str(output_path),
+        ]
+    )
+    assert exit_code == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt == {
+        "ok": True,
+        "output": str(output_path),
+        "tool": "clankerprof_targets",
+    }
+    artifact = json.loads(output_path.read_text(encoding="utf-8"))
+    assert artifact["tool"] == "clankerprof_targets"
+    assert "Target#render" in artifact["parents"]
+
+
+def test_clankerprof_compare_output_receipt_preserves_regression_exit(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    before_path = tmp_path / "before.json"
+    after_path = tmp_path / "after.json"
+    output_path = tmp_path / "compare.json"
+    global_output_path = tmp_path / "compare-global.json"
+    before_path.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "A", "pct": 10.0}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    after_path.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "A", "pct": 50.0}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = clankerprof_main(
+        [
+            "compare",
+            "--before",
+            str(before_path),
+            "--after",
+            str(after_path),
+            "--output",
+            str(output_path),
+        ]
+    )
+    assert exit_code == 2
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt == {
+        "has_regression": True,
+        "ok": True,
+        "output": str(output_path),
+        "tool": "clankerprof_compare",
+    }
+    artifact = json.loads(output_path.read_text(encoding="utf-8"))
+    assert artifact["tool"] == "clankerprof_compare"
+    assert artifact["has_regression"] is True
+
+    exit_code = clankerprof_main(
+        [
+            "--output",
+            str(global_output_path),
+            "compare",
+            "--before",
+            str(before_path),
+            "--after",
+            str(after_path),
+        ]
+    )
+    assert exit_code == 2
+    capsys.readouterr()
+    assert global_output_path.read_text(encoding="utf-8") == output_path.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_autoclanker_pprof_compare_output_receipt_both_placements(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    before_path = tmp_path / "before.json"
+    after_path = tmp_path / "after.json"
+    local_path = tmp_path / "compare-local.json"
+    global_path = tmp_path / "compare-global.json"
+    report = {
+        "tool": "clankerprof_slices",
+        "summary": {"total_time_ns": 100},
+        "slices": [{"name": "A", "pct": 10.0}],
+    }
+    before_path.write_text(json.dumps(report), encoding="utf-8")
+    after_path.write_text(json.dumps(report), encoding="utf-8")
+
+    exit_code = autoclanker_main(
+        [
+            "pprof",
+            "compare",
+            "--before",
+            str(before_path),
+            "--after",
+            str(after_path),
+            "--output",
+            str(local_path),
+        ]
+    )
+    assert exit_code == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt == {
+        "has_regression": False,
+        "ok": True,
+        "output": str(local_path),
+        "tool": "clankerprof_compare",
+    }
+
+    exit_code = autoclanker_main(
+        [
+            "--output",
+            str(global_path),
+            "pprof",
+            "compare",
+            "--before",
+            str(before_path),
+            "--after",
+            str(after_path),
+        ]
+    )
+    assert exit_code == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["output"] == str(global_path)
+    assert global_path.read_text(encoding="utf-8") == local_path.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_clankerprof_facts_stdout_matches_artifact_bytes(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    artifact_path = tmp_path / "facts.json"
+    profile_path.write_bytes(_target_profile_bytes())
+
+    assert clankerprof_main(["facts", "--profile", str(profile_path)]) == 0
+    compact_stdout = capsys.readouterr().out
+    assert (
+        clankerprof_main(
+            ["facts", "--profile", str(profile_path), "--output", str(artifact_path)]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    assert compact_stdout == artifact_path.read_text(encoding="utf-8")
+
+    assert (
+        clankerprof_main(["facts", "--profile", str(profile_path), "--pretty"]) == 0
+    )
+    pretty_stdout = capsys.readouterr().out
+    assert pretty_stdout != compact_stdout
+    assert json.loads(pretty_stdout) == json.loads(compact_stdout)
+
+
+def test_clankerprof_slice_config_rejects_non_finite_top(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(_slice_semantics_profile_bytes())
+    config_path = tmp_path / "slices-config.yml"
+    config_path.write_text(
+        f"profile: {profile_path}\ntop: .inf\n",
+        encoding="utf-8",
+    )
+
+    exit_code = clankerprof_main(["slices", "--config", str(config_path)])
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "top in slice config must be an integer."
 
 
 def test_clankerprof_filter_validation_applies_without_slices_config(

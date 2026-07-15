@@ -405,13 +405,27 @@ envelope; with `--output` they write the artifact and print the JSON receipt.
 A global `--output` before the subcommand is equivalent to the subcommand's
 own `--output` through both the standalone and umbrella CLIs.
 
+Every subcommand, including `compare`, accepts `--output`. Receipts name the
+writing tool in a `tool` key; the `facts` receipt additionally carries
+`schema_version` and `summary`, and the `compare` receipt additionally
+carries `has_regression`. `compare`'s regression exit code is unchanged by
+`--output`: the artifact is written and the receipt printed before the
+nonzero exit. `facts` without `--output` prints to stdout exactly the bytes
+it would write to the artifact — compact by default, indented with
+`--pretty`.
+
 Every contracted failure — decode errors (including truncated or corrupt
 gzip), missing or unreadable input files, malformed YAML/JSON/TOML configs and
 rule packs, invalid facts payloads (wrong schema version, missing keys, index
 or summary mismatches), and option validation — exits `2` and prints a single
 `{"ok": false, "error": ...}` JSON envelope to stderr, never a traceback.
-Filter and collapse shape validation always runs, with or without a slices
-config.
+Usage errors (unknown flags or subcommands, missing required options, invalid
+option values) follow the same envelope through the standalone `clankerprof`
+and `clankerprof-rs` CLIs, while `--help` and `--version` stay human-readable
+with exit `0`; the umbrella `autoclanker pprof` surface guarantees the
+envelope for contracted runtime failures and exit code `2` for usage errors,
+but its usage errors may print the host parser's prose message. Filter and
+collapse shape validation always runs, with or without a slices config.
 
 ## Compatibility and validation
 
