@@ -488,7 +488,10 @@ rule matches `slice:<name>` and is excluded by `!slice:<name>`. Collapse
 
 At most one slice may set `default: true`; declaring several is a validation
 error (previously attribution silently used the last while tracking used the
-first).
+first). The `default` value must be a YAML boolean — absent and `null` read
+as false, and any other type is a validation error in both languages
+(`Slice default must be a boolean.`); truthiness coercion is forbidden
+because it silently diverged between implementations.
 
 Slice projection must not redefine target-boundary semantics.
 

@@ -3460,3 +3460,39 @@ def test_clankerprof_rust_round3_fixes_match_python(tmp_path: Path) -> None:
         ["scopes", "--profile", str(zero_profile), "--config", str(zero_scopes)],
         "zero-total-scopes",
     )
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_slice_default_boolean_matches_python(
+    tmp_path: Path,
+) -> None:
+    facts_path = _order_scope_facts(tmp_path)
+
+    # `default` accepts only YAML booleans: Python truthiness (`default: 1`
+    # meant default) diverged from Rust's as_bool (silently non-default),
+    # observably flipping slice attribution. Both now fail closed.
+    for label, literal in (("int", "1"), ("string", '"yes"')):
+        slices_path = tmp_path / f"default-{label}.yml"
+        slices_path.write_text(
+            f"slices:\n  - name: catch\n    default: {literal}\n",
+            encoding="utf-8",
+        )
+        envelope = _assert_identical_envelope(
+            ["slices", "--facts", str(facts_path), "--slices", str(slices_path)],
+            f"slice-default-{label}",
+        )
+        assert json.loads(envelope) == {
+            "ok": False,
+            "error": "Slice default must be a boolean.",
+        }
+
+    # Boolean and null/absent spellings keep working byte-identically.
+    good_path = tmp_path / "default-bool.yml"
+    good_path.write_text(
+        "slices:\n  - name: catch\n    default: true\n  - name: other\n",
+        encoding="utf-8",
+    )
+    _assert_identical_success(
+        ["slices", "--facts", str(facts_path), "--slices", str(good_path)],
+        "slice-default-bool",
+    )

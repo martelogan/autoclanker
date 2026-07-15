@@ -6122,6 +6122,21 @@ def test_clankerprof_config_string_fields_fail_closed(
     envelope = _error_envelope(capsys)
     assert envelope["error"] == "Slice paths values must be strings."
 
+    # `default` must be a YAML boolean: truthiness (`1`, `"yes"`) diverged
+    # from Rust's as_bool, observably flipping which slice is the default.
+    for bad_default in ("1", '"yes"'):
+        default_path = tmp_path / "slices_default.yml"
+        default_path.write_text(
+            f"slices:\n  - name: catch\n    default: {bad_default}\n",
+            encoding="utf-8",
+        )
+        exit_code = clankerprof_main(
+            ["slices", "--profile", str(profile_path), "--slices", str(default_path)]
+        )
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == "Slice default must be a boolean."
+
     numeric_config = tmp_path / "targets_numeric.json"
     numeric_config.write_text('{"T": {"Numeric": 123}}', encoding="utf-8")
     exit_code = clankerprof_main(

@@ -91,6 +91,7 @@ existing boundary JSON payloads, or slice ownership semantics.
 
 | Cost-kind/owner tables evaluate in declaration order (first match wins) in YAML and TOML | covered | `test_clankerprof_scope_tables_respect_declaration_order`, `test_clankerprof_rust_scope_declaration_order_matches_python` |
 | Scope `label`/`name` must be strings and `function` a string or string array; violations exit 2 with matching envelopes | covered | `test_clankerprof_scope_labels_must_be_strings`, `test_clankerprof_rust_scope_declaration_order_matches_python` |
+| Slice `default` accepts only YAML booleans (absent/null read as false; truthiness coercion rejected with a shared message) | covered | `test_clankerprof_config_string_fields_fail_closed`, `test_clankerprof_rust_slice_default_boolean_matches_python` |
 | Scope runtime flags (`--no-enhanced`, `--fold-runtime-internals`, `--verbose-runtime-internals`) parity | covered | `test_clankerprof_rust_runtime_flags_match_python` |
 
 ## Runtime rules

@@ -84,3 +84,9 @@ and this loop's real work.
 | R3-06 | String-field validation remains divergent on three public configuration surfaces | Reproduced. Non-string values coerced/dropped divergently on slice paths ([123]), target config patterns (123), rule match lists ([null]). Fix: reject non-strings, identical messages, both languages. #J6 | done | audit round 3; fixed: slice paths/name, target patterns, rule scalar/list/map fields all reject non-strings with shared messages (Rust value_str retired) |
 | R3-07 | Compare threshold flags accept different numeric grammars | Reproduced. --threshold-abs/rel grammars diverge: Python float() accepts '1_0'/' 2 ', Rust clap rejects. Fix: shared strict f64 grammar (Rust's) in Python. #J7 | done | audit round 3; fixed: shared strict f64 grammar (Rust f64::from_str semantics adopted); Python strict_float; Rust String args + parse_compare_threshold |
 | R3-08 | The Rust guide still says scope parity is not claimed | Reproduced. docs/CLANKERPROF_RUST.md still disclaims scope parity that PARITY.md and the shipped CLI provide. Fix: update stale text. #J8 | done | audit round 3; fixed: CLANKERPROF_RUST.md parity passages rewritten to match PARITY.md; no other stale disclaimers found |
+
+## Wave L — post-R3 hardening (cluster K report-only flag)
+
+| ID | Requirement | Verify | Status | Notes |
+| --- | --- | --- | --- | --- |
+| L-01 | Slice `default` accepts only YAML booleans in both languages (truthiness coercion diverged: Python bool(1)=default, Rust as_bool=silently non-default) | `test_clankerprof_config_string_fields_fail_closed`, `test_clankerprof_rust_slice_default_boolean_matches_python` | done | fail-closed with shared message "Slice default must be a boolean."; absent/null keep reading as false in both |

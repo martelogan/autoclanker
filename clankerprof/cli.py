@@ -492,12 +492,20 @@ def _load_slices(path: str | None) -> tuple[SliceDefinition, ...]:
         for path_pattern in cast(list[object], paths):
             if not isinstance(path_pattern, str):
                 raise ValueError("Slice paths values must be strings.")
+        raw_default = raw_item.get("default", False)
+        if raw_default is None:
+            raw_default = False
+        if not isinstance(raw_default, bool):
+            # Truthiness would diverge from Rust's as_bool (`1` was default
+            # in Python, silently non-default in Rust); only YAML booleans
+            # are accepted in either language.
+            raise ValueError("Slice default must be a boolean.")
         metadata = _slice_metadata(raw_item)
         slices.append(
             SliceDefinition(
                 name=slice_name,
                 path_patterns=tuple(cast(list[str], paths)),
-                is_default=bool(raw_item.get("default", False)),
+                is_default=raw_default,
                 metadata=metadata,
             )
         )

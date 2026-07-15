@@ -151,10 +151,14 @@ pub fn load_slices_file(path: impl AsRef<Path>) -> Result<Vec<SliceDefinition>, 
             };
             paths.push(text.to_string());
         }
-        let is_default = mapping
-            .get(serde_yaml::Value::String("default".to_string()))
-            .and_then(serde_yaml::Value::as_bool)
-            .unwrap_or(false);
+        // Only YAML booleans (absent/null read as false): as_bool coercion
+        // silently treated `default: 1` as non-default where Python's
+        // truthiness made it the default slice.
+        let is_default = match mapping.get(serde_yaml::Value::String("default".to_string())) {
+            None | Some(serde_yaml::Value::Null) => false,
+            Some(serde_yaml::Value::Bool(value)) => *value,
+            Some(_) => return Err("Slice default must be a boolean.".to_string()),
+        };
         let mut metadata: BTreeMap<String, Value> = BTreeMap::new();
         for (raw_key, raw_value) in mapping {
             let Some(key) = raw_key.as_str() else {
