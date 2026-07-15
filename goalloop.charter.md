@@ -6,7 +6,7 @@ gates:
 audit:
   auditor: codex exec --sandbox read-only --cd /Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit
     -
-  max_rounds: 3
+  max_rounds: 10
 ---
 
 # Charter: clankerprof-v2-adversarial-review
@@ -74,7 +74,9 @@ proof, and an audit round completes with zero new confirmed findings.
 
 ## Stop conditions
 
-- Audit exceeds max_rounds (3) without convergence → stop and escalate to
+- Audit exceeds max_rounds (10; raised from 3 by Logan on 2026-07-15 after
+  three fully-confirmed rounds — convergence should run as long as needed)
+  without convergence → stop and escalate to
   Logan with `goalloop audit status` and the open tracker rows.
 - A confirmed finding requires a breaking contract change (e.g. a facts v3
   schema, changed CLI exit-code semantics, altered compare gate contract)
