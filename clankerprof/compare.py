@@ -23,11 +23,27 @@ def _finite_or_none(value: float) -> float | None:
 
 def _validated_options(options: CompareOptions | None) -> CompareOptions:
     resolved = options or CompareOptions()
-    if not (
-        math.isfinite(resolved.threshold_abs) and math.isfinite(resolved.threshold_rel)
+    if (
+        not (
+            math.isfinite(resolved.threshold_abs)
+            and math.isfinite(resolved.threshold_rel)
+        )
+        or resolved.threshold_abs < 0
+        or resolved.threshold_rel < 0
     ):
-        raise ValueError("Compare thresholds must be finite numbers.")
+        # A non-finite threshold would silently disable gating; a negative one
+        # would gate identical reports as regressions (0 > -1).
+        raise ValueError("Compare thresholds must be finite, non-negative numbers.")
     return resolved
+
+
+def _finite_value(value: float, name: str) -> float:
+    """Derived compare values (frame-percentage sums and absolute deltas) must
+    stay finite; overflow fails closed rather than serializing an uncontracted
+    null. Only ``delta_rel`` has a documented null path."""
+    if not math.isfinite(value):
+        raise ValueError(f"Compare values for '{name}' are not finite.")
+    return value
 
 
 def _require_number(payload: dict[str, Any], key: str, context: str) -> float:
@@ -51,10 +67,12 @@ def _optional_rows(
     payload: dict[str, Any], key: str, context: str
 ) -> list[dict[str, Any]]:
     """Structural row arrays may be absent, but a present key must be an array
-    of objects — wrong shapes are malformed input, never silently empty."""
-    raw: object = payload.get(key)
-    if raw is None:
+    of objects — wrong shapes (including a present null) are malformed input,
+    never silently empty. Conflating null with absence would let a nulled-out
+    array turn a real regression into an apparent removal."""
+    if key not in payload:
         return []
+    raw: object = payload[key]
     if not isinstance(raw, list):
         raise ValueError(f"{context} field {key!r} must be an array.")
     rows: list[dict[str, Any]] = []
@@ -183,7 +201,7 @@ def compare_slice_json(
             if after_payload is None
             else _require_number(after_payload, "pct", "Slice")
         )
-        delta_abs = after_pct - before_pct
+        delta_abs = _finite_value(after_pct - before_pct, name)
         delta_rel = _delta_rel(before_pct, after_pct)
 
         in_focus = not resolved.focus_slices or name in resolved.focus_slices
@@ -203,17 +221,25 @@ def compare_slice_json(
         after_frames = (
             {} if after_payload is None else _frames_by_function(after_payload)
         )
-        frame_deltas = [
-            {
-                "function": function,
-                "slice": name,
-                "before_pct": before_frames.get(function, 0.0),
-                "after_pct": after_frames.get(function, 0.0),
-                "delta_abs": after_frames.get(function, 0.0)
-                - before_frames.get(function, 0.0),
-            }
-            for function in sorted(set(before_frames) | set(after_frames))
-        ]
+        # Finiteness is checked while walking the sorted union so both
+        # languages report the same first offender when several overflow.
+        frame_deltas: list[dict[str, Any]] = []
+        for function in sorted(set(before_frames) | set(after_frames)):
+            before_frame_pct = _finite_value(
+                before_frames.get(function, 0.0), function
+            )
+            after_frame_pct = _finite_value(after_frames.get(function, 0.0), function)
+            frame_deltas.append(
+                {
+                    "function": function,
+                    "slice": name,
+                    "before_pct": before_frame_pct,
+                    "after_pct": after_frame_pct,
+                    "delta_abs": _finite_value(
+                        after_frame_pct - before_frame_pct, function
+                    ),
+                }
+            )
         frame_deltas.sort(
             key=lambda item: abs(cast(float, item["delta_abs"])), reverse=True
         )
@@ -324,7 +350,7 @@ def compare_boundary_json(
     for kind, boundary, name in sorted(set(before_rows) | set(after_rows)):
         before_pct = before_rows.get((kind, boundary, name), 0.0)
         after_pct = after_rows.get((kind, boundary, name), 0.0)
-        delta_abs = after_pct - before_pct
+        delta_abs = _finite_value(after_pct - before_pct, name)
         delta_rel = _delta_rel(before_pct, after_pct)
         in_focus = (
             not resolved.focus_boundaries or boundary in resolved.focus_boundaries

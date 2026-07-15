@@ -1251,13 +1251,17 @@ def run_boundaries(args: argparse.Namespace) -> dict[str, Any]:
     return payload
 
 
-_COMPARE_THRESHOLD_MESSAGE = "Compare thresholds must be finite numbers."
+_COMPARE_THRESHOLD_MESSAGE = "Compare thresholds must be finite, non-negative numbers."
 
 
 def _compare_threshold(raw: object) -> float:
     if isinstance(raw, str):
-        return strict_float(raw, message=_COMPARE_THRESHOLD_MESSAGE)
-    return float(cast(float, raw))
+        value = strict_float(raw, message=_COMPARE_THRESHOLD_MESSAGE)
+    else:
+        value = float(cast(float, raw))
+    if value < 0:
+        raise ValueError(_COMPARE_THRESHOLD_MESSAGE)
+    return value
 
 
 def run_compare(args: argparse.Namespace) -> dict[str, Any]:

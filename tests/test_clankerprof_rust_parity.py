@@ -892,7 +892,7 @@ def test_clankerprof_rust_compare_rejects_malformed_reports_like_python(
             good,
             good,
             ["--threshold-abs", "NaN"],
-            "Compare thresholds must be finite numbers.",
+            "Compare thresholds must be finite, non-negative numbers.",
         ),
     ]
     for index, (before, after, extra_argv, message) in enumerate(cases):
@@ -3408,7 +3408,7 @@ def test_clankerprof_rust_round3_fixes_match_python(tmp_path: Path) -> None:
         )
         assert json.loads(envelope) == {
             "ok": False,
-            "error": "Compare thresholds must be finite numbers.",
+            "error": "Compare thresholds must be finite, non-negative numbers.",
         }
     _assert_identical_success(
         [
@@ -3495,4 +3495,173 @@ def test_clankerprof_rust_slice_default_boolean_matches_python(
     _assert_identical_success(
         ["slices", "--facts", str(facts_path), "--slices", str(good_path)],
         "slice-default-bool",
+    )
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_compare_fail_closed_matches_python(tmp_path: Path) -> None:
+    def write(name: str, payload: str) -> Path:
+        path = tmp_path / name
+        path.write_text(payload, encoding="utf-8")
+        return path
+
+    good_slices = write(
+        "before.json",
+        '{"tool": "clankerprof_slices", "summary": {"total_time_ns": 100}, '
+        '"slices": [{"name": "A", "pct": 10.0, "frames": []}]}',
+    )
+
+    # R4-01: a present null nested-row array fails closed identically (the
+    # Python side previously read it as absent and turned a real regression
+    # into an apparent removal).
+    null_frames = write(
+        "null-frames.json",
+        '{"tool": "clankerprof_slices", "summary": {"total_time_ns": 100}, '
+        '"slices": [{"name": "A", "pct": 10.0, "frames": null}]}',
+    )
+    envelope = _assert_identical_envelope(
+        ["compare", "--before", str(good_slices), "--after", str(null_frames)],
+        "null-frames",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Slice field 'frames' must be an array.",
+    }
+    good_boundaries = write(
+        "boundaries.json",
+        '{"tool": "clankerprof_boundaries", "summary": {"total_time_ns": 100}, '
+        '"boundaries": [{"name": "B", "pct_of_profile": 40.0, "buckets": null}]}',
+    )
+    envelope = _assert_identical_envelope(
+        ["compare", "--before", str(good_boundaries), "--after", str(good_boundaries)],
+        "null-buckets",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Boundary field 'buckets' must be an array.",
+    }
+
+    # R4-02: duplicate JSON member names fail closed in BOTH orderings — the
+    # message core is shared; serde's location suffix is engine-specific.
+    for label, ordering in (
+        ("dup-30-10", '"pct": 30.0, "pct": 10.0'),
+        ("dup-10-30", '"pct": 10.0, "pct": 30.0'),
+    ):
+        dup_path = write(
+            f"{label}.json",
+            '{"tool": "clankerprof_slices", "summary": {"total_time_ns": 100}, '
+            '"slices": [{"name": "A", ' + ordering + "}]}",
+        )
+        argv = ["compare", "--before", str(good_slices), "--after", str(dup_path)]
+        python_run = _run_python_cli_raw(argv)
+        rust_run = _run_rust_cli_raw(argv)
+        assert python_run.returncode == 2, (label, python_run.stderr)
+        assert rust_run.returncode == 2, (label, rust_run.stderr)
+        core = 'duplicate entry with key "pct"'
+        assert core in json.loads(python_run.stderr)["error"], label
+        assert core in json.loads(rust_run.stderr)["error"], label
+
+    # ...and the duplicate-member rule covers every JSON input surface: facts
+    # artifacts and target configs, not just compare reports.
+    facts_path = _order_scope_facts(tmp_path)
+    target_config = write("t-config.json", '{"T": {}}')
+    dup_facts = write(
+        "dup-facts.json", '{"schema_version": "x", "schema_version": "y"}'
+    )
+    argv = [
+        "targets",
+        "--facts",
+        str(dup_facts),
+        "--config",
+        str(target_config),
+    ]
+    python_run = _run_python_cli_raw(argv)
+    rust_run = _run_rust_cli_raw(argv)
+    core = 'duplicate entry with key "schema_version"'
+    assert python_run.returncode == 2 and rust_run.returncode == 2
+    assert core in json.loads(python_run.stderr)["error"]
+    assert core in json.loads(rust_run.stderr)["error"]
+    dup_config = write(
+        "dup-config.json", '{"T": {"App": "path:/a", "App": "path:/b"}}'
+    )
+    argv = [
+        "targets",
+        "--facts",
+        str(facts_path),
+        "--config",
+        str(dup_config),
+    ]
+    python_run = _run_python_cli_raw(argv)
+    rust_run = _run_rust_cli_raw(argv)
+    core = 'duplicate entry with key "App"'
+    assert python_run.returncode == 2 and rust_run.returncode == 2
+    assert core in json.loads(python_run.stderr)["error"]
+    assert core in json.loads(rust_run.stderr)["error"]
+
+    # R4-10: finite inputs whose derived sums/deltas overflow fail closed with
+    # one shared typed message (previously a leaked CPython json message in
+    # Python and a corrupt null-bearing exit-0 report in Rust).
+    overflow_frames = write(
+        "overflow-frames.json",
+        '{"tool": "clankerprof_slices", "summary": {"total_time_ns": 100}, '
+        '"slices": [{"name": "A", "pct": 10.0, "frames": ['
+        '{"function": "f", "pct": 1e308}, {"function": "f", "pct": 1e308}]}]}',
+    )
+    envelope = _assert_identical_envelope(
+        ["compare", "--before", str(good_slices), "--after", str(overflow_frames)],
+        "overflow-frames",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Compare values for 'f' are not finite.",
+    }
+    low = write(
+        "low.json",
+        '{"tool": "clankerprof_slices", "summary": {"total_time_ns": 100}, '
+        '"slices": [{"name": "A", "pct": -1e308}]}',
+    )
+    high = write(
+        "high.json",
+        '{"tool": "clankerprof_slices", "summary": {"total_time_ns": 100}, '
+        '"slices": [{"name": "A", "pct": 1e308}]}',
+    )
+    envelope = _assert_identical_envelope(
+        ["compare", "--before", str(low), "--after", str(high)],
+        "overflow-delta",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Compare values for 'A' are not finite.",
+    }
+
+    # R4-13: negative thresholds are option-validation errors (0 > -1 would
+    # gate identical reports as regressions); zero stays legal.
+    envelope = _assert_identical_envelope(
+        [
+            "compare",
+            "--before",
+            str(good_slices),
+            "--after",
+            str(good_slices),
+            "--threshold-abs=-1",
+        ],
+        "negative-threshold",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Compare thresholds must be finite, non-negative numbers.",
+    }
+    _assert_identical_success(
+        [
+            "compare",
+            "--before",
+            str(good_slices),
+            "--after",
+            str(good_slices),
+            "--threshold-abs",
+            "0",
+            "--threshold-rel",
+            "0",
+        ],
+        "zero-thresholds",
     )

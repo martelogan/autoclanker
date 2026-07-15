@@ -43,10 +43,27 @@ pub fn compare_json(
 }
 
 fn validate_options(options: &CompareOptions) -> Result<(), String> {
-    if !options.threshold_abs.is_finite() || !options.threshold_rel.is_finite() {
-        return Err("Compare thresholds must be finite numbers.".to_string());
+    // A non-finite threshold would silently disable gating; a negative one
+    // would gate identical reports as regressions (0 > -1).
+    if !options.threshold_abs.is_finite()
+        || !options.threshold_rel.is_finite()
+        || options.threshold_abs < 0.0
+        || options.threshold_rel < 0.0
+    {
+        return Err("Compare thresholds must be finite, non-negative numbers.".to_string());
     }
     Ok(())
+}
+
+/// Derived compare values (frame-percentage sums and absolute deltas) must
+/// stay finite; overflow fails closed rather than serializing an uncontracted
+/// null. Only `delta_rel` has a documented null path.
+fn finite_value(value: f64, name: &str) -> Result<f64, String> {
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(format!("Compare values for '{name}' are not finite."))
+    }
 }
 
 /// Relative delta against the magnitude of the baseline (mirrors Python
@@ -97,7 +114,7 @@ pub fn compare_slice_json(
             .map(|value| require_number(value, "pct", "Slice"))
             .transpose()?
             .unwrap_or(0.0);
-        let delta_abs = after_pct - before_pct;
+        let delta_abs = finite_value(after_pct - before_pct, &name)?;
         let delta_rel = delta_rel(before_pct, after_pct);
         let in_focus = options.focus_slices.is_empty() || options.focus_slices.contains(&name);
         let is_regression =
@@ -128,14 +145,22 @@ pub fn compare_slice_json(
             .chain(after_frames.keys())
             .cloned()
             .collect();
+        // Finiteness is checked while walking the sorted union so both
+        // languages report the same first offender when several overflow.
         let mut frame_deltas = Vec::new();
         for function in functions {
-            let before_frame_pct = before_frames.get(&function).copied().unwrap_or(0.0);
-            let after_frame_pct = after_frames.get(&function).copied().unwrap_or(0.0);
+            let before_frame_pct = finite_value(
+                before_frames.get(&function).copied().unwrap_or(0.0),
+                &function,
+            )?;
+            let after_frame_pct = finite_value(
+                after_frames.get(&function).copied().unwrap_or(0.0),
+                &function,
+            )?;
             frame_deltas.push(json!({
                 "after_pct": after_frame_pct,
                 "before_pct": before_frame_pct,
-                "delta_abs": after_frame_pct - before_frame_pct,
+                "delta_abs": finite_value(after_frame_pct - before_frame_pct, &function)?,
                 "function": function,
                 "slice": name,
             }));
@@ -285,9 +310,15 @@ fn optional_rows<'a>(
     Ok(items.iter().collect())
 }
 
-/// Infallible read for rows this module constructed itself.
+/// Read for rows this module constructed itself: delta fields are checked
+/// finite before insertion (`finite_value`), so a missing or null value here
+/// is an internal invariant violation, never reachable from user input —
+/// defaulting it to zero would silently corrupt ranking instead.
 fn number(payload: &Value, key: &str) -> f64 {
-    payload.get(key).and_then(Value::as_f64).unwrap_or(0.0)
+    payload
+        .get(key)
+        .and_then(Value::as_f64)
+        .expect("compare rows carry finite numeric fields by construction")
 }
 
 fn abs_number(payload: &Value, key: &str) -> f64 {
@@ -389,7 +420,7 @@ pub fn compare_boundary_json(
         let (kind, boundary, name) = key;
         let before_pct = before_rows.get(key).copied().unwrap_or(0.0);
         let after_pct = after_rows.get(key).copied().unwrap_or(0.0);
-        let delta_abs = after_pct - before_pct;
+        let delta_abs = finite_value(after_pct - before_pct, name)?;
         let delta_rel = delta_rel(before_pct, after_pct);
         let in_focus =
             options.focus_boundaries.is_empty() || options.focus_boundaries.contains(boundary);
@@ -505,16 +536,19 @@ mod tests {
     }
 
     #[test]
-    fn non_finite_thresholds_are_validation_errors() {
+    fn non_finite_or_negative_thresholds_are_validation_errors() {
         let report = slice_report(json!([]));
-        for threshold in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        for threshold in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, -0.001] {
             let options = CompareOptions {
                 threshold_abs: threshold,
                 ..CompareOptions::default()
             };
             let error = compare_slice_json(&report, &report, &options)
-                .expect_err("non-finite threshold must be rejected");
-            assert_eq!(error, "Compare thresholds must be finite numbers.");
+                .expect_err("bad threshold must be rejected");
+            assert_eq!(
+                error,
+                "Compare thresholds must be finite, non-negative numbers."
+            );
             let options = CompareOptions {
                 threshold_rel: threshold,
                 ..CompareOptions::default()
@@ -524,8 +558,59 @@ mod tests {
                 &json!({"tool": "clankerprof_boundaries", "boundaries": []}),
                 &options,
             )
-            .expect_err("non-finite threshold must be rejected");
+            .expect_err("bad threshold must be rejected");
         }
+        // Zero thresholds stay legal: gating uses strict `>`, so identical
+        // reports never regress at zero.
+        let identical = slice_report(json!([{"name": "A", "pct": 10.0}]));
+        let zero = CompareOptions {
+            threshold_abs: 0.0,
+            threshold_rel: 0.0,
+            ..CompareOptions::default()
+        };
+        let compared =
+            compare_slice_json(&identical, &identical, &zero).expect("zero thresholds are legal");
+        assert_eq!(compared["has_regression"], json!(false));
+    }
+
+    #[test]
+    fn present_null_row_arrays_are_validation_errors() {
+        let good = slice_report(json!([{"name": "hot", "pct": 10.0, "frames": []}]));
+        let nulled = slice_report(json!([{"name": "hot", "pct": 10.0, "frames": null}]));
+        let error = compare_slice_json(&good, &nulled, &CompareOptions::default())
+            .expect_err("present null frames must fail");
+        assert_eq!(error, "Slice field 'frames' must be an array.");
+        let boundary_nulled = json!({
+            "tool": "clankerprof_boundaries",
+            "summary": {"total_time_ns": 100},
+            "boundaries": [{"name": "B", "pct_of_profile": 40.0, "buckets": null}],
+        });
+        let error = compare_boundary_json(
+            &boundary_nulled,
+            &boundary_nulled,
+            &CompareOptions::default(),
+        )
+        .expect_err("present null buckets must fail");
+        assert_eq!(error, "Boundary field 'buckets' must be an array.");
+    }
+
+    #[test]
+    fn non_finite_derived_values_fail_closed() {
+        // Duplicate-frame summation overflow.
+        let before = slice_report(json!([{"name": "A", "pct": 10.0, "frames": []}]));
+        let after = slice_report(json!([{"name": "A", "pct": 10.0, "frames": [
+            {"function": "f", "pct": 1e308},
+            {"function": "f", "pct": 1e308},
+        ]}]));
+        let error = compare_slice_json(&before, &after, &CompareOptions::default())
+            .expect_err("overflowing frame sum must fail");
+        assert_eq!(error, "Compare values for 'f' are not finite.");
+        // Slice-level delta subtraction overflow.
+        let low = slice_report(json!([{"name": "A", "pct": -1e308}]));
+        let high = slice_report(json!([{"name": "A", "pct": 1e308}]));
+        let error = compare_slice_json(&low, &high, &CompareOptions::default())
+            .expect_err("overflowing slice delta must fail");
+        assert_eq!(error, "Compare values for 'A' are not finite.");
     }
 
     #[test]

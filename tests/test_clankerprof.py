@@ -6203,7 +6203,21 @@ def test_clankerprof_compare_threshold_flags_use_strict_grammar(
         )
         assert exit_code == 2, spelling
         envelope = _error_envelope(capsys)
-        assert envelope["error"] == "Compare thresholds must be finite numbers."
+        assert envelope["error"] == "Compare thresholds must be finite, non-negative numbers."
+    # Negative thresholds would gate identical reports as regressions (0 > -1).
+    exit_code = clankerprof_main(
+        [
+            "compare",
+            "--before",
+            str(report_path),
+            "--after",
+            str(report_path),
+            "--threshold-abs=-1",
+        ]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Compare thresholds must be finite, non-negative numbers."
     exit_code = clankerprof_main(
         [
             "compare",
@@ -6216,3 +6230,77 @@ def test_clankerprof_compare_threshold_flags_use_strict_grammar(
         ]
     )
     assert exit_code == 0
+
+
+def test_clankerprof_compare_rejects_present_null_row_arrays() -> None:
+    # A present null must not read as an absent array: nulling out `frames`/
+    # `buckets` would turn a real regression into an apparent removal.
+    good = _round3_slice_report([{"name": "hot", "pct": 10.0, "frames": []}])
+    nulled = _round3_slice_report([{"name": "hot", "pct": 10.0, "frames": None}])
+    with pytest.raises(ValueError, match=r"Slice field 'frames' must be an array\."):
+        compare_slice_json(good, nulled)
+    boundary_nulled: dict[str, object] = {
+        "tool": "clankerprof_boundaries",
+        "summary": {"total_time_ns": 100},
+        "boundaries": [{"name": "B", "pct_of_profile": 40.0, "buckets": None}],
+    }
+    with pytest.raises(ValueError, match=r"Boundary field 'buckets' must be an array\."):
+        compare_boundary_json(boundary_nulled, boundary_nulled)
+
+
+def test_clankerprof_json_inputs_reject_duplicate_member_names(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from clankerprof.jsonio import parse_strict_json
+
+    # Duplicate members are last-wins in stdlib parsers, so the same multiset
+    # of members flips the compare gate with ordering — the JSON-member-level
+    # twin of the duplicate-row and YAML duplicate-key rules.
+    with pytest.raises(ValueError, match='duplicate entry with key "a"'):
+        parse_strict_json('{"a": 1, "a": 2}')
+    with pytest.raises(ValueError, match='duplicate entry with key "pct"'):
+        parse_strict_json('{"rows": [{"pct": 30.0, "pct": 10.0}]}')
+
+    before_path = tmp_path / "before.json"
+    before_path.write_text(
+        json.dumps(_round3_slice_report([{"name": "A", "pct": 10.0}])),
+        encoding="utf-8",
+    )
+    for ordering in ('"pct": 30.0, "pct": 10.0', '"pct": 10.0, "pct": 30.0'):
+        after_path = tmp_path / "after.json"
+        after_path.write_text(
+            '{"tool": "clankerprof_slices", "summary": {"total_time_ns": 100}, '
+            '"slices": [{"name": "A", ' + ordering + "}]}",
+            encoding="utf-8",
+        )
+        exit_code = clankerprof_main(
+            ["compare", "--before", str(before_path), "--after", str(after_path)]
+        )
+        assert exit_code == 2, ordering
+        envelope = _error_envelope(capsys)
+        assert 'duplicate entry with key "pct"' in cast(str, envelope["error"])
+
+
+def test_clankerprof_compare_derived_values_fail_closed_on_overflow() -> None:
+    # Finite inputs whose sums or deltas overflow must fail closed with the
+    # shared typed message, never serialize an uncontracted null.
+    before = _round3_slice_report([{"name": "A", "pct": 10.0, "frames": []}])
+    after = _round3_slice_report(
+        [
+            {
+                "name": "A",
+                "pct": 10.0,
+                "frames": [
+                    {"function": "f", "pct": 1e308},
+                    {"function": "f", "pct": 1e308},
+                ],
+            }
+        ]
+    )
+    with pytest.raises(ValueError, match=r"Compare values for 'f' are not finite\."):
+        compare_slice_json(before, after)
+    low = _round3_slice_report([{"name": "A", "pct": -1e308}])
+    high = _round3_slice_report([{"name": "A", "pct": 1e308}])
+    with pytest.raises(ValueError, match=r"Compare values for 'A' are not finite\."):
+        compare_slice_json(low, high)

@@ -84,6 +84,10 @@ enum PatternMode {
 }
 
 pub fn parse_target_config_json(payload: &str) -> Result<TargetConfig, String> {
+    // The order-preserving RawValue/IndexMap parse below is last-wins on
+    // duplicate member names; screen those out first (syntax errors keep the
+    // established messages of the parse below).
+    crate::jsonio::ensure_no_duplicate_keys(payload)?;
     let parents: IndexMap<String, Box<RawValue>> = serde_json::from_str(payload)
         .map_err(|_| "Target config must be a JSON object.".to_string())?;
     let mut result = TargetConfig::new();

@@ -6,6 +6,7 @@
 pub mod categorize;
 pub mod compare;
 pub mod facts;
+pub mod jsonio;
 pub mod model;
 pub mod proto;
 pub mod pyjson;

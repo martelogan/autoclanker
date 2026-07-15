@@ -2,9 +2,10 @@
 
 Python's ``json`` module accepts the non-standard ``Infinity``/``-Infinity``/
 ``NaN`` tokens that RFC 8259 forbids and that the Rust port (serde_json)
-rejects at parse time, and PyYAML silently keeps the last value for duplicate
-mapping keys where serde_yaml errors. Every clankerprof JSON/YAML input goes
-through these loaders so both implementations fail closed on the same inputs.
+rejects at parse time, and both stdlib parsers silently keep the last value
+for duplicate object members / YAML mapping keys. Every clankerprof JSON/YAML
+input goes through these loaders so both implementations fail closed on the
+same inputs.
 """
 
 from __future__ import annotations
@@ -23,13 +24,32 @@ def _reject_constant(token: str) -> Any:
     raise ValueError(f"JSON input must not contain the non-finite token {token!r}.")
 
 
+def _strict_object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Duplicate object member names are validation errors, never last-wins:
+    the same multiset of members must not change meaning with ordering (the
+    JSON-member-level twin of the duplicate-row and YAML duplicate-key rules).
+    Fast path: dict() is C-speed; only a length mismatch triggers the scan."""
+    obj = dict(pairs)
+    if len(obj) != len(pairs):
+        seen: set[str] = set()
+        for key, _ in pairs:
+            if key in seen:
+                raise ValueError(f'duplicate entry with key "{key}"')
+            seen.add(key)
+    return obj
+
+
 def parse_strict_json(text: str) -> Any:
     # Integer literals outside [i64::MIN, u64::MAX] need no guard here:
     # serde_json parses them as f64, and Python's unbounded int coerces to
     # the identical f64 in float-domain fields while integer-domain fields
     # reject both representations with the same messages (pinned by the
     # parity suite).
-    return json.loads(text, parse_constant=_reject_constant)
+    return json.loads(
+        text,
+        parse_constant=_reject_constant,
+        object_pairs_hook=_strict_object_pairs,
+    )
 
 
 YAML_KEY_MESSAGE = "YAML mapping keys must be strings."

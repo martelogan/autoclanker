@@ -436,10 +436,9 @@ fn load_projection_input(
             .map_err(|error| error.to_string())?
             .to_sample_facts(),
         (None, Some(facts_path)) => {
-            let payload: serde_json::Value = serde_json::from_str(
+            let payload = clankerprof_core::jsonio::parse_strict_json(
                 &std::fs::read_to_string(facts_path).map_err(|error| error.to_string())?,
-            )
-            .map_err(|error| error.to_string())?;
+            )?;
             sample_facts_from_json(&payload)
         }
     }
@@ -574,9 +573,9 @@ fn load_attributables(path: Option<&PathBuf>) -> Result<Option<Attributables>, S
     let Some(path) = path else {
         return Ok(None);
     };
-    let payload: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(path).map_err(|error| error.to_string())?)
-            .map_err(|error| error.to_string())?;
+    let payload = clankerprof_core::jsonio::parse_strict_json(
+        &std::fs::read_to_string(path).map_err(|error| error.to_string())?,
+    )?;
     let serde_json::Value::Object(columns) = payload else {
         return Err("Attributables must be a JSON object.".to_string());
     };
@@ -1221,9 +1220,10 @@ fn validate_slice_options(
 }
 
 fn parse_compare_threshold(raw: &str) -> Result<f64, String> {
-    let message = "Compare thresholds must be finite numbers.";
+    let message = "Compare thresholds must be finite, non-negative numbers.";
     let value: f64 = raw.parse().map_err(|_| message.to_string())?;
-    if !value.is_finite() {
+    // A negative threshold would gate identical reports as regressions.
+    if !value.is_finite() || value < 0.0 {
         return Err(message.to_string());
     }
     Ok(value)
@@ -1236,14 +1236,12 @@ fn run_compare(args: CompareArgs) -> Result<i32, String> {
         focus_slices: split_focus(args.focus_slices.as_deref()),
         focus_boundaries: split_focus(args.focus_boundaries.as_deref()),
     };
-    let before_payload: serde_json::Value = serde_json::from_str(
+    let before_payload = clankerprof_core::jsonio::parse_strict_json(
         &std::fs::read_to_string(&args.before).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?;
-    let after_payload: serde_json::Value = serde_json::from_str(
+    )?;
+    let after_payload = clankerprof_core::jsonio::parse_strict_json(
         &std::fs::read_to_string(&args.after).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?;
+    )?;
     let payload = compare_json(&before_payload, &after_payload, &options)?;
     let has_regression = payload
         .get("has_regression")

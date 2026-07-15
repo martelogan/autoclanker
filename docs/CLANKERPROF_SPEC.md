@@ -135,7 +135,12 @@ function IDs (in `location_ids` and frame rows) are unsigned 64-bit integers;
 sample values, lines, and `period` are signed 64-bit integers; floats,
 booleans, strings, and out-of-range numbers are validation errors, never
 coerced or truncated. All JSON inputs are strict RFC 8259: the non-standard
-`Infinity`/`-Infinity`/`NaN` tokens are validation errors in both languages.
+`Infinity`/`-Infinity`/`NaN` tokens are validation errors in both languages,
+and duplicate object member names are validation errors on every JSON input
+surface — never silent last-wins, which would make the same multiset of
+members change meaning with ordering (shared message core
+`duplicate entry with key "<key>"`; the location suffix is engine-specific,
+exactly like the YAML duplicate-key rule).
 JSON integer literals outside `[i64::MIN, u64::MAX]` are representation-
 divergent internally (serde_json falls back to `f64`; Python keeps an
 unbounded `int`) but behaviorally identical by contract: float-domain fields
@@ -513,17 +518,25 @@ last-wins would make the gate order-dependent. Row-level absence is different
 and legal: a name
 present in only one report compares against `0.0` (the documented new/removed
 row semantics). Nested row arrays (`frames`, `buckets`, `categories`,
-`domains`) may be absent, but a present key must be an array of objects.
-Numeric report fields must be JSON numbers: malformed values are a validation
-error in both implementations, never coerced to zero. Each report must carry
+`domains`) may be absent, but a present key must be an array of objects — a
+present `null` is a wrong shape and a validation error, not an absent array
+(conflating them would let a nulled-out array turn a real regression into an
+apparent removal). Numeric report fields must be JSON numbers: malformed
+values are a validation error in both implementations, never coerced to
+zero. Derived compare values (frame-percentage sums and absolute deltas)
+must also stay finite: overflow of finite inputs fails closed with
+`Compare values for '<name>' are not finite.` in both languages, never a
+silent `null`. Each report must carry
 a `summary` object whose `total_time_ns` is an integer, accepted across the
 full aggregate range `[i64::MIN, u64::MAX]`, exactly as projections emit
 them; absent or out-of-range values are rejected like non-integers. Compare
-thresholds must be finite numbers spelled in the strict shared float grammar
+thresholds must be finite, non-negative numbers spelled in the strict shared
+float grammar
 (Rust `f64::from_str` mirrored by Python): underscores, surrounding
 whitespace, and non-ASCII digits are validation errors, and a NaN, infinite,
-or overflowing threshold is an option-validation error (a non-finite
-threshold would silently disable gating). For slice
+overflowing, or negative threshold is an option-validation error (a
+non-finite threshold would silently disable gating; a negative one would
+gate identical reports as regressions). For slice
 payloads, it reports:
 
 - total before/after primary time from summaries;
@@ -545,7 +558,9 @@ are signed, so rows can carry negative percentages, and a `-10% -> -5%` row
 is a +50% relative increase that gates like any other (positive baselines are
 bit-identical to plain `delta/before`). A zero baseline has no finite
 relative delta; its `delta_rel` serializes as `null`, never as a bare
-`Infinity` token or a string, and threshold math treats it as unbounded in
+`Infinity` token or a string (the same `null` encoding applies in the rare
+case where a finite delta over a tiny baseline overflows the relative
+computation itself), and threshold math treats it as unbounded in
 the direction of the absolute delta — so a new row whose absolute delta
 exceeds the absolute threshold gates, and a new negative row is an unbounded
 improvement, symmetrically. `top_regressions` orders rows by descending absolute delta;
