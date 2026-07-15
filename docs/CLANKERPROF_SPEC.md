@@ -136,6 +136,11 @@ sample values, lines, and `period` are signed 64-bit integers; floats,
 booleans, strings, and out-of-range numbers are validation errors, never
 coerced or truncated. All JSON inputs are strict RFC 8259: the non-standard
 `Infinity`/`-Infinity`/`NaN` tokens are validation errors in both languages.
+JSON integer literals outside `[i64::MIN, u64::MAX]` are representation-
+divergent internally (serde_json falls back to `f64`; Python keeps an
+unbounded `int`) but behaviorally identical by contract: float-domain fields
+coerce both representations to the same `f64`, and integer-domain fields
+reject both with the same messages — pinned by the parity suite.
 
 Aggregates over sample values are exact, with a documented bound enforced at
 import and at profile decode: the sum of positive primary values must fit

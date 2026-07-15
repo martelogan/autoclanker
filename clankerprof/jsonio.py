@@ -24,6 +24,11 @@ def _reject_constant(token: str) -> Any:
 
 
 def parse_strict_json(text: str) -> Any:
+    # Integer literals outside [i64::MIN, u64::MAX] need no guard here:
+    # serde_json parses them as f64, and Python's unbounded int coerces to
+    # the identical f64 in float-domain fields while integer-domain fields
+    # reject both representations with the same messages (pinned by the
+    # parity suite).
     return json.loads(text, parse_constant=_reject_constant)
 
 

@@ -186,6 +186,7 @@ semantics.
 | Plain YAML scalar resolution follows serde_yaml's dialect (booleans `true`/`false` only, no YAML 1.1 int/float forms, out-of-64-bit ints fail the parse, overflowing float literals stay strings) — table pinned in both engines | covered | `test_clankerprof_strict_yaml_scalars_match_serde_yaml`, Rust `yaml_scalar_semantics` integration tests, `test_clankerprof_rust_yaml_scalars_and_attributables_match_python` |
 | String-typed integer config fields share the trim + ASCII signed-decimal i64 grammar | covered | `test_clankerprof_rust_yaml_scalars_and_attributables_match_python` |
 | Attributable metric values must be JSON numbers (booleans/strings rejected, shared messages) in `--cpu-attributables` and scope `attributables` | covered | `test_clankerprof_attributables_reject_non_numeric_values`, `test_clankerprof_rust_yaml_scalars_and_attributables_match_python` |
+| JSON integer literals outside `[i64::MIN, u64::MAX]` behave identically (f64 fallback vs unbounded int: same f64 in float domains, same rejection in integer domains) | covered | `test_clankerprof_json_out_of_range_integers_reject_in_integer_domains`, `test_clankerprof_rust_yaml_scalars_and_attributables_match_python` |
 
 ## Remaining confidence boundary
 

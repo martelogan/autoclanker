@@ -5160,6 +5160,29 @@ def test_clankerprof_json_inputs_reject_non_finite_tokens(
     assert "non-finite token 'NaN'" in cast(str, envelope["error"])
 
 
+def test_clankerprof_json_out_of_range_integers_reject_in_integer_domains(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # serde_json parses integer literals beyond [i64::MIN, u64::MAX] as f64;
+    # Python keeps an unbounded int. Integer-domain fields must reject both
+    # representations (float-domain fields coerce to the identical f64 — the
+    # parity suite pins that side).
+    report_path = tmp_path / "report.json"
+    report_path.write_text(
+        '{"tool": "clankerprof_slices", '
+        '"summary": {"total_time_ns": 1000000000000000000000000000000}, '
+        '"slices": [{"name": "A", "pct": 1}]}',
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["compare", "--before", str(report_path), "--after", str(report_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert "total_time_ns" in cast(str, envelope["error"])
+
+
 def test_clankerprof_facts_import_rejects_invalid_v1_shapes() -> None:
     with pytest.raises(ValueError, match="JSON must be an object"):
         loads_sample_facts("[]")

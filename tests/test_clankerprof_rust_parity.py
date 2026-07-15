@@ -3126,3 +3126,16 @@ def test_clankerprof_rust_yaml_scalars_and_attributables_match_python(
         "ok": False,
         "error": "Boundary attributable p90 must be a number.",
     }
+
+    # I-03: JSON integer literals outside [i64::MIN, u64::MAX] behave
+    # identically without any guard — serde_json parses them as f64 and
+    # Python's unbounded int coerces to the identical f64 in float-domain
+    # fields. Pinned so neither side grows an asymmetric "fix".
+    huge_attributables = tmp_path / "attributables-huge-int.json"
+    huge_attributables.write_text(
+        '{"col": {"T": 1000000000000000000000000000000}}', encoding="utf-8"
+    )
+    _assert_identical_success(
+        [*targets_base, "--cpu-attributables", str(huge_attributables)],
+        "attributables-huge-int",
+    )
