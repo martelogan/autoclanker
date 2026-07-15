@@ -13,7 +13,14 @@ from clankerprof.categorize import (
     simplify_category,
 )
 from clankerprof.facts import ProfileFactIndex, SampleFactsInput
-from clankerprof.model import Frame, Profile, TimeNs
+from clankerprof.model import (
+    AGGREGATE_BOUNDS_ERROR,
+    AGGREGATE_MAX,
+    AGGREGATE_MIN,
+    Frame,
+    Profile,
+    TimeNs,
+)
 from clankerprof.patterns import (
     DEFAULT_LIBRARY_SELECTORS,
     DEFAULT_RUNTIME_RULES,
@@ -421,6 +428,14 @@ def analyze_boundary_facts(
         )
         for boundary in options.boundaries
     )
+    # Occurrence-mode attribution counts a sample once per matching frame
+    # occurrence, so scope aggregates are NOT subset sums and can escape the
+    # import-time bound. Re-enforce it during accumulation: the per-boundary
+    # positive/negative occurrence sums cap every subordinate accumulator
+    # (category, leaf, caller-pair, owner), so checking them here keeps all
+    # rendered aggregates inside [AGGREGATE_MIN, AGGREGATE_MAX].
+    positive_occurrence = [0] * len(results)
+    negative_occurrence = [0] * len(results)
     index = ProfileFactIndex.from_input(sample_facts)
     runtime_cache = RuntimeCategoryCache(options.runtime_rules)
     predicate_matcher = _FramePredicateMatcher(
@@ -484,6 +499,14 @@ def analyze_boundary_facts(
                 boundary_stats = results[boundary_index]
                 boundary_stats.total_time += value
                 boundary_stats.sample_count += 1
+                if value >= 0:
+                    positive_occurrence[boundary_index] += value
+                    if positive_occurrence[boundary_index] > AGGREGATE_MAX:
+                        raise ValueError(AGGREGATE_BOUNDS_ERROR)
+                else:
+                    negative_occurrence[boundary_index] += value
+                    if negative_occurrence[boundary_index] < AGGREGATE_MIN:
+                        raise ValueError(AGGREGATE_BOUNDS_ERROR)
                 if boundary.count == "once_per_sample":
                     counted_once_boundaries.add(boundary_index)
 

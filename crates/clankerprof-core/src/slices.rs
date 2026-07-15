@@ -331,7 +331,8 @@ fn apply_python_limit<T>(items: &mut Vec<T>, limit: Option<i64>) {
     if limit >= 0 {
         items.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
     } else {
-        let dropped = usize::try_from(-limit).unwrap_or(usize::MAX);
+        // `-i64::MIN` overflows; unsigned_abs is defined for the full range.
+        let dropped = usize::try_from(limit.unsigned_abs()).unwrap_or(usize::MAX);
         items.truncate(items.len().saturating_sub(dropped));
     }
 }
@@ -671,6 +672,16 @@ mod limit_tests {
         let mut items = vec![1, 2];
         apply_python_limit(&mut items, None);
         assert_eq!(items, vec![1, 2]);
+    }
+
+    #[test]
+    fn python_limit_handles_i64_min_without_overflow() {
+        let mut items = vec![1, 2, 3];
+        apply_python_limit(&mut items, Some(i64::MIN));
+        assert!(items.is_empty());
+        let mut items: Vec<i32> = Vec::new();
+        apply_python_limit(&mut items, Some(i64::MIN));
+        assert!(items.is_empty());
     }
 
     #[test]

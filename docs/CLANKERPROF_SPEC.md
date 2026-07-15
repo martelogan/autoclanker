@@ -133,7 +133,14 @@ import and at profile decode: the sum of positive primary values must fit
 sum a projection can produce then lies in `[i64::MIN, u64::MAX]`, so derived
 totals (which may exceed `i64::MAX`, e.g. two `i64::MAX` samples totalling
 `18446744073709551614`) serialize as exact JSON integers in both languages —
-never a panic, wrap, or float approximation.
+never a panic, wrap, or float approximation. The import-time bound covers
+subset sums only; occurrence-mode scope attribution counts a sample once per
+matching frame occurrence and can therefore exceed it. Both implementations
+re-enforce the same bound during scope accumulation and fail with the
+identical validation error rather than emitting out-of-range integers.
+Implementations must read rendered totals back through both signed and
+unsigned integer views: a value in `(i64::MAX, u64::MAX]` is valid data, not
+zero.
 
 Round-tripping this JSON through `loads_sample_facts` must preserve target and
 slice projection outputs, including exports whose IDs exceed `i64::MAX`: each
@@ -329,6 +336,9 @@ cost-kind, and owner pairing.
 
 Scope totals for one scope must remain internally additive: rollup cost-kind
 rows sum to the scope total, and owner cost-kind rows sum to their owner totals.
+Zero-aggregate rows may be omitted from rendered rollups (they cannot affect
+the sums), but rows with negative aggregates must be rendered — sample values
+are signed, and dropping negative rows breaks additivity.
 Calibrated attributables are caller-supplied same-scope metrics; the analyzer
 only scales them proportionally by scope CPU share.
 
@@ -373,7 +383,10 @@ silent "no regression". Each report must contain its projection's row array
 (`slices` or `boundaries`); a payload missing it is a validation error, not
 an empty comparison. Numeric report fields (`pct`, `pct_of_profile`,
 `total_time_ns`) must be JSON numbers: malformed values are a validation
-error in both implementations, never coerced to zero. Compare thresholds
+error in both implementations, never coerced to zero. Summary
+`total_time_ns` values are integers and are accepted across the full
+aggregate range `[i64::MIN, u64::MAX]`, exactly as projections emit them;
+integers outside that range are rejected like non-integers. Compare thresholds
 must be finite numbers; a NaN or infinite threshold is an option-validation
 error (a non-finite threshold would silently disable gating). For slice
 payloads, it reports:

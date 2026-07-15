@@ -2174,3 +2174,150 @@ def test_clankerprof_rust_slices_validation_envelopes_match_python(
         )
         assert completed.returncode == 2, (argv, completed.stderr)
         assert json.loads(completed.stderr) == {"ok": False, "error": message}, argv
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_numeric_edge_semantics_match_python(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from clankerprof.cli import main as clankerprof_main
+
+    repo_root = Path(__file__).resolve().parents[1]
+
+    def rust(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                "cargo",
+                "run",
+                "--quiet",
+                "-p",
+                "clankerprof-core",
+                "--bin",
+                "clankerprof-rs",
+                "--",
+                *argv,
+            ],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    def assert_stdout_parity(argv: list[str]) -> str:
+        assert clankerprof_main(argv) == 0, argv
+        python_stdout = capsys.readouterr().out
+        completed = rust(argv)
+        assert completed.returncode == 0, (argv, completed.stderr)
+        assert completed.stdout == python_stdout, argv
+        return python_stdout
+
+    i64_min = "-9223372036854775808"
+    i64_max = 2**63 - 1
+    two_i64_max = 18_446_744_073_709_551_614
+
+    # Signed-minimum tail limits (--by-slice / --top reach the same helper).
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("T", "/srv/app/t.py"))
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    builder.sample((leaf, target), 7)
+    small_profile = tmp_path / "numeric-small.pb"
+    small_profile.write_bytes(builder.encode())
+    slices_path = tmp_path / "numeric-slices.yml"
+    slices_path.write_text(
+        "slices:\n  - name: app\n    paths:\n      - /srv/app\n",
+        encoding="utf-8",
+    )
+    slice_base = [
+        "slices",
+        "--profile",
+        str(small_profile),
+        "--slices",
+        str(slices_path),
+    ]
+    for flag in ("--by-slice", "--top"):
+        assert_stdout_parity([*slice_base, flag, i64_min])
+
+    # Scope buckets above i64::MAX render (and sort) identically.
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("T", "/srv/app/t.py"))
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    builder.sample((leaf, target), i64_max)
+    builder.sample((leaf, target), i64_max)
+    big_profile = tmp_path / "numeric-big.pb"
+    big_profile.write_bytes(builder.encode())
+    scopes_config = tmp_path / "numeric-scopes.yml"
+    scopes_config.write_text(
+        'cost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - function: T\n',
+        encoding="utf-8",
+    )
+    scopes_base = ["scopes", "--profile", str(big_profile), "--config", str(scopes_config)]
+    big_stdout = assert_stdout_parity(scopes_base)
+    big_boundary = json.loads(big_stdout)["boundaries"][0]
+    assert big_boundary["total_time_ns"] == two_i64_max
+    assert [bucket["time_ns"] for bucket in big_boundary["buckets"]] == [two_i64_max]
+
+    # Occurrence-weighted aggregates beyond u64::MAX fail closed identically.
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("T", "/srv/app/t.py"))
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    builder.sample((leaf, target, target, target), i64_max)
+    overflow_profile = tmp_path / "numeric-overflow.pb"
+    overflow_profile.write_bytes(builder.encode())
+    overflow_argv = [
+        "scopes",
+        "--profile",
+        str(overflow_profile),
+        "--config",
+        str(scopes_config),
+    ]
+    assert clankerprof_main(overflow_argv) == 2
+    python_error = json.loads(capsys.readouterr().err)
+    assert python_error == {
+        "ok": False,
+        "error": "Aggregate sample values exceed the supported integer range.",
+    }
+    completed = rust(overflow_argv)
+    assert completed.returncode == 2, completed.stderr
+    assert json.loads(completed.stderr) == python_error
+
+    # Compare accepts report totals across the full aggregate range.
+    report: dict[str, Any] = {
+        "tool": "clankerprof_slices",
+        "summary": {"total_time_ns": two_i64_max},
+        "slices": [{"name": "A", "pct": 50.0, "frames": []}],
+    }
+    before_path = tmp_path / "numeric-before.json"
+    after_path = tmp_path / "numeric-after.json"
+    before_path.write_text(json.dumps(report), encoding="utf-8")
+    after_path.write_text(json.dumps(report), encoding="utf-8")
+    compare_stdout = assert_stdout_parity(
+        ["compare", "--before", str(before_path), "--after", str(after_path)]
+    )
+    compare_payload = json.loads(compare_stdout)
+    assert compare_payload["before_total_ns"] == two_i64_max
+    assert compare_payload["after_total_ns"] == two_i64_max
+
+    # Mixed-sign costs stay additive and byte-identical.
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("T", "/srv/app/t.py"))
+    pos = builder.location(builder.function("Pos", "/srv/app/pos.py"))
+    neg = builder.location(builder.function("Neg", "/srv/app/neg.py"))
+    builder.sample((pos, target), 10)
+    builder.sample((neg, target), -5)
+    mixed_profile = tmp_path / "numeric-mixed.pb"
+    mixed_profile.write_bytes(builder.encode())
+    mixed_config = tmp_path / "numeric-mixed.yml"
+    mixed_config.write_text(
+        'cost_kind:\n  Pos: "name:Pos"\n  Neg: "name:Neg"\nscope:\n  - function: T\n',
+        encoding="utf-8",
+    )
+    mixed_stdout = assert_stdout_parity(
+        ["scopes", "--profile", str(mixed_profile), "--config", str(mixed_config)]
+    )
+    mixed_boundary = json.loads(mixed_stdout)["boundaries"][0]
+    assert mixed_boundary["total_time_ns"] == 5
+    assert (
+        sum(bucket["time_ns"] for bucket in mixed_boundary["buckets"])
+        == mixed_boundary["total_time_ns"]
+    )

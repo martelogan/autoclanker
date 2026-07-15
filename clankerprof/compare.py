@@ -5,6 +5,8 @@ import math
 from dataclasses import dataclass
 from typing import Any, cast
 
+from clankerprof.model import AGGREGATE_MAX, AGGREGATE_MIN
+
 
 @dataclass(frozen=True, slots=True)
 class CompareOptions:
@@ -41,7 +43,13 @@ def _summary_total(payload: dict[str, Any]) -> int:
     if not isinstance(raw_summary, dict):
         raise ValueError("Report summary must be an object.")
     value: object = cast(dict[str, Any], raw_summary).get("total_time_ns", 0)
-    if isinstance(value, bool) or not isinstance(value, int):
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not AGGREGATE_MIN <= value <= AGGREGATE_MAX
+    ):
+        # Out-of-range integers share the message because Rust's JSON parser
+        # cannot distinguish them from non-integers (both parse as floats).
         raise ValueError("Report summary field 'total_time_ns' must be an integer.")
     return value
 

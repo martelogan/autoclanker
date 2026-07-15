@@ -83,6 +83,8 @@ existing boundary JSON payloads, or slice ownership semantics.
 | Nested predicate expressions remain cached by unique frame identity across repeated samples | covered | `test_clankerprof_boundary_expression_matching_stays_frame_cached` |
 | Configured category selectors remain cached by unique frame identity when used as owner-domain predicates | covered | `test_clankerprof_boundary_category_predicates_stay_frame_cached` |
 | Rust parity for scope decomposition | covered | `test_clankerprof_rust_scopes_match_python_boundary_decomposition`, `test_clankerprof_rust_scopes_legacy_aliases_and_boundaries_subcommand`, `test_clankerprof_rust_scopes_replay_facts_identically` |
+| Scope aggregates in `(i64::MAX, u64::MAX]` render, filter, and sort identically; occurrence-weighted totals beyond the aggregate bound exit 2 with matching envelopes; signed-minimum `--top`/`--by-slice`/`--unattributed-libraries` limits truncate without panicking | covered | `test_clankerprof_rust_numeric_edge_semantics_match_python`, `test_clankerprof_scope_occurrence_aggregates_fail_closed_beyond_bound`, `test_clankerprof_slices_tail_limits_accept_i64_min` |
+| Zero-aggregate rollup rows are omitted while negative rows render, keeping bucket/owner sums equal to scope totals byte-identically | covered | `test_clankerprof_rust_numeric_edge_semantics_match_python`, `test_clankerprof_scope_rollups_render_negative_costs_additively` |
 
 ## Runtime rules
 
@@ -151,6 +153,7 @@ semantics.
 | Compare fails closed on malformed reports: missing `slices`/`boundaries` arrays, non-numeric fields, and non-finite thresholds exit 2 with matching envelopes in both languages | covered | `test_clankerprof_compare_rejects_missing_row_arrays_and_bad_numbers`, `test_clankerprof_compare_rejects_non_finite_thresholds`, `test_clankerprof_rust_compare_rejects_malformed_reports_like_python` |
 | `compare --focus-scopes` alias of `--focus-boundaries` in both CLIs | covered | `test_clankerprof_rust_cli_flag_matrix_matches_python` (compare-focus-scopes-alias) |
 | Frames sharing a function name aggregate (sum) in per-function deltas, byte-identically across languages | covered | `test_clankerprof_compare_aggregates_duplicate_function_frames`, `test_clankerprof_rust_compare_aggregates_duplicate_functions_like_python` |
+| Summary `total_time_ns` accepted across the full aggregate range `[i64::MIN, u64::MAX]` and echoed exactly in both languages | covered | `test_clankerprof_compare_summary_totals_span_u64_range`, `test_clankerprof_rust_numeric_edge_semantics_match_python` |
 | Text compare report wording from older slice tools | not claimed | JSON gate compatibility is the stable contract. |
 
 ## CLI stream contract

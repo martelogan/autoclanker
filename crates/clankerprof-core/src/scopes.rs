@@ -3,7 +3,10 @@
 //! `clankerprof/render.py`.
 
 use crate::categorize::{categorize_stack, simplify_category, RuntimeCategoryCache};
-use crate::model::{CategoryStats, DomainStats, Frame, ProfileFacts, TimeNs};
+use crate::model::{
+    CategoryStats, DomainStats, Frame, ProfileFacts, TimeNs, AGGREGATE_BOUNDS_ERROR, AGGREGATE_MAX,
+    AGGREGATE_MIN,
+};
 use crate::rules::RuntimeRuleSet;
 use crate::slices::SliceDefinition;
 use crate::targets::{
@@ -359,6 +362,14 @@ pub fn analyze_boundary_facts(
             ..BoundaryStats::default()
         })
         .collect();
+    // Occurrence-mode attribution counts a sample once per matching frame
+    // occurrence, so scope aggregates are NOT subset sums and can escape the
+    // import-time bound. Re-enforce it during accumulation: the per-boundary
+    // positive/negative occurrence sums cap every subordinate accumulator
+    // (category, leaf, caller-pair, owner), so checking them here keeps all
+    // rendered aggregates inside [AGGREGATE_MIN, AGGREGATE_MAX].
+    let mut positive_occurrence: Vec<TimeNs> = vec![0; results.len()];
+    let mut negative_occurrence: Vec<TimeNs> = vec![0; results.len()];
     let mut runtime_cache = RuntimeCategoryCache::default();
     let mut predicate_matcher = PredicateMatcher::new(&options.runtime_rules, &options.slices);
     predicate_matcher.category_matcher = Some(CategoryMatcher::new(options.categories.clone()));
@@ -449,6 +460,17 @@ pub fn analyze_boundary_facts(
                 let boundary_stats = &mut results[boundary_index];
                 boundary_stats.total_time += value;
                 boundary_stats.sample_count += 1;
+                if value >= 0 {
+                    positive_occurrence[boundary_index] += value;
+                    if positive_occurrence[boundary_index] > AGGREGATE_MAX {
+                        return Err(AGGREGATE_BOUNDS_ERROR.to_string());
+                    }
+                } else {
+                    negative_occurrence[boundary_index] += value;
+                    if negative_occurrence[boundary_index] < AGGREGATE_MIN {
+                        return Err(AGGREGATE_BOUNDS_ERROR.to_string());
+                    }
+                }
                 if boundary.once_per_sample {
                     counted_once_boundaries.insert(boundary_index);
                 }
@@ -599,6 +621,16 @@ fn truncated<T>(items: Vec<T>, top: Option<usize>) -> Vec<T> {
     }
 }
 
+/// Rendered totals may exceed i64 (aggregate bound allows up to u64::MAX),
+/// so read them back through both integer views before widening.
+fn time_ns_of(value: &Value) -> TimeNs {
+    value
+        .as_i64()
+        .map(TimeNs::from)
+        .or_else(|| value.as_u64().map(TimeNs::from))
+        .unwrap_or(0)
+}
+
 fn render_boundary(boundary: &BoundaryStats, profile_total: TimeNs, top: Option<usize>) -> Value {
     let total = boundary.total_time;
     let bucketed: HashSet<&str> = boundary
@@ -616,7 +648,7 @@ fn render_boundary(boundary: &BoundaryStats, profile_total: TimeNs, top: Option<
     leftover_sorted.sort_by(|left, right| right.1.cpu_time.cmp(&left.1.cpu_time));
     let leftover: Vec<String> = leftover_sorted
         .into_iter()
-        .filter(|(category, stats)| !bucketed.contains(category.as_str()) && stats.cpu_time > 0)
+        .filter(|(category, stats)| !bucketed.contains(category.as_str()) && stats.cpu_time != 0)
         .map(|(category, _)| category.clone())
         .collect();
     if !leftover.is_empty() {
@@ -624,16 +656,16 @@ fn render_boundary(boundary: &BoundaryStats, profile_total: TimeNs, top: Option<
     }
     let mut buckets: Vec<Value> = buckets
         .into_iter()
-        .filter(|bucket| bucket["time_ns"].as_i64().unwrap_or(0) > 0)
+        .filter(|bucket| time_ns_of(&bucket["time_ns"]) != 0)
         .collect();
-    buckets.sort_by_key(|bucket| std::cmp::Reverse(bucket["time_ns"].as_i64().unwrap_or(0)));
+    buckets.sort_by_key(|bucket| std::cmp::Reverse(time_ns_of(&bucket["time_ns"])));
 
     let mut domains_sorted: Vec<(&String, &DomainStats)> = boundary.domains.iter().collect();
     domains_sorted.sort_by(|left, right| right.1.cpu_time.cmp(&left.1.cpu_time));
     let domains: Vec<Value> = truncated(
         domains_sorted
             .into_iter()
-            .filter(|(_, stats)| stats.cpu_time > 0)
+            .filter(|(_, stats)| stats.cpu_time != 0)
             .map(|(name, stats)| render_domain(boundary, name, stats, top))
             .collect(),
         top,
@@ -664,21 +696,13 @@ fn render_bucket(boundary: &BoundaryStats, label: &str, categories: &[String]) -
             boundary
                 .categories
                 .get(category)
-                .filter(|stats| stats.cpu_time > 0)
+                .filter(|stats| stats.cpu_time != 0)
                 .map(|stats| render_category(boundary, category, stats))
         })
         .collect();
-    // Rendered totals may exceed i64 (aggregate bound allows up to u64::MAX),
-    // so read them back through both integer views before widening.
     let cpu_time: TimeNs = category_rows
         .iter()
-        .map(|row| {
-            row["time_ns"]
-                .as_i64()
-                .map(TimeNs::from)
-                .or_else(|| row["time_ns"].as_u64().map(TimeNs::from))
-                .unwrap_or(0)
-        })
+        .map(|row| time_ns_of(&row["time_ns"]))
         .sum();
     let samples: u64 = category_rows
         .iter()
@@ -1228,6 +1252,17 @@ pub fn load_boundary_options(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn time_ns_read_back_handles_the_full_aggregate_range() {
+        assert_eq!(time_ns_of(&json!(-5)), -5);
+        assert_eq!(time_ns_of(&json!(i64::MAX)), TimeNs::from(i64::MAX));
+        // Above i64::MAX serde_json stores u64; as_i64-only reads see zero.
+        assert_eq!(
+            time_ns_of(&json!(18_446_744_073_709_551_614_u64)),
+            18_446_744_073_709_551_614_i128
+        );
+    }
 
     #[test]
     fn predicate_parser_matches_python_validation() {

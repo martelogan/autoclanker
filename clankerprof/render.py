@@ -144,11 +144,11 @@ def _render_boundary(
             key=lambda item: item[1].cpu_time,
             reverse=True,
         )
-        if category not in bucketed_categories and stats.cpu_time > 0
+        if category not in bucketed_categories and stats.cpu_time != 0
     )
     if leftover:
         buckets.append(_render_boundary_bucket(boundary, "Other", leftover))
-    buckets = [bucket for bucket in buckets if cast(int, bucket["time_ns"]) > 0]
+    buckets = [bucket for bucket in buckets if cast(int, bucket["time_ns"]) != 0]
     buckets.sort(key=lambda bucket: cast(int, bucket["time_ns"]), reverse=True)
     return {
         "name": boundary.name,
@@ -164,7 +164,7 @@ def _render_boundary(
                 key=lambda item: item[1].cpu_time,
                 reverse=True,
             )
-            if stats.cpu_time > 0
+            if stats.cpu_time != 0
         ][:top],
     }
 
@@ -179,7 +179,7 @@ def _render_boundary_bucket(
         _render_boundary_category(boundary, category, stats)
         for category in categories
         if (stats := boundary.categories.get(category)) is not None
-        and stats.cpu_time > 0
+        and stats.cpu_time != 0
     ]
     cpu_time = sum(cast(int, row["time_ns"]) for row in category_rows)
     return {

@@ -212,18 +212,19 @@ fn string_field(payload: &Value, key: &str) -> String {
         .to_string()
 }
 
-fn summary_total(payload: &Value) -> Result<i64, String> {
+fn summary_total(payload: &Value) -> Result<Value, String> {
     let Some(summary) = payload.get("summary") else {
-        return Ok(0);
+        return Ok(json!(0));
     };
     if !summary.is_object() {
         return Err("Report summary must be an object.".to_string());
     }
     match summary.get("total_time_ns") {
-        None => Ok(0),
-        Some(value) => value
-            .as_i64()
-            .ok_or_else(|| "Report summary field 'total_time_ns' must be an integer.".to_string()),
+        None => Ok(json!(0)),
+        // Valid report totals span [i64::MIN, u64::MAX] (aggregate bound), so
+        // preserve the exact JSON integer instead of coercing through i64.
+        Some(value) if value.is_i64() || value.is_u64() => Ok(value.clone()),
+        Some(_) => Err("Report summary field 'total_time_ns' must be an integer.".to_string()),
     }
 }
 

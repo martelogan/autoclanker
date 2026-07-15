@@ -5146,3 +5146,143 @@ def test_clankerprof_by_slice_values_validate_and_support_negative_limits(
             "ok": False,
             "error": message,
         }, value
+
+
+def test_clankerprof_slices_tail_limits_accept_i64_min(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("T#render", "/srv/app/t.py"))
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    builder.sample((leaf, target), 7_000_000)
+    profile_path = tmp_path / "i64-min.pb"
+    profile_path.write_bytes(builder.encode())
+    slices_path = tmp_path / "i64-min-slices.yml"
+    slices_path.write_text(
+        "slices:\n  - name: app\n    paths:\n      - /srv/app\n",
+        encoding="utf-8",
+    )
+    base = [
+        "slices",
+        "--profile",
+        str(profile_path),
+        "--slices",
+        str(slices_path),
+    ]
+
+    # i64::MIN is inside the documented signed-64-bit limit domain; the tail
+    # drop must empty the list without erroring (Python `list[:-n]`).
+    for flag in ("--by-slice", "--top"):
+        assert clankerprof_main([*base, flag, "-9223372036854775808"]) == 0, flag
+        payload = json.loads(capsys.readouterr().out)
+        if flag == "--by-slice":
+            assert payload["slices"] == []
+        else:
+            assert all(item["frames"] == [] for item in payload["slices"])
+
+
+def test_clankerprof_scope_occurrence_aggregates_fail_closed_beyond_bound(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("T", "/srv/app/t.py"))
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    # One valid sample (import bound holds: i64::MAX <= u64::MAX), but the
+    # scope frame appears three times, so occurrence attribution would reach
+    # 3 * i64::MAX > u64::MAX.
+    builder.sample((leaf, target, target, target), 2**63 - 1)
+    profile_path = tmp_path / "occurrence-overflow.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "occurrence-overflow.yml"
+    config_path.write_text(
+        'cost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - function: T\n',
+        encoding="utf-8",
+    )
+
+    argv = [
+        "scopes",
+        "--profile",
+        str(profile_path),
+        "--config",
+        str(config_path),
+    ]
+    assert clankerprof_main(argv) == 2
+    assert json.loads(capsys.readouterr().err) == {
+        "ok": False,
+        "error": "Aggregate sample values exceed the supported integer range.",
+    }
+
+    # once_per_sample mode keeps the aggregate a subset sum, which the import
+    # bound already covers: the identical profile stays valid.
+    once_config = tmp_path / "occurrence-once.yml"
+    once_config.write_text(
+        'cost_kind:\n  AppWork: "name:Leaf"\n'
+        "scope:\n  - function: T\n    count: once_per_sample\n",
+        encoding="utf-8",
+    )
+    assert (
+        clankerprof_main(
+            ["scopes", "--profile", str(profile_path), "--config", str(once_config)]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["boundaries"][0]["total_time_ns"] == 2**63 - 1
+
+
+def test_clankerprof_scope_rollups_render_negative_costs_additively(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("T", "/srv/app/t.py"))
+    pos = builder.location(builder.function("Pos", "/srv/app/pos.py"))
+    neg = builder.location(builder.function("Neg", "/srv/app/neg.py"))
+    builder.sample((pos, target), 10)
+    builder.sample((neg, target), -5)
+    profile_path = tmp_path / "mixed-sign.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "mixed-sign.yml"
+    config_path.write_text(
+        'cost_kind:\n  Pos: "name:Pos"\n  Neg: "name:Neg"\n'
+        "scope:\n  - function: T\n",
+        encoding="utf-8",
+    )
+
+    argv = ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+    assert clankerprof_main(argv) == 0
+    boundary = json.loads(capsys.readouterr().out)["boundaries"][0]
+    assert boundary["total_time_ns"] == 5
+    bucket_total = sum(bucket["time_ns"] for bucket in boundary["buckets"])
+    assert bucket_total == boundary["total_time_ns"]
+    categories = {
+        category["name"]: category["time_ns"]
+        for bucket in boundary["buckets"]
+        for category in bucket["categories"]
+    }
+    # Negative aggregates must be rendered (dropping them breaks additivity);
+    # only zero-aggregate rows may be omitted.
+    assert categories == {"Pos": 10, "Neg": -5}
+
+
+def test_clankerprof_compare_summary_totals_span_u64_range() -> None:
+    def report(total: int) -> dict[str, Any]:
+        return {
+            "tool": "clankerprof_slices",
+            "summary": {"total_time_ns": total},
+            "slices": [{"name": "A", "pct": 50.0, "frames": []}],
+        }
+
+    valid_total = 18_446_744_073_709_551_614  # 2 * i64::MAX, the spec example
+    payload = compare_slice_json(report(valid_total), report(valid_total))
+    assert payload["before_total_ns"] == valid_total
+    assert payload["after_total_ns"] == valid_total
+
+    for total in (2**64, -(2**63) - 1):
+        with pytest.raises(
+            ValueError,
+            match="Report summary field 'total_time_ns' must be an integer.",
+        ):
+            compare_slice_json(report(total), report(total))
