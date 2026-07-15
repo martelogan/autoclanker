@@ -585,7 +585,7 @@ fn load_attributables(path: Option<&PathBuf>) -> Result<Option<Attributables>, S
         for (key, value) in entries {
             let number = value
                 .as_f64()
-                .ok_or_else(|| format!("Attributable column {name} must be an object."))?;
+                .ok_or_else(|| format!("Attributable column {name} values must be numbers."))?;
             column.insert(key, number);
         }
         result.insert(name, column);

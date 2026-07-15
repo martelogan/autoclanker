@@ -5778,3 +5778,181 @@ def test_clankerprof_scope_selector_arrays_require_string_entries(
         )
         envelope = _error_envelope(capsys)
         assert envelope["error"] == message
+
+
+# One row per plain YAML scalar in value position: (scalar text, expected
+# typing). This table is byte-identical to SCALAR_TABLE in
+# crates/clankerprof-core/tests/yaml_scalar_semantics.rs, where the same
+# expectations are asserted against serde_yaml itself — together they pin
+# both engines to one scalar-resolution contract.
+_YAML_SCALAR_TABLE: list[tuple[str, str]] = [
+    ("12", "int:12"),
+    ("-7", "int:-7"),
+    ("+12", "int:12"),
+    ("0", "int:0"),
+    ("-0", "int:0"),
+    ("+0", "int:0"),
+    ("007", "str:007"),
+    ("017", "str:017"),
+    ("00", "str:00"),
+    ("-007", "str:-007"),
+    ("9223372036854775807", "int:9223372036854775807"),
+    ("-9223372036854775808", "int:-9223372036854775808"),
+    ("18446744073709551615", "int:18446744073709551615"),
+    ("18446744073709551616", "parse-error"),
+    ("-9223372036854775809", "parse-error"),
+    ("0x1F", "int:31"),
+    ("-0x1F", "int:-31"),
+    ("+0x1F", "int:31"),
+    ("0x1_F", "str:0x1_F"),
+    ("-0x8000000000000000", "int:-9223372036854775808"),
+    ("0x10000000000000000", "parse-error"),
+    ("0o17", "int:15"),
+    ("-0o17", "int:-15"),
+    ("0o8", "str:0o8"),
+    ("0o1_7", "str:0o1_7"),
+    ("0b101", "int:5"),
+    ("-0b101", "int:-5"),
+    ("0b2", "str:0b2"),
+    ("0b1_01", "str:0b1_01"),
+    ("1_0", "str:1_0"),
+    ("1__0", "str:1__0"),
+    ("1_0_0", "str:1_0_0"),
+    ("1:2:3", "str:1:2:3"),
+    ("60:1", "str:60:1"),
+    ("3.14", "float:3.14e0"),
+    ("-2.5", "float:-2.5e0"),
+    ("1.", "float:1e0"),
+    (".5", "float:5e-1"),
+    ("+.5", "float:5e-1"),
+    ("-.5", "float:-5e-1"),
+    ("+0.5", "float:5e-1"),
+    (".0", "float:0e0"),
+    ("0.", "float:0e0"),
+    ("00.5", "float:5e-1"),
+    ("007.5", "float:7.5e0"),
+    ("1e2", "float:1e2"),
+    ("1E2", "float:1e2"),
+    ("1e+2", "float:1e2"),
+    ("1e-2", "float:1e-2"),
+    ("+1e2", "float:1e2"),
+    ("-1e2", "float:-1e2"),
+    ("01e2", "float:1e2"),
+    ("12e03", "float:1.2e4"),
+    ("1.5e10", "float:1.5e10"),
+    ("1.5E+10", "float:1.5e10"),
+    ("5.e3", "float:5e3"),
+    (".5e3", "float:5e2"),
+    ("0e0", "float:0e0"),
+    ("0.0e0", "float:0e0"),
+    ("-0.0", "float:-0e0"),
+    ("1_0.5", "str:1_0.5"),
+    ("1.5_5", "str:1.5_5"),
+    ("1:2:3.5", "str:1:2:3.5"),
+    (".inf", "float:inf"),
+    (".Inf", "float:inf"),
+    (".INF", "float:inf"),
+    ("-.inf", "float:-inf"),
+    ("+.inf", "float:inf"),
+    (".nan", "float:nan"),
+    (".NaN", "float:nan"),
+    (".NAN", "float:nan"),
+    ("-.nan", "str:-.nan"),
+    ("+.nan", "str:+.nan"),
+    ("inf", "str:inf"),
+    ("nan", "str:nan"),
+    ("Infinity", "str:Infinity"),
+    ("1e309", "str:1e309"),
+    ("-1e309", "str:-1e309"),
+    ("1e400", "str:1e400"),
+    ("true", "bool:true"),
+    ("True", "bool:true"),
+    ("TRUE", "bool:true"),
+    ("false", "bool:false"),
+    ("False", "bool:false"),
+    ("FALSE", "bool:false"),
+    ("yes", "str:yes"),
+    ("Yes", "str:Yes"),
+    ("YES", "str:YES"),
+    ("no", "str:no"),
+    ("on", "str:on"),
+    ("off", "str:off"),
+    ("Off", "str:Off"),
+    ("y", "str:y"),
+    ("N", "str:N"),
+    ("~", "null"),
+    ("null", "null"),
+    ("Null", "null"),
+    ("NULL", "null"),
+    ("", "null"),
+    ("2026-01-01", "str:2026-01-01"),
+    ("=", "str:="),
+    (".", "str:."),
+    (".e5", "str:.e5"),
+]
+
+
+def test_clankerprof_strict_yaml_scalars_match_serde_yaml() -> None:
+    import math as _math
+
+    from clankerprof.jsonio import parse_strict_yaml
+
+    failures: list[str] = []
+    for scalar, expected in _YAML_SCALAR_TABLE:
+        if expected == "parse-error":
+            with pytest.raises(ValueError, match="expected any YAML value"):
+                parse_strict_yaml(f"v: {scalar}")
+            continue
+        value = parse_strict_yaml(f"v: {scalar}")["v"]
+        kind, _, payload = expected.partition(":")
+        if kind == "null":
+            ok = value is None
+        elif kind == "bool":
+            ok = isinstance(value, bool) and value is (payload == "true")
+        elif kind == "int":
+            ok = (
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and value == int(payload)
+            )
+        elif kind == "str":
+            ok = isinstance(value, str) and value == payload
+        else:  # float
+            if payload == "nan":
+                ok = isinstance(value, float) and _math.isnan(value)
+            else:
+                ok = isinstance(value, float) and value == float(payload)
+        if not ok:
+            failures.append(f"{scalar!r}: expected {expected}, got {value!r}")
+    assert not failures, "scalar typing drifted from serde_yaml:\n" + "\n".join(
+        failures
+    )
+
+
+def test_clankerprof_attributables_reject_non_numeric_values(
+    tmp_path: Path,
+) -> None:
+    from clankerprof.cli import (
+        _load_attributables,  # pyright: ignore[reportPrivateUsage]
+        _load_boundary_attributables,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    good_path = tmp_path / "attributables-good.json"
+    good_path.write_text('{"col": {"T": 2.5, "U": 3}}', encoding="utf-8")
+    loaded = _load_attributables(str(good_path))
+    assert loaded == {"col": {"T": 2.5, "U": 3.0}}
+
+    for bad_value in ("true", '"10"', "[1]"):
+        bad_path = tmp_path / "attributables-bad.json"
+        bad_path.write_text(f'{{"col": {{"T": {bad_value}}}}}', encoding="utf-8")
+        with pytest.raises(
+            ValueError, match="Attributable column col values must be numbers."
+        ):
+            _load_attributables(str(bad_path))
+
+    assert _load_boundary_attributables({"p90": 5}) == {"p90": 5.0}
+    for bad_metric in (True, "10", [1]):
+        with pytest.raises(
+            ValueError, match="Boundary attributable p90 must be a number."
+        ):
+            _load_boundary_attributables({"p90": bad_metric})

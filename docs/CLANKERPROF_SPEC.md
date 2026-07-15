@@ -341,6 +341,30 @@ null, and sequence keys are validation errors on every YAML surface, because
 Python `str()` and serde's `Display` have no shared spelling for them. The
 YAML 1.1 timestamp resolver is not applied — date-like scalars such as
 `2026-01-01` stay plain strings, matching serde_yaml's YAML 1.2 core schema.
+
+Plain-scalar resolution follows serde_yaml's dialect in both implementations
+(the shared table is pinned empirically by
+`crates/clankerprof-core/tests/yaml_scalar_semantics.rs` and its Python
+mirror): booleans are the `true`/`false` spellings only — `yes`/`no`/`on`/
+`off` are plain strings; integers are signed decimal without leading zeros
+plus signed `0x`/`0o`/`0b` forms, and YAML 1.1-only forms (underscores,
+sexagesimal `1:2:3`, bare-`0` octal like `017`) stay strings; plain integers
+outside `[-2^63, 2^64-1]` fail the parse itself with the shared message core
+`` invalid type: integer `<value>` as u128|i128, expected any YAML value ``
+(location detail engine-specific); floats require a dot or exponent, accept
+unsigned exponents (`1e2`), never contain underscores, keep the unsigned
+`.inf`/`.nan` spellings (signed NaN forms are strings), and literals that
+would overflow to infinity (`1e309`) stay plain strings rather than becoming
+infinite. String-typed integer fields (for example a quoted `top: "17"`)
+share one grammar in both implementations: surrounding whitespace is
+trimmed, then ASCII signed decimal within the i64 domain — underscores,
+unicode digits, and prefixed forms are validation errors.
+
+Attributable metric values — the `--cpu-attributables` JSON table and a
+scope's `attributables` block — must be JSON numbers in both
+implementations: booleans and numeric strings are rejected
+(`Attributable column <name> values must be numbers.` /
+`Boundary attributable <name> must be a number.`), never coerced.
 Selector and predicate arrays require string entries: a non-string entry in
 a scope `selector`/`matcher`/`match` list is
 `<section> selector values must be strings.`, and a non-string entry in any

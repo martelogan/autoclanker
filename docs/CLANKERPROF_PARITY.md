@@ -183,6 +183,9 @@ semantics.
 | Focus flags take one comma-delimited value; a repeated flag keeps the last occurrence in both CLIs | covered | `test_clankerprof_compare_focus_flags_take_one_comma_delimited_value`, `test_clankerprof_rust_value_domain_grammar_matches_python` |
 | Non-string YAML mapping keys rejected on every YAML surface with the shared message; no YAML 1.1 timestamp resolution | covered | `test_clankerprof_yaml_inputs_reject_non_string_mapping_keys`, `test_clankerprof_rust_value_domain_grammar_matches_python` |
 | Selector and string-or-array config fields require string entries in both languages | covered | `test_clankerprof_scope_selector_arrays_require_string_entries`, `test_clankerprof_rust_value_domain_grammar_matches_python` |
+| Plain YAML scalar resolution follows serde_yaml's dialect (booleans `true`/`false` only, no YAML 1.1 int/float forms, out-of-64-bit ints fail the parse, overflowing float literals stay strings) — table pinned in both engines | covered | `test_clankerprof_strict_yaml_scalars_match_serde_yaml`, Rust `yaml_scalar_semantics` integration tests, `test_clankerprof_rust_yaml_scalars_and_attributables_match_python` |
+| String-typed integer config fields share the trim + ASCII signed-decimal i64 grammar | covered | `test_clankerprof_rust_yaml_scalars_and_attributables_match_python` |
+| Attributable metric values must be JSON numbers (booleans/strings rejected, shared messages) in `--cpu-attributables` and scope `attributables` | covered | `test_clankerprof_attributables_reject_non_numeric_values`, `test_clankerprof_rust_yaml_scalars_and_attributables_match_python` |
 
 ## Remaining confidence boundary
 

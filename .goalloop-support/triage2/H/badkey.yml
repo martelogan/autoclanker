@@ -1,0 +1,4 @@
+cost_kind:
+  1: "name:Leaf"
+scope:
+  - function: T

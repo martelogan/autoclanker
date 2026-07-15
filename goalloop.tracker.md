@@ -63,3 +63,10 @@ and this loop's real work.
 | H-02 | Focus flags take one comma-delimited value; repeated flags keep the last occurrence in both CLIs | `test_clankerprof_compare_focus_flags_take_one_comma_delimited_value` | done | Python nargs="*" space-separated form removed (undocumented); Rust gains overrides_with last-wins |
 | H-03 | Non-string YAML mapping keys rejected on every YAML surface with one shared message; YAML 1.1 timestamp resolution removed | `test_clankerprof_yaml_inputs_reject_non_string_mapping_keys`, `test_clankerprof_rust_value_domain_grammar_matches_python` | done | bool/number/null key spellings had no shared form; date scalars now stay strings in both dialects |
 | H-04 | Selector and string-or-array config fields require string entries in both languages | `test_clankerprof_scope_selector_arrays_require_string_entries` | done | str()/Display spelling divergence (True vs true) closed fail-closed |
+
+## Wave I — proactive scalar-resolution parity (pre-round-3)
+
+| ID | Requirement | Verify | Status | Notes |
+| --- | --- | --- | --- | --- |
+| I-01 | Plain YAML scalar resolution matches serde_yaml's dialect in Python (bool spellings, int/float grammars, out-of-64-bit parse failure, overflow-to-string floats); string-typed integer config fields share the trim+ASCII-decimal i64 grammar | `test_clankerprof_strict_yaml_scalars_match_serde_yaml`, Rust `yaml_scalar_semantics` tests, `test_clankerprof_rust_yaml_scalars_and_attributables_match_python` | done | empirical 100-row scalar table pinned in BOTH engines; PyYAML 1.1 resolvers replaced; `_optional_int` string laxity (int("1_0")) closed |
+| I-02 | Attributable metric values must be JSON numbers in both languages (`--cpu-attributables` and scope `attributables`); shared rejection messages | `test_clankerprof_attributables_reject_non_numeric_values`, `test_clankerprof_rust_yaml_scalars_and_attributables_match_python` | done | Python float() bool/string coercion closed; Rust's misleading reused error text fixed to the shared message |

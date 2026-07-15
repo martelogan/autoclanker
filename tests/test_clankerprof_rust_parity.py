@@ -3014,3 +3014,115 @@ def test_clankerprof_rust_value_domain_grammar_matches_python(tmp_path: Path) ->
             f"string-items-{name}",
         )
         assert json.loads(envelope) == {"ok": False, "error": message}
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_yaml_scalars_and_attributables_match_python(
+    tmp_path: Path,
+) -> None:
+    facts_path = _order_scope_facts(tmp_path)
+
+    # I-01: YAML 1.1-only scalar forms no longer resolve in Python, so a
+    # `top` carrying them fails closed identically in both languages...
+    for label, literal in (
+        ("underscore", "1_0"),
+        ("sexagesimal", "1:2:3"),
+        ("quoted-underscore", '"1_0"'),
+    ):
+        config_path = tmp_path / f"top-{label}.yml"
+        config_path.write_text(
+            f"profile: /dev/null\ntop: {literal}\n", encoding="utf-8"
+        )
+        envelope = _assert_identical_envelope(
+            ["slices", "--config", str(config_path)], f"top-{label}"
+        )
+        assert json.loads(envelope) == {
+            "ok": False,
+            "error": "top in slice config must be an integer.",
+        }
+    # ...while YAML 1.2 forms Python used to reject now resolve identically.
+    exponent_config = tmp_path / "top-exponent.yml"
+    exponent_config.write_text("profile: /dev/null\ntop: 1e2\n", encoding="utf-8")
+    _assert_identical_success(
+        ["slices", "--config", str(exponent_config)], "top-exponent"
+    )
+    # `017` stays a string in both YAML dialects, and both string arms then
+    # parse it as decimal 17 (Rust trim+parse::<i64>, Python's ASCII mirror).
+    leading_zero_config = tmp_path / "top-leading-zero.yml"
+    leading_zero_config.write_text(
+        "profile: /dev/null\ntop: 017\n", encoding="utf-8"
+    )
+    _assert_identical_success(
+        ["slices", "--config", str(leading_zero_config)], "top-leading-zero"
+    )
+    yes_config = tmp_path / "label-yes.yml"
+    yes_config.write_text(
+        'cost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - function: T\n    label: yes\n',
+        encoding="utf-8",
+    )
+    yes_output = _assert_identical_success(
+        ["scopes", "--facts", str(facts_path), "--config", str(yes_config)],
+        "label-yes",
+    )
+    assert '"yes"' in yes_output
+
+    # Out-of-64-bit integers fail the YAML parse itself in both engines; the
+    # message core is shared, the location suffix is engine-specific.
+    overflow_config = tmp_path / "top-overflow.yml"
+    overflow_config.write_text(
+        "profile: /dev/null\ntop: 18446744073709551616\n", encoding="utf-8"
+    )
+    argv = ["slices", "--config", str(overflow_config)]
+    python_run = _run_python_cli_raw(argv)
+    rust_run = _run_rust_cli_raw(argv)
+    assert python_run.returncode == 2, python_run.stderr
+    assert rust_run.returncode == 2, rust_run.stderr
+    core = "invalid type: integer `18446744073709551616` as u128, expected any YAML value"
+    assert core in json.loads(python_run.stderr)["error"]
+    assert core in json.loads(rust_run.stderr)["error"]
+
+    # I-02: attributable metrics must be JSON numbers in both languages.
+    target_config = tmp_path / "t-config.json"
+    target_config.write_text(json.dumps({"T": {}}), encoding="utf-8")
+    good_attributables = tmp_path / "attributables-good.json"
+    good_attributables.write_text(json.dumps({"col": {"T": 2.5}}), encoding="utf-8")
+    targets_base = [
+        "targets",
+        "--facts",
+        str(facts_path),
+        "--config",
+        str(target_config),
+        "--format",
+        "csv",
+    ]
+    _assert_identical_success(
+        [*targets_base, "--cpu-attributables", str(good_attributables)],
+        "attributables-good",
+    )
+    for label, bad_value in (("bool", "true"), ("string", '"10"')):
+        bad_attributables = tmp_path / f"attributables-{label}.json"
+        bad_attributables.write_text(
+            f'{{"col": {{"T": {bad_value}}}}}', encoding="utf-8"
+        )
+        envelope = _assert_identical_envelope(
+            [*targets_base, "--cpu-attributables", str(bad_attributables)],
+            f"attributables-{label}",
+        )
+        assert json.loads(envelope) == {
+            "ok": False,
+            "error": "Attributable column col values must be numbers.",
+        }
+    boundary_config = tmp_path / "boundary-attributables.yml"
+    boundary_config.write_text(
+        'cost_kind:\n  AppWork: "name:Leaf"\n'
+        "scope:\n  - function: T\n    attributables:\n      p90: true\n",
+        encoding="utf-8",
+    )
+    envelope = _assert_identical_envelope(
+        ["scopes", "--facts", str(facts_path), "--config", str(boundary_config)],
+        "boundary-attributables-bool",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Boundary attributable p90 must be a number.",
+    }

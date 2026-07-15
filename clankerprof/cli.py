@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import tomllib
 import zlib
@@ -109,14 +110,14 @@ def _load_attributables(path: str | None) -> dict[str, dict[str, float]] | None:
         if not isinstance(values, dict):
             raise ValueError(f"Attributable column {name} must be an object.")
         raw_values = cast(dict[object, object], values)
-        try:
-            result[str(name)] = {
-                str(key): float(cast(Any, value)) for key, value in raw_values.items()
-            }
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"Attributable column {name} values must be numbers."
-            ) from exc
+        column: dict[str, float] = {}
+        for key, value in raw_values.items():
+            # Rust reads these through as_f64, which rejects JSON booleans
+            # and strings that Python's float() would silently coerce.
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"Attributable column {name} values must be numbers.")
+            column[str(key)] = float(value)
+        result[str(name)] = column
     return result
 
 
@@ -164,6 +165,19 @@ def _optional_bool(payload: dict[str, object], key: str) -> bool | None:
     return value
 
 
+def _config_int_from_str(raw: str, message: str) -> int:
+    # Mirrors Rust's `raw.trim().parse::<i64>()`: ASCII signed decimal only
+    # (Python's bare int() would admit underscores and unicode digits) and
+    # the i64 domain.
+    text = raw.strip()
+    if re.fullmatch(r"[-+]?[0-9]+", text, re.ASCII) is None:
+        raise ValueError(message)
+    value = int(text)
+    if not -(2**63) <= value <= 2**63 - 1:
+        raise ValueError(message)
+    return value
+
+
 def _optional_int(payload: dict[str, object], key: str) -> int | None:
     value = payload.get(key)
     if value is None:
@@ -171,6 +185,8 @@ def _optional_int(payload: dict[str, object], key: str) -> int | None:
     message = f"{key} in slice config must be an integer."
     if isinstance(value, bool):
         raise ValueError(message)
+    if isinstance(value, str):
+        return _config_int_from_str(value, message)
     if isinstance(value, float) and not value.is_integer():
         raise ValueError(message)
     try:
@@ -209,6 +225,8 @@ def _optional_unattributed_libraries(payload: dict[str, object]) -> int | None:
     if isinstance(value, bool):
         return 2**63 - 1 if value else None
     message = f"{key} in slice config must be an integer."
+    if isinstance(value, str):
+        return _config_int_from_str(value, message)
     if isinstance(value, float) and not value.is_integer():
         raise ValueError(message)
     try:
@@ -789,10 +807,11 @@ def _load_boundary_attributables(
         raise ValueError(f"{field_name} must be an object.")
     result: dict[str, float] = {}
     for raw_name, raw_metric in cast(dict[object, object], raw_value).items():
-        try:
-            metric = float(cast(Any, raw_metric))
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"{field_name} values must be numbers.") from exc
+        # Rust reads these through as_f64, which rejects the booleans and
+        # numeric strings float() would coerce; message text matches Rust.
+        if isinstance(raw_metric, bool) or not isinstance(raw_metric, (int, float)):
+            raise ValueError(f"Boundary attributable {raw_name} must be a number.")
+        metric = float(raw_metric)
         if metric < 0:
             raise ValueError(f"Boundary attributable {raw_name} cannot be negative.")
         result[str(raw_name)] = metric

@@ -1,0 +1,7 @@
+cost_kind:
+  AppWork: "name:Leaf"
+domain:
+  DomA: "name:Leaf"
+  DomB: "path:/app/t.rb"
+scope:
+  - function: T

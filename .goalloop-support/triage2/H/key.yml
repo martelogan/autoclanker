@@ -1,0 +1,4 @@
+cost_kind:
+  2026-01-01: "name:Leaf"
+scope:
+  - function: T
