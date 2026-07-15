@@ -176,11 +176,14 @@ fn slice_map(payload: &Value) -> Result<BTreeMap<String, Value>, String> {
         .get("slices")
         .and_then(Value::as_array)
         .ok_or_else(|| "Profile comparison input must contain a slices array.".to_string())?;
-    Ok(items
-        .iter()
-        .filter(|item| item.is_object())
-        .map(|item| (string_field(item, "name"), item.clone()))
-        .collect())
+    let mut result = BTreeMap::new();
+    for item in items {
+        if !item.is_object() {
+            return Err("Slice rows must be objects.".to_string());
+        }
+        result.insert(require_name(item, "name", "Slice")?, item.clone());
+    }
+    Ok(result)
 }
 
 /// Frames sharing a function name are summed; iteration follows the frames
@@ -189,54 +192,78 @@ fn slice_map(payload: &Value) -> Result<BTreeMap<String, Value>, String> {
 /// both sides walk the sorted union of function names.
 fn frames_by_function(slice_payload: &Value) -> Result<BTreeMap<String, f64>, String> {
     let mut frames = BTreeMap::new();
-    for item in slice_payload
-        .get("frames")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        if !item.is_object() {
-            continue;
-        }
+    for item in optional_rows(slice_payload, "frames", "Slice")? {
+        let function = require_name(item, "function", "Frame")?;
         let pct = require_number(item, "pct", "Frame")?;
-        *frames.entry(string_field(item, "function")).or_insert(0.0) += pct;
+        *frames.entry(function).or_insert(0.0) += pct;
     }
     Ok(frames)
 }
 
-fn string_field(payload: &Value, key: &str) -> String {
-    payload
-        .get(key)
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string()
-}
-
 fn summary_total(payload: &Value) -> Result<Value, String> {
-    let Some(summary) = payload.get("summary") else {
-        return Ok(json!(0));
-    };
+    let summary = payload.get("summary").unwrap_or(&Value::Null);
     if !summary.is_object() {
         return Err("Report summary must be an object.".to_string());
     }
     match summary.get("total_time_ns") {
-        None => Ok(json!(0)),
         // Valid report totals span [i64::MIN, u64::MAX] (aggregate bound), so
         // preserve the exact JSON integer instead of coercing through i64.
         Some(value) if value.is_i64() || value.is_u64() => Ok(value.clone()),
-        Some(_) => Err("Report summary field 'total_time_ns' must be an integer.".to_string()),
+        // Absent and out-of-range values share the message because this JSON
+        // parser cannot distinguish out-of-range integers from non-integers.
+        _ => Err("Report summary field 'total_time_ns' must be an integer.".to_string()),
     }
 }
 
-/// Strict read of an input-report numeric field: absent defaults to 0,
-/// present non-numbers are malformed input (mirrors Python `_require_number`).
+/// Rows present in a report must carry their numeric fields; absent or
+/// non-numeric is malformed input (mirrors Python `_require_number`).
+/// Row-level absence (a name missing from one report entirely) is handled
+/// by the callers, never by defaulting here.
 fn require_number(payload: &Value, key: &str, context: &str) -> Result<f64, String> {
-    match payload.get(key) {
-        None => Ok(0.0),
-        Some(value) => value
-            .as_f64()
-            .ok_or_else(|| format!("{context} field '{key}' must be a number.")),
+    payload
+        .get(key)
+        .and_then(Value::as_f64)
+        .ok_or_else(|| format!("{context} field '{key}' must be a number."))
+}
+
+fn require_name(payload: &Value, key: &str, context: &str) -> Result<String, String> {
+    payload
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| format!("{context} rows must carry a string '{key}'."))
+}
+
+fn row_context(key: &str) -> &'static str {
+    match key {
+        "slices" => "Slice",
+        "frames" => "Frame",
+        "boundaries" => "Boundary",
+        "buckets" => "Bucket",
+        "categories" => "Category",
+        _ => "Domain",
     }
+}
+
+/// Structural row arrays may be absent, but a present key must be an array
+/// of objects — wrong shapes are malformed input, never silently empty.
+fn optional_rows<'a>(
+    payload: &'a Value,
+    key: &str,
+    context: &str,
+) -> Result<Vec<&'a Value>, String> {
+    let Some(raw) = payload.get(key) else {
+        return Ok(Vec::new());
+    };
+    let Some(items) = raw.as_array() else {
+        return Err(format!("{context} field '{key}' must be an array."));
+    };
+    for item in items {
+        if !item.is_object() {
+            return Err(format!("{} rows must be objects.", row_context(key)));
+        }
+    }
+    Ok(items.iter().collect())
 }
 
 /// Infallible read for rows this module constructed itself.
@@ -264,9 +291,9 @@ fn boundary_rows(payload: &Value) -> Result<BTreeMap<(String, String, String), f
         .ok_or_else(|| "Boundary comparison input must contain a boundaries array.".to_string())?;
     for boundary in boundaries {
         if !boundary.is_object() {
-            continue;
+            return Err("Boundary rows must be objects.".to_string());
         }
-        let boundary_name = string_field(boundary, "name");
+        let boundary_name = require_name(boundary, "name", "Boundary")?;
         rows.insert(
             (
                 "boundary".to_string(),
@@ -275,57 +302,24 @@ fn boundary_rows(payload: &Value) -> Result<BTreeMap<(String, String, String), f
             ),
             require_number(boundary, "pct_of_profile", "Boundary")?,
         );
-        for bucket in boundary
-            .get("buckets")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            if !bucket.is_object() {
-                continue;
-            }
+        for bucket in optional_rows(boundary, "buckets", "Boundary")? {
+            let bucket_name = require_name(bucket, "name", "Bucket")?;
             rows.insert(
-                (
-                    "bucket".to_string(),
-                    boundary_name.clone(),
-                    string_field(bucket, "name"),
-                ),
+                ("bucket".to_string(), boundary_name.clone(), bucket_name),
                 require_number(bucket, "pct", "Bucket")?,
             );
-            for category in bucket
-                .get("categories")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-            {
-                if !category.is_object() {
-                    continue;
-                }
+            for category in optional_rows(bucket, "categories", "Bucket")? {
+                let category_name = require_name(category, "name", "Category")?;
                 rows.insert(
-                    (
-                        "category".to_string(),
-                        boundary_name.clone(),
-                        string_field(category, "name"),
-                    ),
+                    ("category".to_string(), boundary_name.clone(), category_name),
                     require_number(category, "pct", "Category")?,
                 );
             }
         }
-        for domain in boundary
-            .get("domains")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            if !domain.is_object() {
-                continue;
-            }
+        for domain in optional_rows(boundary, "domains", "Boundary")? {
+            let domain_name = require_name(domain, "name", "Domain")?;
             rows.insert(
-                (
-                    "domain".to_string(),
-                    boundary_name.clone(),
-                    string_field(domain, "name"),
-                ),
+                ("domain".to_string(), boundary_name.clone(), domain_name),
                 require_number(domain, "pct", "Domain")?,
             );
         }
@@ -522,5 +516,65 @@ mod tests {
             .as_array()
             .expect("top regressions");
         assert!(regressions.iter().any(|row| row["function"] == "f"));
+    }
+
+    #[test]
+    fn present_rows_missing_fields_fail_closed() {
+        let good = slice_report(json!([{"name": "hot", "pct": 10.0, "frames": []}]));
+        let cases = [
+            (
+                slice_report(json!([{"name": "hot"}])),
+                "Slice field 'pct' must be a number.",
+            ),
+            (
+                slice_report(json!([{"pct": 10.0}])),
+                "Slice rows must carry a string 'name'.",
+            ),
+            (slice_report(json!(["hot"])), "Slice rows must be objects."),
+            (
+                slice_report(json!([{"name": "hot", "pct": 10.0, "frames": "junk"}])),
+                "Slice field 'frames' must be an array.",
+            ),
+            (
+                slice_report(json!([{"name": "hot", "pct": 10.0, "frames": [{"pct": 1.0}]}])),
+                "Frame rows must carry a string 'function'.",
+            ),
+        ];
+        for (after, message) in cases {
+            let error = compare_slice_json(&good, &after, &CompareOptions::default())
+                .expect_err("malformed row must fail");
+            assert_eq!(error, message);
+        }
+    }
+
+    #[test]
+    fn reports_require_summary_totals() {
+        let good = slice_report(json!([{"name": "hot", "pct": 10.0}]));
+        let mut missing_summary = good.clone();
+        missing_summary
+            .as_object_mut()
+            .expect("report object")
+            .remove("summary");
+        let error = compare_slice_json(&missing_summary, &good, &CompareOptions::default())
+            .expect_err("missing summary must fail");
+        assert_eq!(error, "Report summary must be an object.");
+        let mut empty_summary = good.clone();
+        empty_summary["summary"] = json!({});
+        let error = compare_slice_json(&empty_summary, &good, &CompareOptions::default())
+            .expect_err("missing total must fail");
+        assert_eq!(
+            error,
+            "Report summary field 'total_time_ns' must be an integer."
+        );
+    }
+
+    #[test]
+    fn row_absence_keeps_new_and_removed_semantics() {
+        let good = slice_report(json!([{"name": "hot", "pct": 10.0, "frames": []}]));
+        let empty = slice_report(json!([]));
+        let compared = compare_slice_json(&good, &empty, &CompareOptions::default())
+            .expect("row absence stays legal");
+        assert_eq!(compared["slices"][0]["before_pct"], json!(10.0));
+        assert_eq!(compared["slices"][0]["after_pct"], json!(0.0));
     }
 }

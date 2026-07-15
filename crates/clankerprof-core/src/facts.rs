@@ -148,11 +148,16 @@ fn sample_index_field(payload: &Value) -> Result<usize, String> {
         .ok_or_else(|| "Sample fact sample_index must be a non-negative integer.".to_string())
 }
 
-/// Signed 64-bit entries (pprof sample values); missing key means empty.
-fn i64_list(payload: &Value, key: &str, field_name: &str) -> Result<Vec<i64>, String> {
-    match payload.get(key) {
-        None => Ok(Vec::new()),
-        Some(Value::Array(items)) => items
+fn required_sample_key<'a>(entry: &'a Value, key: &str) -> Result<&'a Value, String> {
+    entry
+        .get(key)
+        .ok_or_else(|| format!("Sample facts payload missing required key: '{key}'."))
+}
+
+/// Signed 64-bit entries (pprof sample values).
+fn i64_items(raw: &Value, field_name: &str) -> Result<Vec<i64>, String> {
+    match raw {
+        Value::Array(items) => items
             .iter()
             .map(|item| {
                 item.as_i64().ok_or_else(|| {
@@ -160,15 +165,22 @@ fn i64_list(payload: &Value, key: &str, field_name: &str) -> Result<Vec<i64>, St
                 })
             })
             .collect(),
-        Some(_) => Err(format!("Sample fact {field_name} must be an array.")),
+        _ => Err(format!("Sample fact {field_name} must be an array.")),
     }
 }
 
-/// Unsigned 64-bit entries (pprof location IDs); missing key means empty.
-fn u64_list(payload: &Value, key: &str, field_name: &str) -> Result<Vec<u64>, String> {
+/// v1 compatibility read: missing key means empty (v2 requires presence).
+fn i64_list(payload: &Value, key: &str, field_name: &str) -> Result<Vec<i64>, String> {
     match payload.get(key) {
         None => Ok(Vec::new()),
-        Some(Value::Array(items)) => items
+        Some(raw) => i64_items(raw, field_name),
+    }
+}
+
+/// Unsigned 64-bit entries (pprof location IDs).
+fn u64_items(raw: &Value, field_name: &str) -> Result<Vec<u64>, String> {
+    match raw {
+        Value::Array(items) => items
             .iter()
             .map(|item| {
                 item.as_u64().ok_or_else(|| {
@@ -176,7 +188,15 @@ fn u64_list(payload: &Value, key: &str, field_name: &str) -> Result<Vec<u64>, St
                 })
             })
             .collect(),
-        Some(_) => Err(format!("Sample fact {field_name} must be an array.")),
+        _ => Err(format!("Sample fact {field_name} must be an array.")),
+    }
+}
+
+/// v1 compatibility read: missing key means empty (v2 requires presence).
+fn u64_list(payload: &Value, key: &str, field_name: &str) -> Result<Vec<u64>, String> {
+    match payload.get(key) {
+        None => Ok(Vec::new()),
+        Some(raw) => u64_items(raw, field_name),
     }
 }
 
@@ -281,7 +301,9 @@ fn sample_facts_from_v2(payload: &Value) -> Result<ProfileFacts, String> {
             return Err("Each sample facts entry must be an object.".to_string());
         }
         let raw_stack = match entry.get("stack") {
-            None => &Vec::new(),
+            None => {
+                return Err("Sample facts payload missing required key: 'stack'.".to_string());
+            }
             Some(Value::Array(items)) => items,
             Some(_) => return Err("Sample fact stack must be an array.".to_string()),
         };
@@ -306,8 +328,11 @@ fn sample_facts_from_v2(payload: &Value) -> Result<ProfileFacts, String> {
         samples.push(SampleFact {
             sample_index: sample_index_field(entry)?,
             sample: Sample {
-                location_ids: u64_list(entry, "location_ids", "location_ids")?,
-                values: i64_list(entry, "values", "values")?
+                location_ids: u64_items(
+                    required_sample_key(entry, "location_ids")?,
+                    "location_ids",
+                )?,
+                values: i64_items(required_sample_key(entry, "values")?, "values")?
                     .into_iter()
                     .map(TimeNs::from)
                     .collect(),
@@ -709,5 +734,45 @@ mod tests {
         assert!(sample_facts_from_json(&bad)
             .unwrap_err()
             .contains("primary value does not match"));
+    }
+
+    #[test]
+    fn v2_samples_require_values_location_ids_and_stack() {
+        let base = json!({
+            "schema_version": SAMPLE_FACTS_SCHEMA_VERSION,
+            "profile": {
+                "value_types": [{"type": "cpu", "unit": "nanoseconds"}],
+                "period_type": null,
+                "period": 0,
+                "default_sample_type": "",
+                "primary_value_index": 0,
+            },
+            "strings": ["Leaf#work", "/srv/app/leaf.py"],
+            "frames": [[1, 1, 0, 1, 3, false]],
+            "samples": [
+                {"sample_index": 0, "values": [7], "location_ids": [1], "stack": [0]}
+            ],
+        });
+        for key in ["values", "location_ids", "stack"] {
+            let mut bad = base.clone();
+            bad["samples"][0]
+                .as_object_mut()
+                .expect("sample object")
+                .remove(key);
+            let error = sample_facts_from_json(&bad).unwrap_err();
+            assert_eq!(
+                error,
+                format!("Sample facts payload missing required key: '{key}'.")
+            );
+        }
+        // v1 keeps its documented leniency: missing per-sample arrays read as
+        // empty instead of failing import.
+        let lenient_v1 = json!({
+            "schema_version": SAMPLE_FACTS_SCHEMA_VERSION_V1,
+            "samples": [{"sample_index": 0}],
+        });
+        let facts = sample_facts_from_json(&lenient_v1).expect("lenient v1 sample");
+        assert!(facts.samples[0].sample.values.is_empty());
+        assert!(facts.samples[0].stack.is_empty());
     }
 }

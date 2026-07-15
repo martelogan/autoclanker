@@ -214,13 +214,20 @@ def extract_library_path(
                     f"Invalid library regex pattern {resolved_pattern!r}: {exc}"
                 ) from exc
             if match:
-                component = match.group(1) if match.groups() else match.group(0)
-                relative_path = (
-                    normalized[match.start(1) :] if match.groups() else component
+                # Group 1 names the library when it participated in the match;
+                # otherwise (non-participating optional group, or a pattern
+                # with no groups) the whole match names it. The relative path
+                # always runs from the naming component to the end of the
+                # normalized path — identical to the Rust implementation.
+                component = match.group(1) if match.groups() else None
+                component_start = (
+                    match.start(1) if component is not None else match.start(0)
                 )
+                if component is None:
+                    component = match.group(0)
                 return LibraryPath(
                     name=_normalize_library_component(component, rules),
-                    relative_path=relative_path,
+                    relative_path=normalized[component_start:],
                 )
             continue
         marker = _normalize_profile_path(resolved_pattern).strip("/")

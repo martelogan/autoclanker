@@ -2251,7 +2251,13 @@ def test_clankerprof_rust_numeric_edge_semantics_match_python(
         'cost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - function: T\n',
         encoding="utf-8",
     )
-    scopes_base = ["scopes", "--profile", str(big_profile), "--config", str(scopes_config)]
+    scopes_base = [
+        "scopes",
+        "--profile",
+        str(big_profile),
+        "--config",
+        str(scopes_config),
+    ]
     big_stdout = assert_stdout_parity(scopes_base)
     big_boundary = json.loads(big_stdout)["boundaries"][0]
     assert big_boundary["total_time_ns"] == two_i64_max
@@ -2320,4 +2326,232 @@ def test_clankerprof_rust_numeric_edge_semantics_match_python(
     assert (
         sum(bucket["time_ns"] for bucket in mixed_boundary["buckets"])
         == mixed_boundary["total_time_ns"]
+    )
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_compare_row_strictness_matches_python(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from clankerprof.cli import main as clankerprof_main
+
+    good: dict[str, Any] = {
+        "tool": "clankerprof_slices",
+        "summary": {"total_time_ns": 100},
+        "slices": [{"name": "hot", "pct": 10.0, "frames": []}],
+    }
+    malformed: list[tuple[dict[str, Any], str]] = [
+        (
+            {**good, "slices": [{"name": "hot"}]},
+            "Slice field 'pct' must be a number.",
+        ),
+        (
+            {**good, "slices": [{"pct": 10.0}]},
+            "Slice rows must carry a string 'name'.",
+        ),
+        ({**good, "slices": ["hot"]}, "Slice rows must be objects."),
+        (
+            {**good, "slices": [{"name": "hot", "pct": 10.0, "frames": "junk"}]},
+            "Slice field 'frames' must be an array.",
+        ),
+        (
+            {
+                "tool": "clankerprof_slices",
+                "slices": [{"name": "hot", "pct": 10.0}],
+            },
+            "Report summary must be an object.",
+        ),
+        (
+            {
+                "tool": "clankerprof_slices",
+                "summary": {},
+                "slices": [{"name": "hot", "pct": 10.0}],
+            },
+            "Report summary field 'total_time_ns' must be an integer.",
+        ),
+    ]
+    good_path = tmp_path / "row-good.json"
+    good_path.write_text(json.dumps(good), encoding="utf-8")
+    for index, (after, message) in enumerate(malformed):
+        after_path = tmp_path / f"row-bad-{index}.json"
+        after_path.write_text(json.dumps(after), encoding="utf-8")
+        argv = [
+            "compare",
+            "--before",
+            str(good_path),
+            "--after",
+            str(after_path),
+        ]
+        assert clankerprof_main(argv) == 2, message
+        python_error = json.loads(capsys.readouterr().err)
+        assert python_error == {"ok": False, "error": message}
+        completed = _rust_cli(argv)
+        assert completed.returncode == 2, (message, completed.stderr)
+        assert json.loads(completed.stderr) == python_error
+
+    # Row-level absence keeps new/removed semantics byte-identically.
+    empty_path = tmp_path / "row-empty.json"
+    empty_path.write_text(
+        json.dumps({**good, "slices": []}),
+        encoding="utf-8",
+    )
+    argv = ["compare", "--before", str(good_path), "--after", str(empty_path)]
+    assert clankerprof_main(argv) == 0
+    python_stdout = capsys.readouterr().out
+    completed = _rust_cli(argv)
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == python_stdout
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_facts_and_scope_validation_matches_python(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from clankerprof.cli import main as clankerprof_main
+
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/app/leaf.rb"))
+    target = builder.location(builder.function("T", "/app/t.rb"))
+    builder.sample((leaf, target), 7)
+    facts_payload = cast(
+        dict[str, Any],
+        sample_facts_to_jsonable(
+            decode_profile_bytes(builder.encode()).to_sample_facts()
+        ),
+    )
+    targets_config = tmp_path / "validation-targets.json"
+    targets_config.write_text(json.dumps({"T": {"App": "path:/app"}}), encoding="utf-8")
+
+    for key in ("values", "location_ids", "stack"):
+        mutated = json.loads(json.dumps(facts_payload))
+        del mutated["samples"][0][key]
+        facts_path = tmp_path / f"validation-missing-{key}.json"
+        facts_path.write_text(json.dumps(mutated), encoding="utf-8")
+        argv = [
+            "targets",
+            "--facts",
+            str(facts_path),
+            "--config",
+            str(targets_config),
+            "--format",
+            "json",
+        ]
+        assert clankerprof_main(argv) == 2, key
+        python_error = json.loads(capsys.readouterr().err)
+        assert python_error == {
+            "ok": False,
+            "error": f"Sample facts payload missing required key: '{key}'.",
+        }
+        completed = _rust_cli(argv)
+        assert completed.returncode == 2, (key, completed.stderr)
+        assert json.loads(completed.stderr) == python_error
+
+    facts_path = tmp_path / "validation-facts.json"
+    facts_path.write_text(json.dumps(facts_payload), encoding="utf-8")
+    scope_cases = [
+        (
+            "cost_kind:\n  Empty: {}\nscope:\n  - function: T\n",
+            "cost_kind Empty predicate table cannot be empty.",
+        ),
+        (
+            "scope:\n  - function: T\n    count: 1\n",
+            "scope.count must be occurrence or once_per_sample.",
+        ),
+    ]
+    for index, (config_text, message) in enumerate(scope_cases):
+        config_path = tmp_path / f"validation-scopes-{index}.yml"
+        config_path.write_text(config_text, encoding="utf-8")
+        argv = ["scopes", "--facts", str(facts_path), "--config", str(config_path)]
+        assert clankerprof_main(argv) == 2, message
+        python_error = json.loads(capsys.readouterr().err)
+        assert python_error == {"ok": False, "error": message}
+        completed = _rust_cli(argv)
+        assert completed.returncode == 2, (message, completed.stderr)
+        assert json.loads(completed.stderr) == python_error
+
+    # Owner fallback flags follow Python truthiness in both implementations.
+    truthy_config = tmp_path / "validation-fallback.yml"
+    truthy_config.write_text(
+        "cost_kind:\n"
+        '  AppWork: "name:Leaf"\n'
+        "owner:\n"
+        "  Everything:\n"
+        '    match: "path:/nowhere"\n'
+        '    fallback: "yes"\n'
+        "scope:\n"
+        "  - function: T\n",
+        encoding="utf-8",
+    )
+    argv = ["scopes", "--facts", str(facts_path), "--config", str(truthy_config)]
+    assert clankerprof_main(argv) == 0
+    python_stdout = capsys.readouterr().out
+    completed = _rust_cli(argv)
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == python_stdout
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_library_regex_fallback_matches_python(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from clankerprof.cli import main as clankerprof_main
+
+    pack_path = tmp_path / "fallback-pack.yml"
+    pack_path.write_text(
+        "schema_version: clankerprof.runtime_rules.v1\n"
+        "name: fallback\n"
+        "library_path_patterns:\n"
+        '  - "regex:/gems/(foo)?bar/"\n',
+        encoding="utf-8",
+    )
+    for stem, path in (
+        ("participating", "/gems/foobar/file.rb"),
+        ("fallback", "/gems/bar/file.rb"),
+    ):
+        builder = PprofFixtureBuilder.create()
+        leaf = builder.location(builder.function("Work", path))
+        root = builder.location(builder.function("Main", "/srv/app/main.rb"))
+        builder.sample((leaf, root), 7)
+        profile_path = tmp_path / f"library-{stem}.pb"
+        profile_path.write_bytes(builder.encode())
+        argv = [
+            "slices",
+            "--profile",
+            str(profile_path),
+            "--runtime-rules",
+            str(pack_path),
+        ]
+        assert clankerprof_main(argv) == 0, stem
+        python_stdout = capsys.readouterr().out
+        completed = _rust_cli(argv)
+        assert completed.returncode == 0, (stem, completed.stderr)
+        assert completed.stdout == python_stdout, stem
+        expected_library = "foo" if stem == "participating" else "gems/bar"
+        default_slice = json.loads(python_stdout)["slices"][0]
+        libraries = [
+            entry["name"] for entry in default_slice.get("unattributed_libraries", [])
+        ]
+        assert libraries == [expected_library], (stem, libraries)
+
+
+def _rust_cli(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            "cargo",
+            "run",
+            "--quiet",
+            "-p",
+            "clankerprof-core",
+            "--bin",
+            "clankerprof-rs",
+            "--",
+            *argv,
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        check=False,
+        capture_output=True,
+        text=True,
     )

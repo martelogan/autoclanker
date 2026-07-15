@@ -154,6 +154,11 @@ semantics.
 | `compare --focus-scopes` alias of `--focus-boundaries` in both CLIs | covered | `test_clankerprof_rust_cli_flag_matrix_matches_python` (compare-focus-scopes-alias) |
 | Frames sharing a function name aggregate (sum) in per-function deltas, byte-identically across languages | covered | `test_clankerprof_compare_aggregates_duplicate_function_frames`, `test_clankerprof_rust_compare_aggregates_duplicate_functions_like_python` |
 | Summary `total_time_ns` accepted across the full aggregate range `[i64::MIN, u64::MAX]` and echoed exactly in both languages | covered | `test_clankerprof_compare_summary_totals_span_u64_range`, `test_clankerprof_rust_numeric_edge_semantics_match_python` |
+| Present compare rows must carry string names and their numeric fields; field absence never coerces to zero while row-level absence keeps new/removed semantics | covered | `test_clankerprof_compare_rejects_rows_missing_required_fields`, `test_clankerprof_rust_compare_row_strictness_matches_python` |
+| Compare reports require a `summary` object with an integer `total_time_ns` in both languages | covered | `test_clankerprof_compare_rejects_rows_missing_required_fields`, `test_clankerprof_rust_compare_row_strictness_matches_python` |
+| Facts v2 samples require `values`, `location_ids`, and `stack`; missing keys exit 2 with matching envelopes (v1 keeps documented leniency) in both languages | covered | `test_clankerprof_facts_import_rejects_each_invalid_v2_shape`, `test_clankerprof_rust_facts_and_scope_validation_matches_python` |
+| Empty predicate tables and non-string scope `count` values fail closed in both languages; owner `fallback` follows Python truthiness | covered | `test_clankerprof_scope_config_rejects_empty_tables_and_bad_count`, `test_clankerprof_rust_facts_and_scope_validation_matches_python` |
+| Library regexes name libraries via participating group 1 with whole-match fallback, byte-identically across languages | covered | `test_clankerprof_library_regex_group_fallback`, `test_clankerprof_rust_library_regex_fallback_matches_python` |
 | Text compare report wording from older slice tools | not claimed | JSON gate compatibility is the stable contract. |
 
 ## CLI stream contract

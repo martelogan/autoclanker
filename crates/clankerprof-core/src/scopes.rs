@@ -904,11 +904,17 @@ fn predicate_expr(
                     }
                 }
             };
+            let any = children("any")?;
+            let all = children("all")?;
+            let not_ = children("not")?;
+            if predicates.is_empty() && any.is_empty() && all.is_empty() && not_.is_empty() {
+                return Err(format!("{field_name} predicate table cannot be empty."));
+            }
             Ok(FramePredicateExpr {
                 predicates,
-                any: children("any")?,
-                all: children("all")?,
-                not_: children("not")?,
+                any,
+                all,
+                not_,
             })
         }
         _ => Err(format!(
@@ -1015,10 +1021,9 @@ fn load_boundary_domains(
         let field_name = format!("{section_name} {name}");
         let (fallback, expression) = match raw_value {
             Value::Object(mapping) => {
-                let fallback = mapping
-                    .get("fallback")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
+                // Python evaluates `bool(fallback)` truthiness, so any present
+                // value counts by shape — never silently coerced to false.
+                let fallback = mapping.get("fallback").is_some_and(python_truthy);
                 let mut stripped = mapping.clone();
                 stripped.remove("fallback");
                 (
@@ -1035,6 +1040,19 @@ fn load_boundary_domains(
         });
     }
     Ok(domains)
+}
+
+/// Python `bool()` truthiness over parsed JSON shapes (mirrors the reference
+/// implementation's `bool(mapping.get("fallback", False))`).
+fn python_truthy(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(flag) => *flag,
+        Value::Number(number) => number.as_f64() != Some(0.0),
+        Value::String(text) => !text.is_empty(),
+        Value::Array(items) => !items.is_empty(),
+        Value::Object(mapping) => !mapping.is_empty(),
+    }
 }
 
 fn boundary_predicate_value(raw_boundary: &Map<String, Value>) -> Result<Value, String> {
@@ -1107,15 +1125,21 @@ fn load_boundaries(
         if !seen.insert(label.clone()) {
             return Err(format!("Duplicate boundary label: {label}"));
         }
-        let count = raw_boundary
-            .get("count")
-            .and_then(Value::as_str)
-            .unwrap_or("occurrence");
-        if !matches!(count, "occurrence" | "once_per_sample") {
-            return Err(format!(
-                "{section_name}.count must be occurrence or once_per_sample."
-            ));
-        }
+        // Non-string count values must fail like Python's str()-then-check,
+        // never silently fall back to the occurrence default.
+        let count = match raw_boundary.get("count") {
+            None => "occurrence",
+            Some(Value::String(text))
+                if matches!(text.as_str(), "occurrence" | "once_per_sample") =>
+            {
+                text.as_str()
+            }
+            Some(_) => {
+                return Err(format!(
+                    "{section_name}.count must be occurrence or once_per_sample."
+                ));
+            }
+        };
         let (rollup_name, raw_rollup) = aliased_config_value(
             raw_boundary,
             &["rollup", "bucket"],
@@ -1339,5 +1363,48 @@ count = "twice"
             .unwrap_err();
         std::fs::remove_file(&path).ok();
         assert!(error.contains("count must be occurrence or once_per_sample"));
+    }
+
+    #[test]
+    fn empty_predicate_tables_and_non_string_counts_fail_closed() {
+        let empty_table = r#"
+cost_kind:
+  Empty: {}
+scope:
+  - function: T
+"#;
+        let path = std::env::temp_dir().join("clankerprof-empty-table-test.yml");
+        std::fs::write(&path, empty_table).unwrap();
+        let error = load_boundary_options(&path, crate::rules::RuntimeRuleSet::generic().clone())
+            .unwrap_err();
+        std::fs::remove_file(&path).ok();
+        assert_eq!(error, "cost_kind Empty predicate table cannot be empty.");
+
+        let int_count = r#"
+scope:
+  - function: T
+    count: 1
+"#;
+        let path = std::env::temp_dir().join("clankerprof-int-count-test.yml");
+        std::fs::write(&path, int_count).unwrap();
+        let error = load_boundary_options(&path, crate::rules::RuntimeRuleSet::generic().clone())
+            .unwrap_err();
+        std::fs::remove_file(&path).ok();
+        assert_eq!(error, "scope.count must be occurrence or once_per_sample.");
+    }
+
+    #[test]
+    fn fallback_flags_follow_python_truthiness() {
+        assert!(python_truthy(&json!(true)));
+        assert!(python_truthy(&json!("yes")));
+        assert!(python_truthy(&json!(1)));
+        assert!(python_truthy(&json!([0])));
+        assert!(!python_truthy(&json!(false)));
+        assert!(!python_truthy(&json!(null)));
+        assert!(!python_truthy(&json!(0)));
+        assert!(!python_truthy(&json!(0.0)));
+        assert!(!python_truthy(&json!("")));
+        assert!(!python_truthy(&json!([])));
+        assert!(!python_truthy(&json!({})));
     }
 }

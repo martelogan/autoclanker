@@ -31,25 +31,62 @@ def _validated_options(options: CompareOptions | None) -> CompareOptions:
 
 
 def _require_number(payload: dict[str, Any], key: str, context: str) -> float:
-    """Absent numeric fields default to 0; present non-numbers are malformed."""
-    value: object = payload.get(key, 0)
+    """Rows present in a report must carry their numeric fields; absent or
+    non-numeric is malformed input. Row-level absence (a name missing from one
+    report entirely) is handled by the callers, never by defaulting here."""
+    value: object = payload.get(key)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{context} field {key!r} must be a number.")
     return float(value)
 
 
+def _require_name(payload: dict[str, Any], key: str, context: str) -> str:
+    value: object = payload.get(key)
+    if not isinstance(value, str):
+        raise ValueError(f"{context} rows must carry a string {key!r}.")
+    return value
+
+
+def _optional_rows(
+    payload: dict[str, Any], key: str, context: str
+) -> list[dict[str, Any]]:
+    """Structural row arrays may be absent, but a present key must be an array
+    of objects — wrong shapes are malformed input, never silently empty."""
+    raw: object = payload.get(key)
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(f"{context} field {key!r} must be an array.")
+    rows: list[dict[str, Any]] = []
+    for item in cast(list[object], raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"{_ROW_CONTEXTS[key]} rows must be objects.")
+        rows.append(cast(dict[str, Any], item))
+    return rows
+
+
+_ROW_CONTEXTS = {
+    "slices": "Slice",
+    "frames": "Frame",
+    "boundaries": "Boundary",
+    "buckets": "Bucket",
+    "categories": "Category",
+    "domains": "Domain",
+}
+
+
 def _summary_total(payload: dict[str, Any]) -> int:
-    raw_summary: object = payload.get("summary", {})
+    raw_summary: object = payload.get("summary")
     if not isinstance(raw_summary, dict):
         raise ValueError("Report summary must be an object.")
-    value: object = cast(dict[str, Any], raw_summary).get("total_time_ns", 0)
+    value: object = cast(dict[str, Any], raw_summary).get("total_time_ns")
     if (
         isinstance(value, bool)
         or not isinstance(value, int)
         or not AGGREGATE_MIN <= value <= AGGREGATE_MAX
     ):
-        # Out-of-range integers share the message because Rust's JSON parser
-        # cannot distinguish them from non-integers (both parse as floats).
+        # Absent and out-of-range values share the message because Rust's JSON
+        # parser cannot distinguish out-of-range integers from non-integers.
         raise ValueError("Report summary field 'total_time_ns' must be an integer.")
     return value
 
@@ -60,24 +97,20 @@ def _slice_map(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
         raise ValueError("Profile comparison input must contain a slices array.")
     result: dict[str, dict[str, Any]] = {}
     for item in cast(list[object], raw_slices):
-        if isinstance(item, dict):
-            raw_item = cast(dict[str, Any], item)
-            result[str(raw_item.get("name", ""))] = raw_item
+        if not isinstance(item, dict):
+            raise ValueError("Slice rows must be objects.")
+        raw_item = cast(dict[str, Any], item)
+        result[_require_name(raw_item, "name", "Slice")] = raw_item
     return result
 
 
 def _frames_by_function(slice_payload: dict[str, Any]) -> dict[str, float]:
-    raw_frames = slice_payload.get("frames", [])
-    if not isinstance(raw_frames, list):
-        return {}
     frames: dict[str, float] = {}
-    for item in cast(list[object], raw_frames):
-        if isinstance(item, dict):
-            raw_item = cast(dict[str, Any], item)
-            function = str(raw_item.get("function", ""))
-            frames[function] = frames.get(function, 0.0) + _require_number(
-                raw_item, "pct", "Frame"
-            )
+    for raw_item in _optional_rows(slice_payload, "frames", "Slice"):
+        function = _require_name(raw_item, "function", "Frame")
+        frames[function] = frames.get(function, 0.0) + _require_number(
+            raw_item, "pct", "Frame"
+        )
     return frames
 
 
@@ -122,10 +155,18 @@ def compare_slice_json(
     has_regression = False
 
     for name in names:
-        before_payload = before_slices.get(name, {})
-        after_payload = after_slices.get(name, {})
-        before_pct = _require_number(before_payload, "pct", "Slice")
-        after_pct = _require_number(after_payload, "pct", "Slice")
+        before_payload = before_slices.get(name)
+        after_payload = after_slices.get(name)
+        before_pct = (
+            0.0
+            if before_payload is None
+            else _require_number(before_payload, "pct", "Slice")
+        )
+        after_pct = (
+            0.0
+            if after_payload is None
+            else _require_number(after_payload, "pct", "Slice")
+        )
         delta_abs = after_pct - before_pct
         delta_rel = _delta_rel(before_pct, after_pct)
 
@@ -140,8 +181,12 @@ def compare_slice_json(
         if is_regression:
             has_regression = True
 
-        before_frames = _frames_by_function(before_payload)
-        after_frames = _frames_by_function(after_payload)
+        before_frames = (
+            {} if before_payload is None else _frames_by_function(before_payload)
+        )
+        after_frames = (
+            {} if after_payload is None else _frames_by_function(after_payload)
+        )
         frame_deltas = [
             {
                 "function": function,
@@ -200,42 +245,27 @@ def _boundary_rows(payload: dict[str, Any]) -> dict[tuple[str, str, str], float]
     rows: dict[tuple[str, str, str], float] = {}
     for item in cast(list[object], raw_boundaries):
         if not isinstance(item, dict):
-            continue
+            raise ValueError("Boundary rows must be objects.")
         boundary = cast(dict[str, Any], item)
-        boundary_name = str(boundary.get("name", ""))
+        boundary_name = _require_name(boundary, "name", "Boundary")
         rows[("boundary", boundary_name, boundary_name)] = _require_number(
             boundary, "pct_of_profile", "Boundary"
         )
-        raw_buckets = boundary.get("buckets", [])
-        if isinstance(raw_buckets, list):
-            for bucket_item in cast(list[object], raw_buckets):
-                if not isinstance(bucket_item, dict):
-                    continue
-                bucket = cast(dict[str, Any], bucket_item)
-                bucket_name = str(bucket.get("name", ""))
-                rows[("bucket", boundary_name, bucket_name)] = _require_number(
-                    bucket, "pct", "Bucket"
+        for bucket in _optional_rows(boundary, "buckets", "Boundary"):
+            bucket_name = _require_name(bucket, "name", "Bucket")
+            rows[("bucket", boundary_name, bucket_name)] = _require_number(
+                bucket, "pct", "Bucket"
+            )
+            for category in _optional_rows(bucket, "categories", "Bucket"):
+                category_name = _require_name(category, "name", "Category")
+                rows[("category", boundary_name, category_name)] = _require_number(
+                    category, "pct", "Category"
                 )
-                raw_categories = bucket.get("categories", [])
-                if isinstance(raw_categories, list):
-                    for category_item in cast(list[object], raw_categories):
-                        if not isinstance(category_item, dict):
-                            continue
-                        category = cast(dict[str, Any], category_item)
-                        category_name = str(category.get("name", ""))
-                        rows[("category", boundary_name, category_name)] = (
-                            _require_number(category, "pct", "Category")
-                        )
-        raw_domains = boundary.get("domains", [])
-        if isinstance(raw_domains, list):
-            for domain_item in cast(list[object], raw_domains):
-                if not isinstance(domain_item, dict):
-                    continue
-                domain = cast(dict[str, Any], domain_item)
-                domain_name = str(domain.get("name", ""))
-                rows[("domain", boundary_name, domain_name)] = _require_number(
-                    domain, "pct", "Domain"
-                )
+        for domain in _optional_rows(boundary, "domains", "Boundary"):
+            domain_name = _require_name(domain, "name", "Domain")
+            rows[("domain", boundary_name, domain_name)] = _require_number(
+                domain, "pct", "Domain"
+            )
     return rows
 
 

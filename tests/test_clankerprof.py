@@ -941,6 +941,131 @@ def test_clankerprof_compare_rejects_non_finite_thresholds() -> None:
             )
 
 
+def test_clankerprof_compare_rejects_rows_missing_required_fields() -> None:
+    good = _compare_slice_report([{"name": "hot", "pct": 10.0, "frames": []}])
+    with pytest.raises(ValueError, match="Slice field 'pct' must be a number"):
+        compare_slice_json(good, _compare_slice_report([{"name": "hot"}]))
+    with pytest.raises(ValueError, match="Slice rows must carry a string 'name'"):
+        compare_slice_json(good, _compare_slice_report([{"pct": 10.0}]))
+    with pytest.raises(ValueError, match="Slice rows must be objects"):
+        compare_slice_json(
+            good,
+            _compare_slice_report(cast(list[dict[str, object]], ["hot"])),
+        )
+    with pytest.raises(ValueError, match="Slice field 'frames' must be an array"):
+        compare_slice_json(
+            good,
+            _compare_slice_report([{"name": "hot", "pct": 10.0, "frames": "junk"}]),
+        )
+    with pytest.raises(ValueError, match="Frame rows must be objects"):
+        compare_slice_json(
+            good,
+            _compare_slice_report([{"name": "hot", "pct": 10.0, "frames": ["f"]}]),
+        )
+    with pytest.raises(ValueError, match="Frame rows must carry a string 'function'"):
+        compare_slice_json(
+            good,
+            _compare_slice_report(
+                [{"name": "hot", "pct": 10.0, "frames": [{"pct": 1.0}]}]
+            ),
+        )
+    with pytest.raises(ValueError, match="Report summary must be an object"):
+        compare_slice_json(
+            {"tool": "clankerprof_slices", "slices": [{"name": "hot", "pct": 1.0}]},
+            good,
+        )
+    with pytest.raises(ValueError, match="'total_time_ns' must be an integer"):
+        compare_slice_json(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {},
+                "slices": [{"name": "hot", "pct": 1.0}],
+            },
+            good,
+        )
+    with pytest.raises(ValueError, match="Boundary rows must be objects"):
+        compare_boundary_json(
+            _compare_boundary_report(cast(list[dict[str, object]], ["web"])),
+            _compare_boundary_report([]),
+        )
+    with pytest.raises(ValueError, match="Bucket rows must carry a string 'name'"):
+        compare_boundary_json(
+            _compare_boundary_report(
+                [{"name": "web", "pct_of_profile": 5.0, "buckets": [{"pct": 1.0}]}]
+            ),
+            _compare_boundary_report([]),
+        )
+    # Row-level absence stays legal: names present in only one report compare
+    # against zero instead of failing field validation.
+    removed = compare_slice_json(good, _compare_slice_report([]))
+    assert removed["slices"][0]["after_pct"] == 0.0
+    assert removed["slices"][0]["before_pct"] == 10.0
+
+
+def test_clankerprof_scope_config_rejects_empty_tables_and_bad_count(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path = tmp_path / "facts.json"
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/app/leaf.rb"))
+    parent = builder.location(builder.function("T", "/app/t.rb"))
+    builder.sample((leaf, parent), 7)
+    facts_path.write_text(
+        dumps_sample_facts(decode_profile_bytes(builder.encode()).to_sample_facts()),
+        encoding="utf-8",
+    )
+    cases = [
+        (
+            "cost_kind:\n  Empty: {}\nscope:\n  - function: T\n",
+            "cost_kind Empty predicate table cannot be empty.",
+        ),
+        (
+            "scope:\n  - function: T\n    count: 1\n",
+            "scope.count must be occurrence or once_per_sample.",
+        ),
+    ]
+    for index, (config_text, message) in enumerate(cases):
+        config_path = tmp_path / f"scopes-{index}.yml"
+        config_path.write_text(config_text, encoding="utf-8")
+        exit_code = clankerprof_main(
+            ["scopes", "--facts", str(facts_path), "--config", str(config_path)]
+        )
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == message
+
+
+def test_clankerprof_library_regex_group_fallback(tmp_path: Path) -> None:
+    from clankerprof.patterns import extract_library_path
+
+    pack_path = tmp_path / "pack.yml"
+    pack_path.write_text(
+        "schema_version: clankerprof.runtime_rules.v1\n"
+        "name: fallback\n"
+        "library_path_patterns:\n"
+        '  - "regex:/gems/(foo)?bar/"\n'
+        '  - "regex:/vendor/[^/]+/"\n',
+        encoding="utf-8",
+    )
+    rules = load_runtime_rules_file(pack_path)
+    participating = extract_library_path("/gems/foobar/file.rb", rules)
+    assert participating is not None
+    assert participating.name == "foo"
+    assert participating.relative_path == "foobar/file.rb"
+    # Group 1 declared but not participating: the whole match names the
+    # library, exactly as the Rust implementation computes it.
+    fallback = extract_library_path("/gems/bar/file.rb", rules)
+    assert fallback is not None
+    assert fallback.name == "gems/bar"
+    assert fallback.relative_path == "/gems/bar/file.rb"
+    # No groups declared: whole match, relative path to the end of the path.
+    zero_group = extract_library_path("/x/vendor/acme/lib.rb", rules)
+    assert zero_group is not None
+    assert zero_group.name == "vendor/acme"
+    assert zero_group.relative_path == "/vendor/acme/lib.rb"
+
+
 def test_clankerprof_compare_aggregates_duplicate_function_frames() -> None:
     before = _compare_slice_report(
         [
@@ -4894,6 +5019,18 @@ _INVALID_V2_CASES: list[tuple[Callable[[dict[str, Any]], object], str]] = [
         lambda p: p["samples"][0].__delitem__("sample_index"),
         "missing required key",
     ),
+    (
+        lambda p: p["samples"][0].__delitem__("values"),
+        "missing required key: 'values'",
+    ),
+    (
+        lambda p: p["samples"][0].__delitem__("location_ids"),
+        "missing required key: 'location_ids'",
+    ),
+    (
+        lambda p: p["samples"][0].__delitem__("stack"),
+        "missing required key: 'stack'",
+    ),
 ]
 
 
@@ -5246,8 +5383,7 @@ def test_clankerprof_scope_rollups_render_negative_costs_additively(
     profile_path.write_bytes(builder.encode())
     config_path = tmp_path / "mixed-sign.yml"
     config_path.write_text(
-        'cost_kind:\n  Pos: "name:Pos"\n  Neg: "name:Neg"\n'
-        "scope:\n  - function: T\n",
+        'cost_kind:\n  Pos: "name:Pos"\n  Neg: "name:Neg"\nscope:\n  - function: T\n',
         encoding="utf-8",
     )
 

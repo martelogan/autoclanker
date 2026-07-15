@@ -291,7 +291,7 @@ def _sample_facts_from_v2(payload: JsonObject) -> ProfileFacts:
         if not isinstance(item, dict):
             raise ValueError("Each sample facts entry must be an object.")
         entry = cast(JsonObject, item)
-        raw_stack = entry.get("stack", [])
+        raw_stack = entry["stack"]
         if not isinstance(raw_stack, list):
             raise ValueError("Sample fact stack must be an array.")
         stack: list[Frame] = []
@@ -308,10 +308,10 @@ def _sample_facts_from_v2(payload: JsonObject) -> ProfileFacts:
                 sample_index=_sample_index(entry),
                 sample=Sample(
                     location_ids=_u64_tuple(
-                        entry.get("location_ids", []),
+                        entry["location_ids"],
                         field_name="location_ids",
                     ),
-                    values=_i64_tuple(entry.get("values", []), field_name="values"),
+                    values=_i64_tuple(entry["values"], field_name="values"),
                     primary_index=primary_value_index,
                 ),
                 stack=tuple(stack),

@@ -91,6 +91,11 @@ Top-level fields:
 | `frames` | Interned frame table; stacks reference rows by index. |
 | `samples` | Ordered sample fact array. |
 
+The `summary` block is a redundancy check: exporters always write it, and
+importers cross-validate a present summary against the decoded samples
+(mismatches are validation errors). An absent summary skips the cross-check
+identically in both implementations; it never affects the imported facts.
+
 Each `frames` row is a six-element array:
 
 ```json
@@ -112,6 +117,12 @@ Each sample contains:
 | `values` | All raw sample values. |
 | `location_ids` | Raw pprof location IDs for the sample. |
 | `stack` | Leaf-to-root frame indexes into `frames`. |
+
+All four sample fields are required in v2 payloads: a sample object missing
+any of them is a validation error (`Sample facts payload missing required
+key: '<field>'.`), never an empty default. Legacy v1 payloads keep their
+historical leniency (missing per-sample arrays read as empty) in both
+implementations.
 
 Per-sample primary values and emptiness are derived on import:
 `primary_value = values[profile.primary_value_index]` (with the fallbacks from
@@ -200,6 +211,13 @@ The generic runtime must remain neutral. New configs should prefer
 `library:`, `dependency:`, `package:`, `vendor:`, or selector names declared in
 the active runtime rule pack. Runtime-specific selectors such as `gem:` can
 remain as compatibility aliases, but they are not special to the fact model.
+
+Library regex patterns name the library with their first capture group when
+that group participates in the match; when the pattern declares no groups, or
+its first group does not participate (e.g. an unmatched optional group), the
+whole match names the library instead. The relative path always runs from the
+naming component's start to the end of the normalized path. Both
+implementations share these semantics exactly.
 
 Callers must be able to load runtime rule packs from project-local YAML files.
 Packaged rule packs are conveniences, not the extension boundary. This keeps
@@ -294,6 +312,12 @@ compatibility, but the preferred authoring terminology is:
 
 Scope, cost-kind, owner, and exclusion selectors accept a plain selector,
 an OR list of selectors, or an expression table with `any`, `all`, and `not`.
+An expression table that declares no predicates and no `any`/`all`/`not`
+children is a validation error in both implementations, never a
+never-matching predicate. A scope's `count` must be the string `occurrence`
+or `once_per_sample`; any other value (including non-strings) is a validation
+error, never a silent occurrence default. An owner's `fallback` flag follows
+Python truthiness over the parsed value in both implementations.
 Supported selector keys are intentionally generic: function name contains,
 function name equality, path/glob, regex, native frame, dependency selectors,
 optional slice label, configured cost-kind label, and runtime-rule label.
@@ -381,12 +405,19 @@ dispatching on their shared `tool` field. Both inputs must carry the same
 anything else (including two facts exports) is a validation error, never a
 silent "no regression". Each report must contain its projection's row array
 (`slices` or `boundaries`); a payload missing it is a validation error, not
-an empty comparison. Numeric report fields (`pct`, `pct_of_profile`,
-`total_time_ns`) must be JSON numbers: malformed values are a validation
-error in both implementations, never coerced to zero. Summary
-`total_time_ns` values are integers and are accepted across the full
-aggregate range `[i64::MIN, u64::MAX]`, exactly as projections emit them;
-integers outside that range are rejected like non-integers. Compare thresholds
+an empty comparison. Rows are strict: every row must be an object carrying a
+string `name` (frame rows a string `function`) and its numeric field (`pct`,
+`pct_of_profile`) — a present row missing its numeric field is malformed
+input, never a zero default. Row-level absence is different and legal: a name
+present in only one report compares against `0.0` (the documented new/removed
+row semantics). Nested row arrays (`frames`, `buckets`, `categories`,
+`domains`) may be absent, but a present key must be an array of objects.
+Numeric report fields must be JSON numbers: malformed values are a validation
+error in both implementations, never coerced to zero. Each report must carry
+a `summary` object whose `total_time_ns` is an integer, accepted across the
+full aggregate range `[i64::MIN, u64::MAX]`, exactly as projections emit
+them; absent or out-of-range values are rejected like non-integers. Compare
+thresholds
 must be finite numbers; a NaN or infinite threshold is an option-validation
 error (a non-finite threshold would silently disable gating). For slice
 payloads, it reports:
