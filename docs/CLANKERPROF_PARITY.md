@@ -120,11 +120,16 @@ semantics.
 | `slice:<name>` collapse does not use descendant-attribute rescue | covered | `test_clankerprof_slice_collapse_does_not_use_descendant_attribute_rescue` |
 | Non-descendant filters apply to the selected bottom attribution frame after native/collapse handling | covered | `test_clankerprof_slice_filters_apply_to_bottom_frame_after_native_collapse` |
 | Unsupported filter keys, malformed filters, and collapse prefixes are rejected | covered | `test_clankerprof_slice_cli_validates_filter_and_collapse_contract` |
-| Duplicate scalar config and CLI options are rejected instead of silently merged | covered | `test_clankerprof_slice_cli_rejects_duplicate_scalar_config_options` |
+| Duplicate scalar config and CLI options are rejected instead of silently merged | covered | `test_clankerprof_slice_cli_rejects_duplicate_scalar_config_options`, `test_clankerprof_rust_slices_validation_envelopes_match_python` |
 | `--by-slice=N`, `--by-slice=N%`, and bare `--by-slice` | covered | `test_clankerprof_slice_cli_supports_toml_config_default_slices_and_optional_by_slice` |
-| YAML config for common slice options | covered | `test_clankerprof_slice_cli_supports_config_and_output_limits` |
-| TOML config with profile path, `filter`, and scalar options | covered | `test_clankerprof_slice_cli_supports_toml_config_default_slices_and_optional_by_slice` |
+| `--by-slice` fails closed on unparsable values and non-finite thresholds; negative limits drop slices from the tail, identically across languages | covered | `test_clankerprof_by_slice_values_validate_and_support_negative_limits`, `test_clankerprof_rust_slices_validation_envelopes_match_python`, `test_clankerprof_rust_cli_flag_matrix_matches_python` |
+| YAML config for common slice options | covered | `test_clankerprof_slice_cli_supports_config_and_output_limits`, `test_clankerprof_rust_cli_flag_matrix_matches_python` |
+| TOML config with profile path, `filter`, and scalar options | covered | `test_clankerprof_slice_cli_supports_toml_config_default_slices_and_optional_by_slice`, `test_clankerprof_rust_cli_flag_matrix_matches_python` |
+| `slices --config` merge semantics (value coercions, duplicate rejection, error ordering) in the Rust CLI | covered | `test_clankerprof_rust_cli_flag_matrix_matches_python`, `test_clankerprof_rust_slices_validation_envelopes_match_python` |
 | Default `./slices.yml` discovery when slice-aware options are used | covered | `test_clankerprof_slice_cli_supports_toml_config_default_slices_and_optional_by_slice` |
+| Bracket-class globs (`[seq]`, `[!seq]`, ranges, unterminated `[` literal) attribute identically across languages | covered | `test_clankerprof_rust_cli_flag_matrix_matches_python` (targets-bracket-class-globs), Rust `glob_matches_follows_cpython_fnmatch_semantics` |
+| Configured cost-kind/category predicate errors fail closed in both languages (no silent `Other` rebucketing) | covered | `test_clankerprof_rust_slices_validation_envelopes_match_python` |
+| Multi-member (concatenated) gzip profiles decode fully in both languages | covered | `test_clankerprof_rust_cli_flag_matrix_matches_python` (facts-multimember-gzip), Rust `concatenated_gzip_members_all_decode` |
 | GC pseudo-output for `(marking)` and `(sweeping)` | covered | `test_clankerprof_slice_outputs_gc_uncollapsible_and_unattributed_libraries` |
 | Uncollapsible pseudo-output when all eligible frames are collapsed, using root eligible frame reporting | covered | `test_clankerprof_uncollapsible_reports_root_eligible_frame` |
 | Unattributed library summaries for default slice views, with legacy gem output retained | covered | `test_clankerprof_slice_outputs_gc_uncollapsible_and_unattributed_libraries` |
@@ -144,6 +149,7 @@ semantics.
 | Boundary `top_improvements` ordered by magnitude, most negative first | covered | `test_clankerprof_boundary_compare_orders_top_improvements_by_magnitude` |
 | Compare dispatches on the shared `tool` field and rejects non-report payloads | covered | `test_clankerprof_compare_rejects_wrong_payload_types` |
 | Compare fails closed on malformed reports: missing `slices`/`boundaries` arrays, non-numeric fields, and non-finite thresholds exit 2 with matching envelopes in both languages | covered | `test_clankerprof_compare_rejects_missing_row_arrays_and_bad_numbers`, `test_clankerprof_compare_rejects_non_finite_thresholds`, `test_clankerprof_rust_compare_rejects_malformed_reports_like_python` |
+| `compare --focus-scopes` alias of `--focus-boundaries` in both CLIs | covered | `test_clankerprof_rust_cli_flag_matrix_matches_python` (compare-focus-scopes-alias) |
 | Frames sharing a function name aggregate (sum) in per-function deltas, byte-identically across languages | covered | `test_clankerprof_compare_aggregates_duplicate_function_frames`, `test_clankerprof_rust_compare_aggregates_duplicate_functions_like_python` |
 | Text compare report wording from older slice tools | not claimed | JSON gate compatibility is the stable contract. |
 

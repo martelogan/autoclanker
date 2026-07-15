@@ -18,8 +18,10 @@ compatibility target.
 
 ## Decoding contract
 
-`clankerprof` accepts raw `.pb` and gzipped `.pb.gz` pprof profiles. The decoder
-must preserve:
+`clankerprof` accepts raw `.pb` and gzipped `.pb.gz` pprof profiles. Gzip
+streams may contain multiple RFC 1952 members (producers that append emit
+them); every member must be decoded — silently truncating to the first member
+is a defect. The decoder must preserve:
 
 - sparse pprof function IDs and location IDs;
 - sample order and stable zero-based `sample_index`;
@@ -290,7 +292,15 @@ function name equality, path/glob, regex, native frame, dependency selectors,
 optional slice label, configured cost-kind label, and runtime-rule label.
 The `native:` selector takes `true` (or a bare `native`) to match native
 frames and `false` to match non-native frames; any other value is a
-validation error. A
+validation error. An unsupported predicate key is a validation error wherever
+the predicate is evaluated — including configured cost-kind and category
+definitions — never a silent fall-through to `Other`. Path/glob selectors
+follow CPython `fnmatch` semantics everywhere globs appear (target category
+patterns, slice `paths`, scope predicates): `*`, `?`, and bracket classes —
+`[seq]`, negation `[!seq]`, character ranges, a literal `]` in first
+position — all match; an unterminated `[` is a literal; an inverted range
+such as `[z-a]` never matches. Both implementations must attribute
+identically for every supported glob form. A
 `cost_kind:<label>` selector matches the configured `[cost_kind]` label for a
 frame and is valid for owners, scopes, and exclusions. A
 `runtime_label:<label>` selector matches labels produced by the selected
@@ -426,6 +436,14 @@ with exit `0`; the umbrella `autoclanker pprof` surface guarantees the
 envelope for contracted runtime failures and exit code `2` for usage errors,
 but its usage errors may print the host parser's prose message. Filter and
 collapse shape validation always runs, with or without a slices config.
+`--by-slice` values fail closed in both implementations: bare values must be
+signed 64-bit integers (negative limits drop slices from the tail,
+Python-slice style) and `%`-suffixed thresholds must be finite numbers —
+unparsable or non-finite values are validation errors, never ignored.
+`slices --config` (TOML or YAML) is part of the shared CLI surface: config
+and command line merge with identical duplicate-scalar rejection, value
+coercion, and error ordering in both languages, and `compare` accepts
+`--focus-scopes` as an alias of `--focus-boundaries` in both.
 
 ## Compatibility and validation
 

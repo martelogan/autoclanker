@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import json
 import re
 import shutil
@@ -1391,6 +1392,74 @@ slices:
     scopes_profile_path = tmp_path / "matrix-scopes.pb"
     scopes_profile_path.write_bytes(_scopes_decomposition_profile_bytes())
 
+    slices_config_toml = tmp_path / "matrix-slices-config.toml"
+    slices_config_toml.write_text(
+        f'profile = "{profile_path}"\n'
+        f'slices = "{slices_path}"\n'
+        "top = 2\n"
+        "by_slice = 5\n"
+        "show_paths = true\n"
+        'filter = ["!name:NoSuchThing"]\n',
+        encoding="utf-8",
+    )
+    slices_config_yaml = tmp_path / "matrix-slices-config.yaml"
+    slices_config_yaml.write_text(
+        f"profile: {gc_profile_path}\n"
+        f"slices: {slices_path}\n"
+        "unattributed_libraries: true\n"
+        "no_collapse_native: true\n"
+        "top: -1\n",
+        encoding="utf-8",
+    )
+    bracket_profile_path = tmp_path / "matrix-bracket.pb"
+    bracket_builder = PprofFixtureBuilder.create()
+    bracket_target = bracket_builder.location(
+        bracket_builder.function("T#render", "/app/t.rb")
+    )
+    bracket_a = bracket_builder.location(
+        bracket_builder.function("A#call", "/app/a.rb")
+    )
+    bracket_c = bracket_builder.location(
+        bracket_builder.function("C#call", "/app/c.rb")
+    )
+    bracket_literal = bracket_builder.location(
+        bracket_builder.function("L#call", "/app/[x.rb")
+    )
+    bracket_builder.sample((bracket_a, bracket_target), 5_000_000)
+    bracket_builder.sample((bracket_c, bracket_target), 3_000_000)
+    bracket_builder.sample((bracket_literal, bracket_target), 2_000_000)
+    bracket_profile_path.write_bytes(bracket_builder.encode())
+    bracket_config_path = tmp_path / "matrix-bracket-targets.json"
+    bracket_config_path.write_text(
+        json.dumps(
+            {
+                "T#render": {
+                    "Bracketed": "path:/app/[ab].rb",
+                    "Negated": "path:/app/[!ab].rb",
+                    "Literal": "path:/app/[x.rb",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    multigz_path = tmp_path / "matrix-multi.pb.gz"
+    raw_profile_bytes = _profile_bytes(gzipped=False)
+    multigz_path.write_bytes(
+        gzip.compress(raw_profile_bytes[:16]) + gzip.compress(raw_profile_bytes[16:])
+    )
+    boundary_report_path = tmp_path / "matrix-focus-scopes-report.json"
+    _run_python_cli(
+        [
+            "scopes",
+            "--profile",
+            str(scopes_profile_path),
+            "--config",
+            str(scopes_config_path),
+            "--output",
+            str(boundary_report_path),
+        ]
+    )
+
     target_base = [
         "targets",
         "--profile",
@@ -1538,6 +1607,60 @@ slices:
                 "--show-paths",
                 "--runtime",
                 "ruby",
+            ],
+            "json",
+        ),
+        (
+            "slices-config-toml",
+            ["slices", "--config", str(slices_config_toml), "--runtime", "ruby"],
+            "json",
+        ),
+        (
+            "slices-config-yaml-negative-top",
+            ["slices", "--config", str(slices_config_yaml)],
+            "json",
+        ),
+        (
+            "slices-by-slice-negative",
+            [
+                "slices",
+                "--profile",
+                str(profile_path),
+                "--slices",
+                str(slices_path),
+                "--by-slice",
+                "-1",
+                "--runtime",
+                "ruby",
+            ],
+            "json",
+        ),
+        (
+            "targets-bracket-class-globs",
+            [
+                "targets",
+                "--profile",
+                str(bracket_profile_path),
+                "--config",
+                str(bracket_config_path),
+            ],
+            "json",
+        ),
+        (
+            "facts-multimember-gzip",
+            ["facts", "--profile", str(multigz_path)],
+            "bytes",
+        ),
+        (
+            "compare-focus-scopes-alias",
+            [
+                "compare",
+                "--before",
+                str(boundary_report_path),
+                "--after",
+                str(boundary_report_path),
+                "--focus-scopes",
+                "x",
             ],
             "json",
         ),
@@ -1945,3 +2068,109 @@ def test_clankerprof_rust_facts_numeric_contract_matches_python(
     )
     assert completed.returncode == 2, completed.stderr
     assert '"ok":false' in completed.stderr, completed.stderr
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_slices_validation_envelopes_match_python(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from clankerprof.cli import main as clankerprof_main
+
+    repo_root = Path(__file__).resolve().parents[1]
+    profile_path = tmp_path / "validation.pb"
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("T#render", "/srv/app/t.rb"))
+    leaf = builder.location(builder.function("Leaf#call", "/srv/app/leaf.rb"))
+    builder.sample((leaf, target), 7_000_000)
+    profile_path.write_bytes(builder.encode())
+    slices_path = tmp_path / "validation-slices.yml"
+    slices_path.write_text(
+        "slices:\n  - name: app\n    paths:\n      - /srv/app\n",
+        encoding="utf-8",
+    )
+    duplicate_config = tmp_path / "duplicate-top.yaml"
+    duplicate_config.write_text(
+        f"profile: {profile_path}\ntop: 1\n",
+        encoding="utf-8",
+    )
+    fractional_config = tmp_path / "fractional-top.yaml"
+    fractional_config.write_text(
+        f"profile: {profile_path}\ntop: 2.5\n",
+        encoding="utf-8",
+    )
+    list_config = tmp_path / "list-config.yaml"
+    list_config.write_text("- not-a-mapping\n", encoding="utf-8")
+    bogus_scopes_config = tmp_path / "bogus-scopes.yml"
+    bogus_scopes_config.write_text(
+        'cost_kind:\n  Invalid: "bogus:value"\nscope:\n  - function: T\n',
+        encoding="utf-8",
+    )
+
+    slice_base = [
+        "slices",
+        "--profile",
+        str(profile_path),
+        "--slices",
+        str(slices_path),
+    ]
+    cases: list[tuple[list[str], str]] = [
+        (
+            ["slices", "--config", str(duplicate_config), "--top", "2"],
+            "top specified both on command line and in config file.",
+        ),
+        (
+            ["slices", "--config", str(fractional_config)],
+            "top in slice config must be an integer.",
+        ),
+        (
+            ["slices", "--config", str(list_config)],
+            "Slice config file must be a YAML object.",
+        ),
+        (
+            [*slice_base, "--by-slice", "garbage"],
+            "--by-slice values must be integers.",
+        ),
+        (
+            [*slice_base, "--by-slice", "garbage%"],
+            "--by-slice percentage thresholds must be finite numbers.",
+        ),
+        (
+            [*slice_base, "--by-slice", "inf%"],
+            "--by-slice percentage thresholds must be finite numbers.",
+        ),
+        (
+            [
+                "scopes",
+                "--profile",
+                str(profile_path),
+                "--config",
+                str(bogus_scopes_config),
+            ],
+            "Unsupported predicate key: bogus",
+        ),
+    ]
+    for argv, message in cases:
+        assert clankerprof_main(argv) == 2, argv
+        python_error = capsys.readouterr().err
+        python_payload = json.loads(python_error)
+        assert python_payload == {"ok": False, "error": message}, argv
+        completed = subprocess.run(
+            [
+                "cargo",
+                "run",
+                "--quiet",
+                "-p",
+                "clankerprof-core",
+                "--bin",
+                "clankerprof-rs",
+                "--",
+                *argv,
+            ],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 2, (argv, completed.stderr)
+        assert json.loads(completed.stderr) == {"ok": False, "error": message}, argv

@@ -118,6 +118,9 @@ struct SlicesArgs {
     /// Read versioned sample-facts JSON instead of a pprof profile.
     #[arg(long)]
     facts: Option<PathBuf>,
+    /// Slice options file (TOML or YAML) merged with CLI flags.
+    #[arg(long)]
+    config: Option<PathBuf>,
     /// Slice definitions YAML file.
     #[arg(long)]
     slices: Option<PathBuf>,
@@ -142,11 +145,12 @@ struct SlicesArgs {
     /// Collapse rule, repeatable.
     #[arg(long)]
     collapse: Vec<String>,
-    /// Limit frames per slice.
-    #[arg(long)]
-    top: Option<usize>,
+    /// Limit frames per slice (negative drops from the tail, Python-style).
+    #[arg(long, allow_negative_numbers = true)]
+    top: Option<i64>,
     /// Slice count limit or percentage threshold (bare flag means 0.1%).
-    #[arg(long, num_args = 0..=1, default_missing_value = "0.1%")]
+    /// Negative-number values must parse as values, mirroring argparse.
+    #[arg(long, num_args = 0..=1, default_missing_value = "0.1%", allow_negative_numbers = true)]
     by_slice: Option<String>,
     /// Include filename paths in frame output.
     #[arg(long)]
@@ -156,8 +160,8 @@ struct SlicesArgs {
     no_collapse_native: bool,
     /// Report unattributed dependency libraries for the default slice
     /// (optionally limited to N entries).
-    #[arg(long, visible_alias = "unattributed-gems", num_args = 0..=1, default_missing_value = "9223372036854775807")]
-    unattributed_libraries: Option<usize>,
+    #[arg(long, visible_alias = "unattributed-gems", num_args = 0..=1, default_missing_value = "9223372036854775807", allow_negative_numbers = true)]
+    unattributed_libraries: Option<i64>,
     /// Write the report to this path instead of stdout.
     #[arg(long, overrides_with = "output")]
     output: Option<PathBuf>,
@@ -246,7 +250,7 @@ struct CompareArgs {
     #[arg(long)]
     focus_slices: Option<String>,
     /// Comma-delimited boundary names to gate on.
-    #[arg(long)]
+    #[arg(long, visible_alias = "focus-scopes")]
     focus_boundaries: Option<String>,
     /// Write the comparison to this path instead of stdout.
     #[arg(long, overrides_with = "output")]
@@ -376,7 +380,7 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
         };
         payload.insert(
             "slices".to_string(),
-            render_slice_json(&analyze_slice_facts(&facts, &options), &options),
+            render_slice_json(&analyze_slice_facts(&facts, &options), &options)?,
         );
     }
     if let Some(scopes_config_path) = &args.scopes_config {
@@ -656,23 +660,77 @@ fn write_compat_target_csv_artifacts(
 }
 
 fn run_slices(args: SlicesArgs) -> Result<(), String> {
-    let runtime_rules = resolve_runtime_rules(
-        &args.runtime,
-        args.runtime_rules.as_ref(),
-        args.core_classes.as_ref(),
+    // The merge below mirrors the Python reference (run_slices in
+    // clankerprof/cli.py) statement for statement, including the order in
+    // which validation errors surface.
+    let config = load_slices_config(args.config.as_ref())?;
+    let raw_profile = merge_single_value(
+        args.profile.as_ref().map(path_string),
+        config.get("profile"),
+        "profile",
     )?;
+    let raw_facts = merge_single_value(
+        args.facts.as_ref().map(path_string),
+        config.get("facts"),
+        "facts",
+    )?;
+    let profile_path = raw_profile.map(PathBuf::from);
+    let facts_path = raw_facts.map(PathBuf::from);
+    let facts = load_projection_input(profile_path.as_ref(), facts_path.as_ref())?;
+    let raw_slices = merge_single_value(
+        args.slices.as_ref().map(path_string),
+        config.get("slices"),
+        "slices",
+    )?;
+    let raw_top = optional_config_int(&config, "top")?;
+    if args.top.is_some() && raw_top.is_some() {
+        return Err("top specified both on command line and in config file.".to_string());
+    }
+    let top = args.top.or(raw_top);
+    let raw_by_slice = optional_config_by_slice(&config)?;
+    if args.by_slice.is_some() && raw_by_slice.is_some() {
+        return Err("by_slice specified both on command line and in config file.".to_string());
+    }
+    let by_slice = args.by_slice.clone().or(raw_by_slice);
+    let raw_show_paths = optional_config_bool(&config, "show_paths")?;
+    if args.show_paths && raw_show_paths.is_some() {
+        return Err("show_paths specified both on command line and in config file.".to_string());
+    }
+    let show_paths = args.show_paths || raw_show_paths.unwrap_or(false);
+    let raw_no_collapse_native = optional_config_bool(&config, "no_collapse_native")?;
+    if args.no_collapse_native && raw_no_collapse_native.is_some() {
+        return Err(
+            "no_collapse_native specified both on command line and in config file.".to_string(),
+        );
+    }
+    let no_collapse_native = args.no_collapse_native || raw_no_collapse_native.unwrap_or(false);
+    let raw_unattributed_libraries = optional_config_unattributed(&config)?;
+    if args.unattributed_libraries.is_some() && raw_unattributed_libraries.is_some() {
+        return Err(
+            "unattributed_libraries specified both on command line and in config file \
+             (--unattributed-gems is a compatibility alias)."
+                .to_string(),
+        );
+    }
+    let unattributed_libraries = args.unattributed_libraries.or(raw_unattributed_libraries);
+    let mut filters = config_string_array(&config, "filters")?;
+    filters.extend(config_string_array(&config, "filter")?);
+    filters.extend(args.filter.iter().cloned());
+    let mut collapse = config_string_array(&config, "collapse")?;
+    collapse.extend(args.collapse.iter().cloned());
+    let mut raw_attributes = config_string_array(&config, "attribute")?;
+    raw_attributes.extend(args.attribute.iter().cloned());
     let mut attributes = Vec::new();
-    for raw in &args.attribute {
+    for raw in &raw_attributes {
         attributes.push(parse_attribute(raw)?);
     }
-    let mut slices_path = args.slices.clone();
+    let mut slices_path = raw_slices.map(PathBuf::from);
     let slice_aware = slices_path.is_some()
-        || args.by_slice.is_some()
+        || by_slice.is_some()
         || !attributes.is_empty()
-        || args
-            .filter
+        || filters
             .iter()
-            .chain(&args.collapse)
+            .chain(&collapse)
             .any(|item| item.trim_start_matches(['!', '<']).starts_with("slice:"));
     if slices_path.is_none() && slice_aware {
         let default_slices = std::path::Path::new("slices.yml");
@@ -680,15 +738,20 @@ fn run_slices(args: SlicesArgs) -> Result<(), String> {
             slices_path = Some(default_slices.to_path_buf());
         }
     }
+    let runtime_rules = resolve_runtime_rules(
+        &args.runtime,
+        args.runtime_rules.as_ref(),
+        args.core_classes.as_ref(),
+    )?;
     let mut options = SliceAnalysisOptions {
-        filters: args.filter,
-        collapse: args.collapse,
+        filters,
+        collapse,
         attributes,
-        top: args.top,
-        by_slice: args.by_slice,
-        show_paths: args.show_paths,
-        no_collapse_native: args.no_collapse_native,
-        unattributed_libraries: args.unattributed_libraries,
+        top,
+        by_slice,
+        show_paths,
+        no_collapse_native,
+        unattributed_libraries,
         runtime_rules,
         ..SliceAnalysisOptions::default()
     };
@@ -696,10 +759,257 @@ fn run_slices(args: SlicesArgs) -> Result<(), String> {
         options.slices = load_slices_file(slices_path)?;
     }
     validate_slice_options(&options, args.allow_virtual_attribute_slices)?;
-    let facts = load_projection_input(args.profile.as_ref(), args.facts.as_ref())?;
-    let payload = render_slice_json(&analyze_slice_facts(&facts, &options), &options);
+    let payload = render_slice_json(&analyze_slice_facts(&facts, &options), &options)?;
     let rendered = serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?;
     emit(&rendered, args.output.as_ref(), "clankerprof_slices")
+}
+
+fn path_string(path: &PathBuf) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+/// Mirror of Python `_load_slices_config`: TOML by suffix, YAML otherwise,
+/// root must be a mapping. Non-string YAML keys are dropped, matching how the
+/// Python dict is only ever read through string keys.
+fn load_slices_config(
+    path: Option<&PathBuf>,
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    const MESSAGE: &str = "Slice config file must be a YAML object.";
+    let Some(path) = path else {
+        return Ok(serde_json::Map::new());
+    };
+    let payload = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let value = if path.extension().and_then(|extension| extension.to_str()) == Some("toml") {
+        let parsed: toml::Value = toml::from_str(&payload).map_err(|error| error.to_string())?;
+        toml_to_json(parsed)
+    } else {
+        let parsed: serde_yaml::Value =
+            serde_yaml::from_str(&payload).map_err(|error| error.to_string())?;
+        yaml_to_json(parsed)
+    };
+    match value {
+        serde_json::Value::Object(map) => Ok(map),
+        _ => Err(MESSAGE.to_string()),
+    }
+}
+
+fn json_float(value: f64) -> serde_json::Value {
+    // Python floats flow through unchanged; non-finite values become their
+    // Python str() forms so downstream coercion errors mirror the reference.
+    serde_json::Number::from_f64(value)
+        .map(serde_json::Value::Number)
+        .unwrap_or_else(|| {
+            serde_json::Value::String(if value.is_nan() {
+                "nan".to_string()
+            } else if value > 0.0 {
+                "inf".to_string()
+            } else {
+                "-inf".to_string()
+            })
+        })
+}
+
+fn yaml_to_json(value: serde_yaml::Value) -> serde_json::Value {
+    match value {
+        serde_yaml::Value::Null => serde_json::Value::Null,
+        serde_yaml::Value::Bool(item) => serde_json::Value::Bool(item),
+        serde_yaml::Value::Number(number) => {
+            if let Some(int) = number.as_i64() {
+                serde_json::Value::from(int)
+            } else if let Some(unsigned) = number.as_u64() {
+                serde_json::Value::from(unsigned)
+            } else {
+                json_float(number.as_f64().unwrap_or(f64::NAN))
+            }
+        }
+        serde_yaml::Value::String(item) => serde_json::Value::String(item),
+        serde_yaml::Value::Sequence(items) => {
+            serde_json::Value::Array(items.into_iter().map(yaml_to_json).collect())
+        }
+        serde_yaml::Value::Mapping(mapping) => serde_json::Value::Object(
+            mapping
+                .into_iter()
+                .filter_map(|(key, item)| match key {
+                    serde_yaml::Value::String(key) => Some((key, yaml_to_json(item))),
+                    _ => None,
+                })
+                .collect(),
+        ),
+        serde_yaml::Value::Tagged(tagged) => yaml_to_json(tagged.value),
+    }
+}
+
+fn toml_to_json(value: toml::Value) -> serde_json::Value {
+    match value {
+        toml::Value::String(item) => serde_json::Value::String(item),
+        toml::Value::Integer(item) => serde_json::Value::from(item),
+        toml::Value::Float(item) => json_float(item),
+        toml::Value::Boolean(item) => serde_json::Value::Bool(item),
+        toml::Value::Datetime(item) => serde_json::Value::String(item.to_string()),
+        toml::Value::Array(items) => {
+            serde_json::Value::Array(items.into_iter().map(toml_to_json).collect())
+        }
+        toml::Value::Table(table) => serde_json::Value::Object(
+            table
+                .into_iter()
+                .map(|(key, item)| (key, toml_to_json(item)))
+                .collect(),
+        ),
+    }
+}
+
+/// str() coercion for config scalars, matching Python's `_merge_single_value`
+/// and `_string_array` (which stringify whatever the config holds).
+fn python_str(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(item) => item.clone(),
+        serde_json::Value::Bool(true) => "True".to_string(),
+        serde_json::Value::Bool(false) => "False".to_string(),
+        serde_json::Value::Null => "None".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn merge_single_value(
+    cli_value: Option<String>,
+    config_value: Option<&serde_json::Value>,
+    name: &str,
+) -> Result<Option<String>, String> {
+    let config_value = config_value.filter(|value| !value.is_null());
+    if cli_value.is_some() && config_value.is_some() {
+        return Err(format!(
+            "{name} specified both on command line and in config file."
+        ));
+    }
+    if cli_value.is_some() {
+        return Ok(cli_value);
+    }
+    Ok(config_value.map(python_str))
+}
+
+/// Mirror of Python `_optional_int`: bools and non-integral floats are
+/// rejected; magnitudes beyond i64 clamp, which is equivalent for a
+/// truncation limit (Python's unbounded int slices the same way).
+fn optional_config_int(
+    config: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<Option<i64>, String> {
+    let message = format!("{key} in slice config must be an integer.");
+    optional_int_value(config.get(key), &message)
+}
+
+fn optional_int_value(
+    value: Option<&serde_json::Value>,
+    message: &str,
+) -> Result<Option<i64>, String> {
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Bool(_)) => Err(message.to_string()),
+        Some(serde_json::Value::Number(number)) => {
+            if let Some(int) = number.as_i64() {
+                Ok(Some(int))
+            } else if number.as_u64().is_some() {
+                Ok(Some(i64::MAX))
+            } else if let Some(float) = number.as_f64() {
+                if float.is_finite() && float.fract() == 0.0 {
+                    Ok(Some(float.clamp(i64::MIN as f64, i64::MAX as f64) as i64))
+                } else {
+                    Err(message.to_string())
+                }
+            } else {
+                Err(message.to_string())
+            }
+        }
+        Some(serde_json::Value::String(raw)) => raw
+            .trim()
+            .parse::<i64>()
+            .map(Some)
+            .map_err(|_| message.to_string()),
+        Some(_) => Err(message.to_string()),
+    }
+}
+
+fn optional_config_bool(
+    config: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<Option<bool>, String> {
+    match config.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Bool(item)) => Ok(Some(*item)),
+        Some(_) => Err(format!("{key} in slice config must be a boolean.")),
+    }
+}
+
+/// Mirror of Python `_optional_by_slice`: bools toggle the 0.1% default,
+/// integral numbers become count limits, non-integral numbers become
+/// percentage thresholds, and anything else is stringified.
+fn optional_config_by_slice(
+    config: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Option<String>, String> {
+    match config.get("by_slice") {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Bool(true)) => Ok(Some("0.1%".to_string())),
+        Some(serde_json::Value::Bool(false)) => Ok(None),
+        Some(serde_json::Value::Number(number)) => {
+            if let Some(int) = number.as_i64() {
+                Ok(Some(int.to_string()))
+            } else if let Some(unsigned) = number.as_u64() {
+                Ok(Some(unsigned.to_string()))
+            } else if let Some(float) = number.as_f64() {
+                if float.fract() == 0.0 && float.is_finite() {
+                    Ok(Some(
+                        (float.clamp(i64::MIN as f64, i64::MAX as f64) as i64).to_string(),
+                    ))
+                } else {
+                    Ok(Some(format!("{float}%")))
+                }
+            } else {
+                Ok(Some(number.to_string()))
+            }
+        }
+        Some(other) => Ok(Some(python_str(other))),
+    }
+}
+
+fn optional_config_unattributed(
+    config: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Option<i64>, String> {
+    let present: Vec<(&str, &serde_json::Value)> = ["unattributed_gems", "unattributed_libraries"]
+        .iter()
+        .filter_map(|key| {
+            config
+                .get(*key)
+                .filter(|value| !value.is_null())
+                .map(|value| (*key, value))
+        })
+        .collect();
+    let [(key, value)] = present.as_slice() else {
+        if present.is_empty() {
+            return Ok(None);
+        }
+        return Err(
+            "unattributed_gems and unattributed_libraries are aliases; use only one.".to_string(),
+        );
+    };
+    match value {
+        serde_json::Value::Bool(true) => Ok(Some(i64::MAX)),
+        serde_json::Value::Bool(false) => Ok(None),
+        other => {
+            let message = format!("{key} in slice config must be an integer.");
+            optional_int_value(Some(other), &message)
+        }
+    }
+}
+
+fn config_string_array(
+    config: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<Vec<String>, String> {
+    match config.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(Vec::new()),
+        Some(serde_json::Value::Array(items)) => Ok(items.iter().map(python_str).collect()),
+        Some(_) => Err(format!("{key} in slice config must be an array.")),
+    }
 }
 
 fn parse_attribute(raw: &str) -> Result<clankerprof_core::slices::AttributionRule, String> {
@@ -875,10 +1185,70 @@ fn split_focus(value: Option<&str>) -> BTreeSet<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::hoist_global_output;
+    use super::{
+        hoist_global_output, merge_single_value, optional_config_by_slice, optional_config_int,
+        optional_config_unattributed,
+    };
 
     fn args(items: &[&str]) -> Vec<String> {
         items.iter().map(ToString::to_string).collect()
+    }
+
+    fn config(payload: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+        match payload {
+            serde_json::Value::Object(map) => map,
+            _ => unreachable!("test config must be an object"),
+        }
+    }
+
+    #[test]
+    fn config_merge_mirrors_python_optional_value_coercions() {
+        let map = config(serde_json::json!({
+            "top": 3.0,
+            "by_slice": 0.5,
+            "unattributed_libraries": true,
+        }));
+        assert_eq!(optional_config_int(&map, "top"), Ok(Some(3)));
+        assert_eq!(optional_config_by_slice(&map), Ok(Some("0.5%".to_string())));
+        assert_eq!(optional_config_unattributed(&map), Ok(Some(i64::MAX)));
+        let bad = config(serde_json::json!({"top": true}));
+        assert_eq!(
+            optional_config_int(&bad, "top"),
+            Err("top in slice config must be an integer.".to_string())
+        );
+        let fractional = config(serde_json::json!({"top": 2.5}));
+        assert_eq!(
+            optional_config_int(&fractional, "top"),
+            Err("top in slice config must be an integer.".to_string())
+        );
+        let aliases = config(serde_json::json!({
+            "unattributed_gems": 1,
+            "unattributed_libraries": 2,
+        }));
+        assert_eq!(
+            optional_config_unattributed(&aliases),
+            Err(
+                "unattributed_gems and unattributed_libraries are aliases; use only one."
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn config_merge_rejects_values_set_in_both_places() {
+        let error = merge_single_value(
+            Some("cli.pb".to_string()),
+            Some(&serde_json::json!("config.pb")),
+            "profile",
+        )
+        .expect_err("must reject");
+        assert_eq!(
+            error,
+            "profile specified both on command line and in config file."
+        );
+        let merged = merge_single_value(None, Some(&serde_json::json!("config.pb")), "profile")
+            .expect("merge");
+        assert_eq!(merged, Some("config.pb".to_string()));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use crate::model::{
     select_primary_value_index, Function, Location, Profile, Sample, TimeNs, ValueType,
 };
-use flate2::read::GzDecoder;
+use flate2::read::MultiGzDecoder;
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 use std::fs;
@@ -286,7 +286,10 @@ pub fn decode_profile_bytes(data: &[u8]) -> DecodeResult<Profile> {
 
 fn maybe_gzip_decompress(data: &[u8]) -> DecodeResult<Vec<u8>> {
     if data.starts_with(&[0x1f, 0x8b]) {
-        let mut decoder = GzDecoder::new(data);
+        // MultiGzDecoder matches Python's gzip.decompress: RFC 1952 allows a
+        // stream of members, and profiles produced by appending writers are
+        // silently truncated by a single-member decoder.
+        let mut decoder = MultiGzDecoder::new(data);
         let mut payload = Vec::new();
         decoder.read_to_end(&mut payload)?;
         return Ok(payload);
@@ -402,4 +405,35 @@ fn string_at(strings: &[String], index: usize) -> String {
 
 fn int64_from_varint(value: u64) -> i64 {
     value as i64
+}
+
+#[cfg(test)]
+mod gzip_tests {
+    use super::maybe_gzip_decompress;
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+
+    fn gzip_member(payload: &[u8]) -> Vec<u8> {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(payload).expect("write member");
+        encoder.finish().expect("finish member")
+    }
+
+    #[test]
+    fn concatenated_gzip_members_all_decode() {
+        // RFC 1952 allows a stream of members; Python's gzip.decompress
+        // reads them all, so a single-member decode silently drops data.
+        let mut stream = gzip_member(&[0x32, 0x00]);
+        stream.extend(gzip_member(&[0x12, 0x02, 0x10, 0x07]));
+        let decoded = maybe_gzip_decompress(&stream).expect("decode");
+        assert_eq!(decoded, vec![0x32, 0x00, 0x12, 0x02, 0x10, 0x07]);
+    }
+
+    #[test]
+    fn truncated_gzip_still_errors() {
+        let mut stream = gzip_member(&[0x32, 0x00]);
+        stream.truncate(stream.len() - 5);
+        assert!(maybe_gzip_decompress(&stream).is_err());
+    }
 }

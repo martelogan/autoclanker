@@ -39,11 +39,14 @@ pub struct SliceAnalysisOptions {
     pub filters: Vec<String>,
     pub collapse: Vec<String>,
     pub attributes: Vec<AttributionRule>,
-    pub top: Option<usize>,
+    /// Signed to honor Python's slice semantics: a negative limit drops
+    /// entries from the tail (`list[:-n]`) instead of keeping the head.
+    pub top: Option<i64>,
     pub by_slice: Option<String>,
     pub show_paths: bool,
     pub no_collapse_native: bool,
-    pub unattributed_libraries: Option<usize>,
+    /// Signed for the same Python slice-semantics reason as `top`.
+    pub unattributed_libraries: Option<i64>,
     pub runtime_rules: RuntimeRuleSet,
 }
 
@@ -268,7 +271,10 @@ pub fn analyze_slice_facts(
     }
 }
 
-pub fn render_slice_json(result: &SliceAnalysisResult, options: &SliceAnalysisOptions) -> Value {
+pub fn render_slice_json(
+    result: &SliceAnalysisResult,
+    options: &SliceAnalysisOptions,
+) -> Result<Value, String> {
     let total = if result.matching_time_ns != 0 {
         result.matching_time_ns
     } else {
@@ -281,24 +287,53 @@ pub fn render_slice_json(result: &SliceAnalysisResult, options: &SliceAnalysisOp
         .collect();
     if let Some(by_slice) = &options.by_slice {
         if let Some(raw_threshold) = by_slice.strip_suffix('%') {
-            let threshold = raw_threshold.parse::<f64>().unwrap_or(0.0);
+            let threshold = parse_by_slice_threshold(raw_threshold)?;
             selected_slices.retain(|slice| {
                 total != 0 && slice.time_ns as f64 / total as f64 * 100.0 >= threshold
             });
-        } else if let Ok(limit) = by_slice.parse::<usize>() {
-            selected_slices.truncate(limit);
+        } else {
+            let limit = by_slice
+                .parse::<i64>()
+                .map_err(|_| "--by-slice values must be integers.".to_string())?;
+            apply_python_limit(&mut selected_slices, Some(limit));
         }
     }
     let payload = json!({
         "slices": selected_slices.into_iter().map(|slice| slice_payload(slice, total, options)).collect::<Vec<_>>(),
         "summary": {
-            "matching_pct": if result.total_time_ns == 0 { 0.0 } else { result.matching_time_ns as f64 / result.total_time_ns as f64 * 100.0 },
+            // Python's `... if total else 0` yields an int zero here, so the
+            // empty-profile summary must serialize as 0, not 0.0.
+            "matching_pct": if result.total_time_ns == 0 { json!(0) } else { json!(result.matching_time_ns as f64 / result.total_time_ns as f64 * 100.0) },
             "matching_time_ns": result.matching_time_ns,
             "total_time_ns": result.total_time_ns,
         },
         "tool": "clankerprof_slices",
     });
-    add_optional_slice_payloads(payload, result, total, options)
+    Ok(add_optional_slice_payloads(payload, result, total, options))
+}
+
+fn parse_by_slice_threshold(raw: &str) -> Result<f64, String> {
+    const MESSAGE: &str = "--by-slice percentage thresholds must be finite numbers.";
+    let threshold = raw.parse::<f64>().map_err(|_| MESSAGE.to_string())?;
+    if !threshold.is_finite() {
+        return Err(MESSAGE.to_string());
+    }
+    Ok(threshold)
+}
+
+/// Python list-slice truncation: a non-negative limit keeps the head
+/// (`list[:n]`), a negative limit drops that many entries from the tail
+/// (`list[:-n]`).
+fn apply_python_limit<T>(items: &mut Vec<T>, limit: Option<i64>) {
+    let Some(limit) = limit else {
+        return;
+    };
+    if limit >= 0 {
+        items.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+    } else {
+        let dropped = usize::try_from(-limit).unwrap_or(usize::MAX);
+        items.truncate(items.len().saturating_sub(dropped));
+    }
 }
 
 fn add_optional_slice_payloads(
@@ -360,12 +395,10 @@ fn slice_payload(slice: &SliceStats, total: TimeNs, options: &SliceAnalysisOptio
     payload
 }
 
-fn rendered_frames(slice: &SliceStats, total: TimeNs, top: Option<usize>) -> Vec<Value> {
+fn rendered_frames(slice: &SliceStats, total: TimeNs, top: Option<i64>) -> Vec<Value> {
     let mut frames: Vec<_> = slice.frames.values().collect();
     frames.sort_by(|left, right| right.time_ns.cmp(&left.time_ns));
-    if let Some(limit) = top {
-        frames.truncate(limit);
-    }
+    apply_python_limit(&mut frames, top);
     frames
         .into_iter()
         .map(|frame| {
@@ -380,12 +413,10 @@ fn rendered_frames(slice: &SliceStats, total: TimeNs, top: Option<usize>) -> Vec
         .collect()
 }
 
-fn rendered_libraries(slice: &SliceStats, total: TimeNs, limit: Option<usize>) -> Vec<Value> {
+fn rendered_libraries(slice: &SliceStats, total: TimeNs, limit: Option<i64>) -> Vec<Value> {
     let mut libraries: Vec<_> = slice.unattributed_libraries.iter().collect();
     libraries.sort_by(|left, right| right.1.cmp(left.1));
-    if let Some(limit) = limit {
-        libraries.truncate(limit);
-    }
+    apply_python_limit(&mut libraries, limit);
     libraries
         .into_iter()
         .map(|(name, time_ns)| {
@@ -620,4 +651,37 @@ use crate::categorize::is_native_path;
 
 fn is_gc_function(name: &str) -> bool {
     name == "(marking)" || name == "(sweeping)"
+}
+
+#[cfg(test)]
+mod limit_tests {
+    use super::{apply_python_limit, parse_by_slice_threshold};
+
+    #[test]
+    fn python_limit_keeps_head_for_non_negative_and_drops_tail_for_negative() {
+        let mut items = vec![1, 2, 3, 4];
+        apply_python_limit(&mut items, Some(2));
+        assert_eq!(items, vec![1, 2]);
+        let mut items = vec![1, 2, 3, 4];
+        apply_python_limit(&mut items, Some(-1));
+        assert_eq!(items, vec![1, 2, 3]);
+        let mut items = vec![1, 2];
+        apply_python_limit(&mut items, Some(-5));
+        assert!(items.is_empty());
+        let mut items = vec![1, 2];
+        apply_python_limit(&mut items, None);
+        assert_eq!(items, vec![1, 2]);
+    }
+
+    #[test]
+    fn by_slice_thresholds_must_be_finite() {
+        assert_eq!(parse_by_slice_threshold("0.5"), Ok(0.5));
+        for raw in ["garbage", "nan", "inf", "-inf"] {
+            assert_eq!(
+                parse_by_slice_threshold(raw),
+                Err("--by-slice percentage thresholds must be finite numbers.".to_string()),
+                "{raw}"
+            );
+        }
+    }
 }

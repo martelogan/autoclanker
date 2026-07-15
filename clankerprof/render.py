@@ -3,6 +3,8 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
+import re
 
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
@@ -805,6 +807,33 @@ def render_target_text(
     return "\n".join(lines)
 
 
+_BY_SLICE_INT_MESSAGE = "--by-slice values must be integers."
+_BY_SLICE_THRESHOLD_MESSAGE = "--by-slice percentage thresholds must be finite numbers."
+
+
+def _by_slice_limit(raw: str) -> int:
+    """Strict shared grammar with the Rust core: optional sign, digits,
+    int64 range — bare int() would also accept whitespace and underscores."""
+    if re.fullmatch(r"[+-]?\d+", raw) is None:
+        raise ValueError(_BY_SLICE_INT_MESSAGE)
+    value = int(raw)
+    if not -(2**63) <= value <= 2**63 - 1:
+        raise ValueError(_BY_SLICE_INT_MESSAGE)
+    return value
+
+
+def _by_slice_threshold(raw: str) -> float:
+    if raw != raw.strip() or "_" in raw:
+        raise ValueError(_BY_SLICE_THRESHOLD_MESSAGE)
+    try:
+        threshold = float(raw)
+    except ValueError as exc:
+        raise ValueError(_BY_SLICE_THRESHOLD_MESSAGE) from exc
+    if not math.isfinite(threshold):
+        raise ValueError(_BY_SLICE_THRESHOLD_MESSAGE)
+    return threshold
+
+
 def render_slice_json(
     result: SliceAnalysisResult,
     options: SliceAnalysisOptions | None = None,
@@ -833,14 +862,14 @@ def render_slice_json(
     if resolved_options.by_slice:
         by_slice = resolved_options.by_slice
         if by_slice.endswith("%"):
-            threshold = float(by_slice.removesuffix("%"))
+            threshold = _by_slice_threshold(by_slice.removesuffix("%"))
             selected_slices = [
                 item
                 for item in selected_slices
                 if total and item.time_ns / total * 100 >= threshold
             ]
         else:
-            selected_slices = selected_slices[: int(by_slice)]
+            selected_slices = selected_slices[: _by_slice_limit(by_slice)]
 
     def slice_payload(slice_item: SliceStats) -> dict[str, object]:
         metadata = metadata_by_slice.get(slice_item.name, {})

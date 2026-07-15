@@ -411,17 +411,50 @@ pub(crate) fn match_regex(pattern: &str, path: &str) -> bool {
 }
 
 fn glob_matches(pattern: &str, path: &str) -> bool {
-    let regex = glob_to_regex(pattern);
-    match_regex(&regex, path)
+    glob_to_regex(pattern)
+        .map(|regex| match_regex(&regex, path))
+        .unwrap_or(false)
 }
 
-fn glob_to_regex(pattern: &str) -> String {
-    let mut output = String::from("^");
-    for character in pattern.chars() {
+/// Translate a glob into a regex with CPython `fnmatch.translate` semantics —
+/// the Python reference routes glob patterns through `fnmatch`, so bracket
+/// classes (`[ab]`, `[!ab]`, ranges, a literal `]` in first position, an
+/// unterminated `[` treated as a literal) must all behave identically here.
+/// Returns `None` for patterns fnmatch translates to a never-matching class
+/// (an empty range like `[z-a]`), since the regex crate has no `(?!)`.
+fn glob_to_regex(pattern: &str) -> Option<String> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let n = chars.len();
+    // (?s) mirrors fnmatch's re.DOTALL wrapper so `*`/`?` cross newlines.
+    let mut output = String::from("(?s)^");
+    let mut i = 0;
+    while i < n {
+        let character = chars[i];
+        i += 1;
         match character {
             '*' => output.push_str(".*"),
             '?' => output.push('.'),
-            '.' | '+' | '(' | ')' | '|' | '^' | '$' | '{' | '}' | '[' | ']' | '\\' => {
+            '[' => {
+                let mut j = i;
+                if j < n && chars[j] == '!' {
+                    j += 1;
+                }
+                if j < n && chars[j] == ']' {
+                    j += 1;
+                }
+                while j < n && chars[j] != ']' {
+                    j += 1;
+                }
+                if j >= n {
+                    // Unterminated class stays a literal '[' (fnmatch parity).
+                    output.push_str("\\[");
+                } else {
+                    let stuff: Vec<char> = chars[i..j].to_vec();
+                    i = j + 1;
+                    output.push_str(&translate_glob_class(&stuff)?);
+                }
+            }
+            '.' | '+' | '(' | ')' | '|' | '^' | '$' | '{' | '}' | ']' | '\\' => {
                 output.push('\\');
                 output.push(character);
             }
@@ -429,7 +462,91 @@ fn glob_to_regex(pattern: &str) -> String {
         }
     }
     output.push('$');
-    output
+    Some(output)
+}
+
+/// Bracket-class body translation ported from CPython fnmatch.translate,
+/// emitting escapes the regex crate accepts (it rejects Python's bare `]`
+/// first-position literal and treats bare `[` as nested-class syntax).
+/// Returns `None` when range normalization empties the class (never match).
+fn translate_glob_class(stuff: &[char]) -> Option<String> {
+    let raw: String = stuff.iter().collect();
+    let chunks: Vec<String> = if !raw.contains('-') {
+        vec![raw.clone()]
+    } else {
+        // Split on range-forming hyphens exactly the way CPython does, then
+        // merge away inverted (empty) ranges like `z-a`.
+        let mut chunks: Vec<String> = Vec::new();
+        let mut start = 0usize;
+        let mut k = if stuff.first() == Some(&'!') { 2 } else { 1 };
+        loop {
+            let Some(offset) = stuff[k.min(stuff.len())..]
+                .iter()
+                .position(|&item| item == '-')
+                .map(|position| position + k.min(stuff.len()))
+            else {
+                break;
+            };
+            chunks.push(stuff[start..offset].iter().collect());
+            start = offset + 1;
+            k = offset + 3;
+        }
+        let tail: String = stuff[start..].iter().collect();
+        if tail.is_empty() {
+            let last = chunks.last_mut()?;
+            last.push('-');
+        } else {
+            chunks.push(tail);
+        }
+        let mut index = chunks.len().saturating_sub(1);
+        while index > 0 {
+            let left_last = chunks[index - 1].chars().last();
+            let right_first = chunks[index].chars().next();
+            if let (Some(left), Some(right)) = (left_last, right_first) {
+                if left > right {
+                    let merged: String = chunks[index - 1]
+                        .chars()
+                        .take(chunks[index - 1].chars().count() - 1)
+                        .chain(chunks[index].chars().skip(1))
+                        .collect();
+                    chunks[index - 1] = merged;
+                    chunks.remove(index);
+                }
+            }
+            index -= 1;
+        }
+        chunks
+    };
+    let escaped: Vec<String> = chunks
+        .iter()
+        .map(|chunk| {
+            let mut item = String::new();
+            for character in chunk.chars() {
+                // '\\' and '-' per CPython; '[', ']', '&', '~', '|' because
+                // the regex crate gives them class-level meaning Python
+                // doesn't (nested classes and set operations).
+                if matches!(character, '\\' | '-' | '[' | ']' | '&' | '~' | '|') {
+                    item.push('\\');
+                }
+                item.push(character);
+            }
+            item
+        })
+        .collect();
+    let mut body = escaped.join("-");
+    if body.is_empty() {
+        // CPython emits the never-matching (?!) here; signal it upward.
+        return None;
+    }
+    if body == "!" {
+        return Some(".".to_string());
+    }
+    if let Some(rest) = body.strip_prefix('!') {
+        body = format!("^{rest}");
+    } else if body.starts_with('^') {
+        body = format!("\\{body}");
+    }
+    Some(format!("[{body}]"))
 }
 
 fn normalize_library_component(component: &str, rules: &RuntimeRuleSet) -> String {
@@ -454,4 +571,55 @@ pub fn is_runtime_stdlib_path(path: &str, rules: &RuntimeRuleSet) -> bool {
             .stdlib_path_markers
             .iter()
             .any(|marker| path.contains(marker))
+}
+
+#[cfg(test)]
+mod glob_tests {
+    use super::glob_matches;
+
+    #[test]
+    fn glob_matches_follows_cpython_fnmatch_semantics() {
+        // Expectations generated from CPython 3.11 fnmatch.fnmatch — the
+        // Python reference routes glob patterns straight through fnmatch.
+        let table: &[(&str, &str, bool)] = &[
+            ("/app/[ab].rb", "/app/a.rb", true),
+            ("/app/[ab].rb", "/app/b.rb", true),
+            ("/app/[ab].rb", "/app/c.rb", false),
+            ("/app/[!ab].rb", "/app/a.rb", false),
+            ("/app/[!ab].rb", "/app/c.rb", true),
+            ("/app/[a-c].rb", "/app/b.rb", true),
+            ("/app/[a-c].rb", "/app/d.rb", false),
+            ("/app/[z-a].rb", "/app/a.rb", false),
+            ("/app/[z-a].rb", "/app/z.rb", false),
+            ("/app/[ab.rb", "/app/[ab.rb", true),
+            ("/app/[ab.rb", "/app/a.rb", false),
+            ("/app/[]a].rb", "/app/].rb", true),
+            ("/app/[]a].rb", "/app/a.rb", true),
+            ("/app/[]a].rb", "/app/x.rb", false),
+            ("/app/[!]a].rb", "/app/x.rb", true),
+            ("/app/[!]a].rb", "/app/].rb", false),
+            ("/app/[!]a].rb", "/app/a.rb", false),
+            ("/app/[a-].rb", "/app/-.rb", true),
+            ("/app/[a-].rb", "/app/a.rb", true),
+            ("/app/[a-].rb", "/app/b.rb", false),
+            ("/app/[^a].rb", "/app/^.rb", true),
+            ("/app/[^a].rb", "/app/a.rb", true),
+            ("/app/[^a].rb", "/app/b.rb", false),
+            ("/app/[[].rb", "/app/[.rb", true),
+            ("/app/[[].rb", "/app/a.rb", false),
+            ("/app/[a-c-e].rb", "/app/b.rb", true),
+            ("/app/[a-c-e].rb", "/app/-.rb", true),
+            ("/app/[a-c-e].rb", "/app/e.rb", true),
+            ("/app/[a-c-e].rb", "/app/d.rb", false),
+            ("/app/*[0-9]?.rb", "/app/x42.rb", true),
+            ("/app/*[0-9]?.rb", "/app/x4.rb", false),
+        ];
+        for (pattern, path, expected) in table {
+            assert_eq!(
+                glob_matches(pattern, path),
+                *expected,
+                "pattern {pattern:?} vs path {path:?}"
+            );
+        }
+    }
 }

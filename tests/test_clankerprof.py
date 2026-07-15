@@ -1446,9 +1446,7 @@ def test_clankerprof_facts_stdout_matches_artifact_bytes(
     capsys.readouterr()
     assert compact_stdout == artifact_path.read_text(encoding="utf-8")
 
-    assert (
-        clankerprof_main(["facts", "--profile", str(profile_path), "--pretty"]) == 0
-    )
+    assert clankerprof_main(["facts", "--profile", str(profile_path), "--pretty"]) == 0
     pretty_stdout = capsys.readouterr().out
     assert pretty_stdout != compact_stdout
     assert json.loads(pretty_stdout) == json.loads(compact_stdout)
@@ -5088,3 +5086,63 @@ def test_clankerprof_facts_import_edge_branches() -> None:
     tolerated["summary"] = "free-form"
     imported = loads_sample_facts(json.dumps(tolerated))
     assert imported.total_primary_value == 50_000_000
+
+
+def test_clankerprof_by_slice_values_validate_and_support_negative_limits(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("T#render", "/srv/app/t.rb"))
+    app_leaf = builder.location(builder.function("Leaf#call", "/srv/app/leaf.rb"))
+    gem_leaf = builder.location(
+        builder.function("Client#post", "/gems/http-5.1.0/lib/http.rb")
+    )
+    builder.sample((app_leaf, target), 7_000_000)
+    builder.sample((gem_leaf, target), 3_000_000)
+    profile_path = tmp_path / "by-slice.pb"
+    profile_path.write_bytes(builder.encode())
+    slices_path = tmp_path / "by-slice-slices.yml"
+    slices_path.write_text(
+        "slices:\n"
+        "  - name: app\n"
+        "    paths:\n"
+        "      - /srv/app\n"
+        "  - name: default\n"
+        "    default: true\n",
+        encoding="utf-8",
+    )
+    base = [
+        "slices",
+        "--profile",
+        str(profile_path),
+        "--slices",
+        str(slices_path),
+    ]
+
+    assert clankerprof_main(base) == 0
+    full_payload = json.loads(capsys.readouterr().out)
+    full_names = [item["name"] for item in full_payload["slices"]]
+    assert len(full_names) == 2
+
+    # Negative limits drop from the tail (Python list slicing), and stay
+    # supported so the Rust port must honor the same semantics.
+    assert clankerprof_main([*base, "--by-slice", "-1"]) == 0
+    negative_payload = json.loads(capsys.readouterr().out)
+    negative_names = [item["name"] for item in negative_payload["slices"]]
+    assert negative_names == full_names[:-1]
+
+    # Malformed values fail closed with the shared strict messages instead of
+    # leaking int()/float() exception text.
+    for value, message in (
+        ("garbage", "--by-slice values must be integers."),
+        ("1_0", "--by-slice values must be integers."),
+        ("garbage%", "--by-slice percentage thresholds must be finite numbers."),
+        ("inf%", "--by-slice percentage thresholds must be finite numbers."),
+        ("nan%", "--by-slice percentage thresholds must be finite numbers."),
+    ):
+        assert clankerprof_main([*base, "--by-slice", value]) == 2, value
+        assert json.loads(capsys.readouterr().err) == {
+            "ok": False,
+            "error": message,
+        }, value

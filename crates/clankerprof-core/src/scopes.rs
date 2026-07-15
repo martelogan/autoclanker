@@ -380,6 +380,7 @@ pub fn analyze_boundary_facts(
         let value = fact.primary_value();
         let stack = fact.stack.as_slice();
         let leaf = &stack[0];
+        let mut category_error: Option<String> = None;
         let outcome = {
             let matcher_ptr: *mut PredicateMatcher<'_> = &mut predicate_matcher;
             let mut configured_category_for = |frame: &Frame| -> Option<String> {
@@ -387,10 +388,21 @@ pub fn analyze_boundary_facts(
                 // matcher is otherwise unused; the raw pointer sidesteps the
                 // borrow of predicate_matcher held by the closure itself.
                 let matcher = unsafe { &mut *matcher_ptr };
-                let mut category_matcher = matcher.category_matcher.take()?;
-                let result = category_matcher.category_for(frame, matcher).ok().flatten();
+                let Some(mut category_matcher) = matcher.category_matcher.take() else {
+                    return None;
+                };
+                let result = category_matcher.category_for(frame, matcher);
                 matcher.category_matcher = Some(category_matcher);
-                result
+                match result {
+                    Ok(value) => value,
+                    Err(error) => {
+                        // Propagated after categorize_stack returns: swallowing
+                        // predicate errors here silently rebuckets all cost as
+                        // "Other" while Python fails closed.
+                        category_error.get_or_insert(error);
+                        None
+                    }
+                }
             };
             categorize_stack(
                 stack,
@@ -402,6 +414,9 @@ pub fn analyze_boundary_facts(
                 &mut configured_category_for,
             )
         };
+        if let Some(error) = category_error {
+            return Err(error);
+        }
         let category = outcome.category;
         let frame_to_categorize = &stack[outcome.frame_index];
 
