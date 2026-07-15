@@ -3879,6 +3879,23 @@ def test_clankerprof_slice_descendant_filters_use_or_semantics() -> None:
     )
     assert inverted_descendant_result.matching_time_ns == 60_000_000
 
+    # Negation binds to descendant EXISTENCE: a stack that contains the
+    # forbidden frame is excluded even though its other frames don't match
+    # (any(not m) would let it pass whenever any unrelated frame exists).
+    forbidden_present_result = analyze_slices(
+        profile,
+        SliceAnalysisOptions(filters=("<!name:RequestHandler#render_response",)),
+    )
+    request_stack_result = analyze_slices(
+        profile,
+        SliceAnalysisOptions(filters=("<name:RequestHandler#render_response",)),
+    )
+    assert request_stack_result.matching_time_ns > 0
+    assert (
+        forbidden_present_result.matching_time_ns
+        == request_stack_result.total_time_ns - request_stack_result.matching_time_ns
+    )
+
 
 @covers("M9-004")
 def test_clankerprof_slice_filter_prefixes_can_repeat_in_any_order() -> None:
@@ -5242,9 +5259,18 @@ def test_clankerprof_facts_import_edge_branches() -> None:
     with pytest.raises(ValueError, match="frame must be an object"):
         loads_sample_facts(json.dumps(v1_bad_frame))
 
-    tolerated = _valid_facts_export()
-    tolerated["summary"] = "free-form"
-    imported = loads_sample_facts(json.dumps(tolerated))
+    # A present summary must be an object; only absent or null skip the
+    # redundancy cross-check.
+    wrong_type = _valid_facts_export()
+    wrong_type["summary"] = "free-form"
+    with pytest.raises(ValueError, match="summary must be an object"):
+        loads_sample_facts(json.dumps(wrong_type))
+    wrong_type["summary"] = []
+    with pytest.raises(ValueError, match="summary must be an object"):
+        loads_sample_facts(json.dumps(wrong_type))
+    null_summary = _valid_facts_export()
+    null_summary["summary"] = None
+    imported = loads_sample_facts(json.dumps(null_summary))
     assert imported.total_primary_value == 50_000_000
 
 
@@ -5297,9 +5323,13 @@ def test_clankerprof_by_slice_values_validate_and_support_negative_limits(
     for value, message in (
         ("garbage", "--by-slice values must be integers."),
         ("1_0", "--by-slice values must be integers."),
+        # An empty PRESENT value is not an integer — truthiness must not
+        # silently disable filtering (Rust already rejects it).
+        ("", "--by-slice values must be integers."),
         ("garbage%", "--by-slice percentage thresholds must be finite numbers."),
         ("inf%", "--by-slice percentage thresholds must be finite numbers."),
         ("nan%", "--by-slice percentage thresholds must be finite numbers."),
+        ("%", "--by-slice percentage thresholds must be finite numbers."),
     ):
         assert clankerprof_main([*base, "--by-slice", value]) == 2, value
         assert json.loads(capsys.readouterr().err) == {
@@ -5424,6 +5454,63 @@ def test_clankerprof_scope_rollups_render_negative_costs_additively(
     # Negative aggregates must be rendered (dropping them breaks additivity);
     # only zero-aggregate rows may be omitted.
     assert categories == {"Pos": 10, "Neg": -5}
+
+
+def test_clankerprof_scope_attributables_scale_for_negative_totals(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("T", "/srv/app/t.py"))
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    builder.sample((leaf, target), -10)
+    profile_path = tmp_path / "negative-total.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "negative-total.yml"
+    config_path.write_text(
+        'cost_kind:\n  Work: "name:Leaf"\n'
+        "scope:\n  - function: T\n"
+        '    rollup:\n      All: ["Work"]\n'
+        "    attributables:\n      p90: 100.0\n",
+        encoding="utf-8",
+    )
+
+    argv = ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+    assert clankerprof_main(argv) == 0
+    boundary = json.loads(capsys.readouterr().out)["boundaries"][0]
+    assert boundary["total_time_ns"] == -10
+    # A -10/-10 row is 100% of its scope: estimates scale by signed share for
+    # any nonzero total instead of vanishing on negative totals.
+    assert boundary["attributable_estimates"] == {"p90": 100.0}
+    bucket = boundary["buckets"][0]
+    assert bucket["attributable_estimates"] == {"p90": 100.0}
+    assert bucket["categories"][0]["attributable_estimates"] == {"p90": 100.0}
+
+
+def test_clankerprof_slice_metadata_rejects_non_finite_numbers(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    builder.sample((leaf,), 7)
+    profile_path = tmp_path / "metadata.pb"
+    profile_path.write_bytes(builder.encode())
+    for label, yaml_text in (
+        ("nested-map", "slices:\n  - name: app\n    metadata: {score: .nan}\n"),
+        ("top-level", "slices:\n  - name: app\n    score: .inf\n"),
+        ("list-item", "slices:\n  - name: app\n    labels: [ok, .nan]\n"),
+    ):
+        slices_path = tmp_path / f"metadata-{label}.yml"
+        slices_path.write_text(yaml_text, encoding="utf-8")
+        exit_code = clankerprof_main(
+            ["slices", "--profile", str(profile_path), "--slices", str(slices_path)]
+        )
+        assert exit_code == 2, label
+        assert json.loads(capsys.readouterr().err) == {
+            "ok": False,
+            "error": "Slice metadata values must be finite JSON-compatible numbers.",
+        }, label
 
 
 def test_clankerprof_compare_summary_totals_span_u64_range() -> None:

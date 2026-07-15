@@ -294,7 +294,11 @@ class _SliceMatcher:
                 self.matches_predicate(frame, item.key, item.value) for frame in frames
             )
         if item.inverted:
-            return any(not matched for matched in matches)
+            # Negation binds to descendant EXISTENCE: a stack containing the
+            # forbidden frame must not pass just because some other frame
+            # fails to match. (Bottom filters are single-frame, where the
+            # two formulas coincide.)
+            return not any(matches)
         return any(matches)
 
     def filters_match_sample(self, stack: Sequence[Frame], bottom: Frame) -> bool:

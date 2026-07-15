@@ -3790,3 +3790,118 @@ def test_clankerprof_rust_target_renderer_semantics_match_python(
         "quoted-core-classes",
     )
     assert "Ruby Core (Native)" in output
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_r4_slices_scopes_facts_validation_matches_python(
+    tmp_path: Path,
+) -> None:
+    from clankerprof.facts import dumps_sample_facts
+
+    # R4-05: negative scope totals scale attributable estimates by signed
+    # share instead of erasing them.
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    parent = builder.location(builder.function("T", "/srv/app/t.py"))
+    builder.sample((leaf, parent), -10)
+    negative_facts = tmp_path / "negative-facts.json"
+    negative_facts.write_text(
+        dumps_sample_facts(decode_profile_bytes(builder.encode()).to_sample_facts()),
+        encoding="utf-8",
+    )
+    scopes_config = tmp_path / "negative-scopes.yml"
+    scopes_config.write_text(
+        'cost_kind:\n  Work: "name:Leaf"\n'
+        "scope:\n  - function: T\n"
+        '    rollup:\n      All: ["Work"]\n'
+        "    attributables:\n      p90: 100.0\n",
+        encoding="utf-8",
+    )
+    output = _assert_identical_success(
+        ["scopes", "--facts", str(negative_facts), "--config", str(scopes_config)],
+        "negative-total-attributables",
+    )
+    boundary = json.loads(output)["boundaries"][0]
+    assert boundary["buckets"][0]["attributable_estimates"] == {"p90": 100.0}
+    assert boundary["buckets"][0]["categories"][0]["attributable_estimates"] == {
+        "p90": 100.0
+    }
+
+    # R4-08: negated descendant filters bind to descendant existence.
+    facts_path = _order_scope_facts(tmp_path)
+    excluded = _assert_identical_success(
+        ["slices", "--facts", str(facts_path), "--filter", "<!name:T"],
+        "negated-descendant-present",
+    )
+    assert json.loads(excluded)["summary"]["matching_time_ns"] == 0
+    kept = _assert_identical_success(
+        ["slices", "--facts", str(facts_path), "--filter", "<!name:Missing"],
+        "negated-descendant-absent",
+    )
+    assert json.loads(kept)["summary"]["matching_time_ns"] == 7
+
+    # R4-11: an empty present --by-slice value is rejected, never a silent
+    # filtering bypass.
+    slices_yaml = tmp_path / "by-slice-slices.yml"
+    slices_yaml.write_text(
+        "slices:\n  - name: app\n    paths:\n      - /srv/app\n",
+        encoding="utf-8",
+    )
+    envelope = _assert_identical_envelope(
+        [
+            "slices",
+            "--facts",
+            str(facts_path),
+            "--slices",
+            str(slices_yaml),
+            "--by-slice",
+            "",
+        ],
+        "by-slice-empty",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "--by-slice values must be integers.",
+    }
+
+    # R4-12: non-finite slice metadata fails closed with one shared message
+    # (Rust previously emitted a silent null).
+    for label, yaml_text in (
+        ("nested", "slices:\n  - name: app\n    metadata: {score: .nan}\n"),
+        ("list", "slices:\n  - name: app\n    labels: [ok, .inf]\n"),
+    ):
+        metadata_yaml = tmp_path / f"metadata-{label}.yml"
+        metadata_yaml.write_text(yaml_text, encoding="utf-8")
+        envelope = _assert_identical_envelope(
+            ["slices", "--facts", str(facts_path), "--slices", str(metadata_yaml)],
+            f"metadata-{label}",
+        )
+        assert json.loads(envelope) == {
+            "ok": False,
+            "error": "Slice metadata values must be finite JSON-compatible numbers.",
+        }
+
+    # R4-14: a present facts summary must be an object; null keeps reading
+    # as absent.
+    valid = json.loads(facts_path.read_text(encoding="utf-8"))
+    wrong_summaries: tuple[tuple[str, object], ...] = (
+        ("array", []),
+        ("string", "free-form"),
+    )
+    for label, summary in wrong_summaries:
+        wrong = dict(valid)
+        wrong["summary"] = summary
+        wrong_path = tmp_path / f"summary-{label}.json"
+        wrong_path.write_text(json.dumps(wrong, sort_keys=True), encoding="utf-8")
+        envelope = _assert_identical_envelope(
+            ["slices", "--facts", str(wrong_path)], f"summary-{label}"
+        )
+        assert json.loads(envelope) == {
+            "ok": False,
+            "error": "Sample facts summary must be an object.",
+        }
+    null_summary = dict(valid)
+    null_summary["summary"] = None
+    null_path = tmp_path / "summary-null.json"
+    null_path.write_text(json.dumps(null_summary, sort_keys=True), encoding="utf-8")
+    _assert_identical_success(["slices", "--facts", str(null_path)], "summary-null")

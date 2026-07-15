@@ -467,8 +467,12 @@ def _validate_summary(
     total_primary_value: TimeNs,
     empty_sample_count: int,
 ) -> None:
-    if not isinstance(raw, dict):
+    if raw is None:
         return
+    if not isinstance(raw, dict):
+        # Absent (or explicit null) skips the redundancy cross-check; a
+        # present summary of any other type is malformed, not "absent".
+        raise ValueError("Sample facts summary must be an object.")
     summary_payload = cast(JsonObject, raw)
 
     def summary_int(key: str) -> int | None:

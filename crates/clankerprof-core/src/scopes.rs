@@ -616,7 +616,10 @@ fn scale_attributables(
     value: TimeNs,
 ) -> Value {
     let mut scaled = Map::new();
-    if attributables.is_empty() || total <= 0 {
+    // Signed shares: a -10/-10 row is 100% of its scope, so estimates scale
+    // for any nonzero total; only an exactly-zero total (undefined share)
+    // suppresses them, mirroring the zero-arm of the pct fields.
+    if attributables.is_empty() || total == 0 {
         return Value::Object(scaled);
     }
     for (name, metric_value) in attributables {

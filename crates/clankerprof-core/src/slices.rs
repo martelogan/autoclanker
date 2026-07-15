@@ -167,7 +167,7 @@ pub fn load_slices_file(path: impl AsRef<Path>) -> Result<Vec<SliceDefinition>, 
             if matches!(key, "name" | "paths" | "default") {
                 continue;
             }
-            let converted = serde_json::to_value(raw_value).map_err(|error| error.to_string())?;
+            let converted = metadata_value(raw_value)?;
             if key == "metadata" {
                 if let Value::Object(nested) = converted {
                     for (nested_key, nested_value) in nested {
@@ -523,6 +523,39 @@ fn collapse_matches_frame(
     matches_frame_filter(frame, raw_filter, &options.runtime_rules)
 }
 
+/// Slice metadata mirrors Python's `_json_compatible`: preserved as generic
+/// JSON, except non-finite numbers, which serde_json would silently null —
+/// neither implementation can "preserve" those, so both fail closed.
+fn metadata_value(raw: &serde_yaml::Value) -> Result<Value, String> {
+    match raw {
+        serde_yaml::Value::Number(number) => {
+            if let Some(value) = number.as_f64() {
+                if !value.is_finite() {
+                    return Err(
+                        "Slice metadata values must be finite JSON-compatible numbers.".to_string(),
+                    );
+                }
+            }
+            serde_json::to_value(raw).map_err(|error| error.to_string())
+        }
+        serde_yaml::Value::Sequence(items) => Ok(Value::Array(
+            items.iter().map(metadata_value).collect::<Result<_, _>>()?,
+        )),
+        serde_yaml::Value::Mapping(mapping) => {
+            let mut object = serde_json::Map::new();
+            for (key, value) in mapping {
+                let Some(key) = key.as_str() else {
+                    // Strict YAML loading already rejects non-string keys.
+                    return Err("YAML mapping keys must be strings.".to_string());
+                };
+                object.insert(key.to_string(), metadata_value(value)?);
+            }
+            Ok(Value::Object(object))
+        }
+        _ => serde_json::to_value(raw).map_err(|error| error.to_string()),
+    }
+}
+
 fn filters_match_sample(
     filters: &[String],
     stack: &[Frame],
@@ -568,10 +601,14 @@ fn filter_matches_stack(
             matches_frame_filter(frame, &body, &options.runtime_rules)
         }
     });
+    // Negation binds to descendant EXISTENCE: a stack containing the
+    // forbidden frame must not pass just because some other frame fails to
+    // match. (Bottom filters are single-frame, where the formulas coincide.)
+    let matched = matches.into_iter().any(|matched| matched);
     if inverted {
-        matches.into_iter().any(|matched| !matched)
+        !matched
     } else {
-        matches.into_iter().any(|matched| matched)
+        matched
     }
 }
 
@@ -670,7 +707,7 @@ fn is_gc_function(name: &str) -> bool {
 
 #[cfg(test)]
 mod limit_tests {
-    use super::{apply_python_limit, parse_by_slice_threshold};
+    use super::{apply_python_limit, metadata_value, parse_by_slice_threshold};
 
     #[test]
     fn python_limit_keeps_head_for_non_negative_and_drops_tail_for_negative() {
@@ -705,6 +742,28 @@ mod limit_tests {
             assert_eq!(
                 parse_by_slice_threshold(raw),
                 Err("--by-slice percentage thresholds must be finite numbers.".to_string()),
+                "{raw}"
+            );
+        }
+    }
+
+    #[test]
+    fn metadata_values_reject_non_finite_numbers() {
+        let finite: serde_yaml::Value = serde_yaml::from_str("{score: 1.5, tags: [a, 2]}").unwrap();
+        assert_eq!(
+            metadata_value(&finite).unwrap(),
+            serde_json::json!({"score": 1.5, "tags": ["a", 2]})
+        );
+        for raw in [
+            "{score: .nan}",
+            "{score: .inf}",
+            "[ok, .nan]",
+            "{a: {b: [.inf]}}",
+        ] {
+            let value: serde_yaml::Value = serde_yaml::from_str(raw).unwrap();
+            assert_eq!(
+                metadata_value(&value),
+                Err("Slice metadata values must be finite JSON-compatible numbers.".to_string()),
                 "{raw}"
             );
         }

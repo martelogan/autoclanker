@@ -428,6 +428,8 @@ Unknown slice keys are preserved as generic JSON-compatible `metadata` in
 slice output. A nested `metadata:` object is flattened into that same payload,
 so callers can attach labels, contacts, docs, escalation hints, or any other
 domain metadata without teaching `clankerprof` application-specific concepts.
+Non-finite YAML numbers (`.nan`, `.inf`) are rejected at load — they are
+not JSON-compatible, so neither implementation could preserve them.
 
 Common slice options can also live in a YAML config:
 

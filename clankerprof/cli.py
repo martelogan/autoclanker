@@ -1030,6 +1030,10 @@ def _load_boundary_options(
 
 
 def _json_compatible(value: object) -> JsonValue:
+    if isinstance(value, float) and not math.isfinite(value):
+        # serde_json would silently null a non-finite number; neither
+        # implementation can "preserve" it, so both fail closed.
+        raise ValueError("Slice metadata values must be finite JSON-compatible numbers.")
     if value is None or isinstance(value, str | int | float | bool):
         return value
     if isinstance(value, list):

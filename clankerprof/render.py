@@ -149,7 +149,10 @@ def _scale_attributables(
     total: TimeNs,
     value: TimeNs,
 ) -> dict[str, float]:
-    if not attributables or total <= 0:
+    # Signed shares: a -10/-10 row is 100% of its scope, so estimates scale
+    # for any nonzero total; only an exactly-zero total (undefined share)
+    # suppresses them, mirroring the zero-arm of the pct fields.
+    if not attributables or total == 0:
         return {}
     return {
         name: _finite_attributable(name, metric_value * _f64_ratio(value, total))
@@ -921,7 +924,7 @@ def render_slice_json(
         for item in resolved_options.slices
         if item.metadata
     }
-    if resolved_options.by_slice:
+    if resolved_options.by_slice is not None:
         by_slice = resolved_options.by_slice
         if by_slice.endswith("%"):
             threshold = _by_slice_threshold(by_slice.removesuffix("%"))

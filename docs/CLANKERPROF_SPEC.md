@@ -93,8 +93,11 @@ Top-level fields:
 
 The `summary` block is a redundancy check: exporters always write it, and
 importers cross-validate a present summary against the decoded samples
-(mismatches are validation errors). An absent summary skips the cross-check
-identically in both implementations; it never affects the imported facts.
+(mismatches are validation errors). An absent (or explicit `null`) summary
+skips the cross-check identically in both implementations; it never affects
+the imported facts. A present summary of any other type is a validation
+error (`Sample facts summary must be an object.`) — wrong-typed is
+malformed, never "absent".
 
 Each `frames` row is a six-element array:
 
@@ -485,7 +488,11 @@ Zero-aggregate rows may be omitted from rendered rollups (they cannot affect
 the sums), but rows with negative aggregates must be rendered — sample values
 are signed, and dropping negative rows breaks additivity.
 Calibrated attributables are caller-supplied same-scope metrics; the analyzer
-only scales them proportionally by scope CPU share.
+only scales them proportionally by scope CPU share. The share is signed —
+a `-10` row inside a `-10` scope is 100% of it — so estimates are emitted
+for any nonzero scope total and suppressed only when the total is exactly
+zero (undefined share), mirroring the zero-arm of the pct fields; the
+finite-estimate guard still rejects any scaled result that overflows.
 
 ## Slice projection contract
 
@@ -500,7 +507,11 @@ For each sample:
 - if every eligible frame is collapsed, count the sample and report an
   uncollapsible pseudo-output;
 - apply non-descendant filters conjunctively to the selected bottom frame;
-- apply descendant filters as an OR across the stack;
+- apply descendant filters as an OR across the stack; a negated descendant
+  filter (`<!pred`) matches only samples whose stack contains NO frame
+  matching `pred` — negation binds to descendant existence, never per-frame
+  (a stack containing the forbidden frame must not pass just because some
+  other frame fails to match);
 - apply attribute rules before path-based slice matching;
 - use the configured default slice or `(all)` for unmatched samples;
 - report GC pseudo-slice time for `(marking)` and `(sweeping)`;

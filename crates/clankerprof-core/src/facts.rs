@@ -415,8 +415,12 @@ fn validate_summary(
     total_primary_value: TimeNs,
     empty_sample_count: usize,
 ) -> Result<(), String> {
-    let Some(Value::Object(summary)) = raw else {
-        return Ok(());
+    // Absent (or explicit null) skips the redundancy cross-check; a present
+    // summary of any other type is malformed, not "absent".
+    let summary = match raw {
+        None | Some(Value::Null) => return Ok(()),
+        Some(Value::Object(map)) => map,
+        Some(_) => return Err("Sample facts summary must be an object.".to_string()),
     };
     let summary_int = |key: &str| -> Result<Option<i128>, String> {
         match summary.get(key) {
