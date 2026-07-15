@@ -130,14 +130,14 @@ def load_charter(paths: LoopPaths) -> Charter:
     gates = tuple(str(gate) for gate in cast(list[object], raw_gates))
     raw_audit = payload.get("audit")
     auditor: str | None = None
-    max_rounds = 3
+    max_rounds = 10
     if raw_audit is not None:
         if not isinstance(raw_audit, dict):
             raise ValueError(f"{CHARTER_FILENAME} audit block must be a mapping.")
         audit_payload = cast(dict[str, object], raw_audit)
         raw_auditor = audit_payload.get("auditor")
         auditor = str(raw_auditor) if raw_auditor else None
-        raw_rounds = audit_payload.get("max_rounds", 3)
+        raw_rounds = audit_payload.get("max_rounds", 10)
         if isinstance(raw_rounds, bool) or not isinstance(raw_rounds, int):
             raise ValueError(f"{CHARTER_FILENAME} audit.max_rounds must be an integer.")
         max_rounds = raw_rounds

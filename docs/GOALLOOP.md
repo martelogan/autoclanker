@@ -30,6 +30,8 @@ artifact), and use exit codes: 0 success, 1 not-met/gate-failure
 
 - `goalloop init --name N [--gate CMD]... [--auditor CMD] [--max-audit-rounds K]`
   — scaffold the charter and tracker; refuses to overwrite an existing loop.
+  `K` defaults to 10: audits should run as long as needed for convergence,
+  with the cap as a runaway backstop rather than an expected stop.
 - `goalloop status` — progress summary: per-wave done/total with pending rows,
   gates, audit state.
 - `goalloop assert ID_OR_WAVE...` — exit 1 unless the named rows/waves are

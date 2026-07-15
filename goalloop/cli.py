@@ -439,7 +439,7 @@ def register_goalloop_commands(
         "--auditor",
         help="Command that runs an independent read-only audit (e.g. codex exec).",
     )
-    init.add_argument("--max-audit-rounds", type=int, default=3)
+    init.add_argument("--max-audit-rounds", type=int, default=10)
     _add_root(init)
     _set(init, run_init)
 
