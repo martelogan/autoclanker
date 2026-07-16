@@ -1,0 +1,6 @@
+slices:
+  - name: components
+    paths:
+      - app/components/**
+  - name: instrumentation
+    paths: []

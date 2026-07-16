@@ -1,0 +1,3 @@
+slices:
+  - name: default
+    default: true

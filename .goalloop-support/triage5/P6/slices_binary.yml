@@ -1,0 +1,8 @@
+slices:
+  - name: app
+    paths:
+      - /srv/app
+    metadata:
+      x: !!binary SGVsbG8=
+  - name: default
+    default: true

@@ -1,0 +1,11 @@
+slices:
+  - name: App
+    paths:
+      - /app
+    metadata:
+      owner: first
+  - name: App
+    paths:
+      - /other
+    metadata:
+      owner: second

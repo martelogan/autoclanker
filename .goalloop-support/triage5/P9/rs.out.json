@@ -1,0 +1,28 @@
+{
+  "after_total_ns": 100,
+  "before_total_ns": 100,
+  "has_regression": false,
+  "slices": [
+    {
+      "after_pct": 10.0,
+      "before_pct": 10.0,
+      "delta_abs": 0.0,
+      "delta_rel": 0.0,
+      "frame_deltas": [],
+      "name": "App",
+      "status": "stable"
+    },
+    {
+      "after_pct": 90.0,
+      "before_pct": 90.0,
+      "delta_abs": 0.0,
+      "delta_rel": 0.0,
+      "frame_deltas": [],
+      "name": "Other",
+      "status": "stable"
+    }
+  ],
+  "tool": "clankerprof_compare",
+  "top_improvements": [],
+  "top_regressions": []
+}

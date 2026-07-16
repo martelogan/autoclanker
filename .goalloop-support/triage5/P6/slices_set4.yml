@@ -1,0 +1,8 @@
+slices:
+  - name: app
+    paths:
+      - /srv/app
+    metadata:
+      x: !!set {alpha: null, beta: null, gamma: null, delta: null}
+  - name: default
+    default: true

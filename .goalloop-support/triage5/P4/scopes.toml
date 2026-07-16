@@ -1,0 +1,9 @@
+[cost_kind]
+"App" = "path:app/**"
+
+[owner]
+"Rendering" = "path:app/rendering/**"
+
+[[scope]]
+label = "Request render"
+match = "name_eq:RequestHandler#render_response"

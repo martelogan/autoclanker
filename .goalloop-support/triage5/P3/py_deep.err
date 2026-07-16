@@ -1,0 +1,35 @@
+Traceback (most recent call last):
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/.venv/bin/clankerprof", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1617, in main
+    payload = cast(dict[str, Any], args.handler(args))
+                                   ^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 95, in wrapped
+    return handler(args)
+           ^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1065, in run_targets
+    sample_facts = _load_projection_input(args.profile, args.facts)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 141, in _load_projection_input
+    return read_sample_facts(facts_path)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/facts.py", line 277, in read_sample_facts
+    return loads_sample_facts(Path(path).read_text(encoding="utf-8"))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/facts.py", line 258, in loads_sample_facts
+    raw = parse_strict_json(payload)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/jsonio.py", line 48, in parse_strict_json
+    return json.loads(
+           ^^^^^^^^^^^
+  File "/Users/logan_martel/.local/share/mise/installs/python/3.11.14/lib/python3.11/json/__init__.py", line 359, in loads
+    return cls(**kw).decode(s)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/.local/share/mise/installs/python/3.11.14/lib/python3.11/json/decoder.py", line 337, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/.local/share/mise/installs/python/3.11.14/lib/python3.11/json/decoder.py", line 353, in raw_decode
+    obj, end = self.scan_once(s, idx)
+               ^^^^^^^^^^^^^^^^^^^^^^
+RecursionError: maximum recursion depth exceeded while decoding a JSON array from a unicode string

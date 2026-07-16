@@ -1,0 +1,62 @@
+[
+ {
+  "title": "Rust omits descendant-attribution rescue for bottom slice filters",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Rust slice: filters skip the descendant-attribution rescue in both polarities (spec'd, Python conforms); no parity test combined attributes with slice: filters. Rust-only fix. Evidence: .goalloop-support/round5.triage.json#P1"
+ },
+ {
+  "title": "Accepted Python-dialect regexes have different matching semantics in Rust",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Compilable-in-both patterns diverge on $-before-newline, (?i) casefolding, unicode w/s classes; fancy-regex exposes no knobs for Python semantics. Resolution: document-and-pin the divergence classes. #P2"
+ },
+ {
+  "title": "Recursive and deeply nested inputs escape Python's JSON error boundary",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. YAML alias cycles and 1100-deep JSON escape Python's boundary as RecursionError tracebacks exit 1; Rust exits 2 cleanly. Fix: contract RecursionError at the choke points, shared message core. #P3"
+ },
+ {
+  "title": "Rust scope top-N selection alphabetizes equal-cost functions",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Another D5 sibling: scopes per-function map is BTreeMap, alphabetizing equal-cost ties before --top; Python keeps first-seen. Rust-only IndexMap fix. #P4"
+ },
+ {
+  "title": "Integral `by_slice` floats beyond int64 are silently clamped only in Rust",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Rust clamps integral config by_slice floats beyond i64 (1.0e20 -> i64::MAX) and proceeds; Python rejects. Rust-only fail-closed fix. #P5"
+ },
+ {
+  "title": "Tagged YAML metadata is non-parity and nondeterministic",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Tagged YAML (!!binary/!!set) constructs Python-native objects (hash-randomized set repr = nondeterministic artifacts) vs serde structural forms; constructed-value parity unachievable. Resolution: reject explicit tags in both strict loaders. #P6"
+ },
+ {
+  "title": "Duplicate slice names produce first-wins versus last-wins metadata",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Duplicate slice names: Python last-wins metadata, Rust first-wins. Fix: reject duplicates in both, mirroring the multiple-default precedent. #P7"
+ },
+ {
+  "title": "Facts-v2 profile metadata is defaulted or coerced instead of validated",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Facts v2 profile metadata defaulted/coerced: absent primary_value_index silently selects index 0 against the documented last-type fallback; non-string value_types accepted divergently. Fix: strict v2 validation both. #P8"
+ },
+ {
+  "title": "Compare trusts self-inconsistent percentages and fails open",
+  "verdict": "refuted",
+  "evidence": "Refuted: compare's documented contract gates the report's claimed percentage fields; per-row time_ns is optional evidence with no promised cross-validation, and projections never emit inconsistent rows - the 'corrupt or manipulated report' premise attacks the artifact trust model, not a contract clause. Full proof: .goalloop-support/round5.triage.json#P9. Doc pin of the trust model added with the R5 fixes."
+ },
+ {
+  "title": "Rust's core-class CSV parser still breaks multiline quoted fields",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Rust core-class CSV parse still splits lines before fields, breaking multiline quoted records that Python csv.reader handles. Rust-only streaming-parse fix. #P10"
+ },
+ {
+  "title": "Delimiter-based aggregation keys merge distinct frames and caller/leaf pairs",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Delimiter-string aggregation keys collide on NUL/' -> ' in symbol names, merging distinct frames and caller/leaf pairs identically in both languages. Fix: tuple-identity keys, delimiter display-only. #P11"
+ },
+ {
+  "title": "Both protobuf decoders accept illegal field-zero and invalid-UTF-8 data",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Both decoders accept illegal protobuf field 0 and invalid UTF-8 (U+FFFD replacement) against the strict-decode contract. Fix: reject both, identical messages; codecs align exactly. #P12"
+ }
+]

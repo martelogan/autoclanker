@@ -1,0 +1,127 @@
+{
+  "boundaries": [
+    {
+      "attributable_estimates": {},
+      "buckets": [
+        {
+          "attributable_estimates": {},
+          "categories": [
+            {
+              "attributable_estimates": {},
+              "caller_leaf_pairs": [
+                {
+                  "attributable_estimates": {},
+                  "pair": "ZOwner -> ZOwner",
+                  "pct": 50.0,
+                  "samples": 1,
+                  "time_ns": 10
+                },
+                {
+                  "attributable_estimates": {},
+                  "pair": "AOwner -> AOwner",
+                  "pct": 50.0,
+                  "samples": 1,
+                  "time_ns": 10
+                }
+              ],
+              "files": [
+                "app/rendering/owner.rb"
+              ],
+              "folded_from": {},
+              "leaf_functions": {
+                "AOwner": {
+                  "count": 1,
+                  "cpu_time": 10
+                },
+                "ZOwner": {
+                  "count": 1,
+                  "cpu_time": 10
+                }
+              },
+              "name": "App",
+              "pct": 100.0,
+              "samples": 2,
+              "time_ns": 20
+            }
+          ],
+          "name": "Other",
+          "pct": 100.0,
+          "samples": 2,
+          "time_ns": 20
+        }
+      ],
+      "domains": [
+        {
+          "attributable_estimates": {},
+          "cost_kinds": [
+            {
+              "attributable_estimates": {},
+              "name": "App",
+              "pct_of_boundary": 100.0,
+              "pct_of_domain": 100.0,
+              "samples": 2,
+              "time_ns": 20
+            }
+          ],
+          "files": [
+            {
+              "attributable_estimates": {},
+              "caller_leaf_pairs": [
+                {
+                  "caller": "ZOwner",
+                  "leaf": "ZOwner",
+                  "pct_of_file": 50.0,
+                  "samples": 1,
+                  "time_ns": 10
+                },
+                {
+                  "caller": "AOwner",
+                  "leaf": "AOwner",
+                  "pct_of_file": 50.0,
+                  "samples": 1,
+                  "time_ns": 10
+                }
+              ],
+              "cost_kinds": [
+                {
+                  "name": "App",
+                  "pct_of_file": 100.0,
+                  "samples": 2,
+                  "time_ns": 20
+                }
+              ],
+              "filename": "app/rendering/owner.rb",
+              "functions": {
+                "AOwner": {
+                  "count": 1,
+                  "cpu_time": 10
+                },
+                "ZOwner": {
+                  "count": 1,
+                  "cpu_time": 10
+                }
+              },
+              "pct_of_boundary": 100.0,
+              "pct_of_domain": 100.0,
+              "samples": 2,
+              "time_ns": 20
+            }
+          ],
+          "name": "Rendering",
+          "pct": 100.0,
+          "samples": 2,
+          "time_ns": 20
+        }
+      ],
+      "name": "Request render",
+      "pct_of_profile": 100.0,
+      "samples": 2,
+      "total_time_ns": 20
+    }
+  ],
+  "summary": {
+    "total_time_ns": 20,
+    "unique_frame_count": 3
+  },
+  "tool": "clankerprof_boundaries"
+}

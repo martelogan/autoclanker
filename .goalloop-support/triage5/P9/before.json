@@ -1,0 +1,8 @@
+{
+  "tool": "clankerprof_slices",
+  "summary": {"total_time_ns": 100},
+  "slices": [
+    {"name": "App", "time_ns": 10, "pct": 10.0},
+    {"name": "Other", "time_ns": 90, "pct": 90.0}
+  ]
+}

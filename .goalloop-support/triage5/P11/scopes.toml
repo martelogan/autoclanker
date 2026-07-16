@@ -1,0 +1,6 @@
+[cost_kind]
+"App" = "path:app/**"
+
+[[scope]]
+label = "Leaf scope"
+match = "name:C"

@@ -4,3 +4,4 @@
 {"confirmed": 8, "event": "audit_ingest", "refuted": 0, "round": 3}
 {"contract_digest": "d5247b9b36b1603a59109155904959fb82a49a0f1d71ef13f1a71bd10735d7f4", "event": "lock"}
 {"confirmed": 14, "event": "audit_ingest", "refuted": 0, "round": 4}
+{"confirmed": 11, "event": "audit_ingest", "refuted": 1, "round": 5}

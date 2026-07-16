@@ -1,0 +1,3002 @@
+Traceback (most recent call last):
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/.venv/bin/clankerprof", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1617, in main
+    payload = cast(dict[str, Any], args.handler(args))
+                                   ^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 95, in wrapped
+    return handler(args)
+           ^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1210, in run_slices
+    slices=_load_slices(raw_slices),
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 512, in _load_slices
+    metadata = _slice_metadata(raw_item)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1058, in _slice_metadata
+    metadata[str(nested_key)] = _json_compatible(nested_value)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1042, in _json_compatible
+    return {
+           ^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1043, in <dictcomp>
+    str(key): _json_compatible(item)
+              ^^^^^^^^^^^^^^^^^^^^^^
+RecursionError: maximum recursion depth exceeded

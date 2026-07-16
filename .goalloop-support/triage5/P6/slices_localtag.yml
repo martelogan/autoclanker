@@ -1,0 +1,8 @@
+slices:
+  - name: app
+    paths:
+      - /srv/app
+    metadata:
+      x: !foo bar
+  - name: default
+    default: true
