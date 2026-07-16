@@ -1,0 +1,10 @@
+slices:
+  - name: A
+    paths:
+      - a.rb
+  - name: B
+    paths:
+      - b.rb
+  - name: "A,B"
+    paths:
+      - ab.rb

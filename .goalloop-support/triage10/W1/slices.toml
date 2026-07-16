@@ -1,0 +1,9 @@
+[[filters]]
+name = "A"
+paths = ["a.rb"]
+[[filters]]
+name = "B"
+paths = ["b.rb"]
+[[filters]]
+name = "A,B"
+paths = ["ab.rb"]

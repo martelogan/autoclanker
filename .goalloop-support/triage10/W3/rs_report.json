@@ -1,0 +1,7 @@
+{
+  "targets": {
+    "parents": {},
+    "tool": "clankerprof_targets"
+  },
+  "tool": "clankerprof_report"
+}

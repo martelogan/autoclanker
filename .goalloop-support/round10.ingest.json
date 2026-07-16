@@ -1,0 +1,27 @@
+[
+ {
+  "title": "Comma-bearing focus names make the compare gate fail open",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Focus values split on comma while comma-bearing row names are valid producer output -> focusing 'A,B' gates A and B, regression in row 'A,B' passes. Fix: reserve comma in names + compare backstop. #W1"
+ },
+ {
+  "title": "Misspelled slice-config options are silently ignored",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Slice-options config has no top-level allowlist: filterz typo silently yields 100pct-matching report. Fix: fixed-shape allowlist, both languages. #W2"
+ },
+ {
+  "title": "Rust report accepts an empty target config rejected by the target command",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Rust report bypasses targets' nonempty-config validation ({} accepted). Rust-only fix reusing the exact literal. #W3"
+ },
+ {
+  "title": "Rust report skips --top validation when no scope section is requested",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Rust report parses --top only in the scopes branch -> '--top junk' silently accepted in target/slice-only reports. Fix: validate at parse. #W4"
+ },
+ {
+  "title": "Both protobuf decoders accept field numbers above the legal maximum",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Both decoders skip field numbers above protobuf's 2^29-1 maximum instead of erroring. Fix: enforce max, shared message. #W5"
+ }
+]
