@@ -114,3 +114,11 @@
 - CONFIRMED [R8-12] Unknown top-level scope keys silently disable configuration sections: Reproduced. Unknown TOP-LEVEL scope config keys silently ignored (owenr typo drops the owner section). Fix: top-level allowlist, both languages. #T12
 - CONFIRMED [R8-13] Repeated protobuf period_type messages are replaced instead of merged: Reproduced. Repeated protobuf period_type occurrences replace instead of merge (proto3 singular-message merge semantics). Fix: merge fields across occurrences, both decoders. #T13
 - CONFIRMED [R8-14] Facts-v2 accepts a primary index inconsistent with the declared default metric: Reproduced. primary_value_index bounded (R7) but not tied to the documented selection from default_sample_type/value_types -> contradictory artifacts select the wrong metric. Fix: recompute and require equality, both languages. #T14
+
+## Round 9
+
+- CONFIRMED [R9-01] Extended-mode regex comments corrupt Rust backreference numbering: Reproduced. Backref rewrite lacks (?x) extended-mode awareness: '#' line-comment parens counted as groups -> silent renumbering, wrong attribution. Rust-only fix per sketch. #U1
+- CONFIRMED [R9-02] Scope retention still erases nonzero caller/leaf subtrees: Reproduced. Caller/leaf-pair evidence missing from the subtree-renderable predicates (third sibling of R6-03/R8-01) -> zero-sum categories/domains with signed pairs erased. Both languages. #U2
+- CONFIRMED [R9-03] Core-class categorization bypasses the rule pack's native-path matcher: Reproduced. Core-class categorization checks positive native markers only, bypassing is_native_path (patterns + exclusions ignored), both languages. Fix: route through is_native_path. #U3
+- CONFIRMED [R9-04] A configured `(all)` slice collides with the implicit fallback: Reproduced. Configured non-default (all) slice merges with the implicit fallback, absorbing unmatched samples under misleading metadata. Fix: reserve (all) too. #U4
+- CONFIRMED [R9-05] Facts v2 import does not enforce zero-based sample indexes: Reproduced. sample_index range-checked but not required to equal array position despite normative stable zero-based order. Fix: positional equality, both languages. #U5

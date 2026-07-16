@@ -1,0 +1,100 @@
+{
+ "schema_version": "clankerprof.sample_facts.v2",
+ "tool": "clankerprof_facts",
+ "profile": {
+  "value_types": [
+   {
+    "type": "cpu",
+    "unit": "nanoseconds"
+   }
+  ],
+  "period_type": null,
+  "period": 0,
+  "default_sample_type": "",
+  "primary_value_index": 0
+ },
+ "summary": {
+  "sample_count": 2,
+  "empty_sample_count": 0,
+  "non_empty_sample_count": 2,
+  "total_primary_value": 0
+ },
+ "strings": [
+  "LeafA",
+  "/x/la.rb",
+  "LeafB",
+  "/x/lb.rb",
+  "Owner",
+  "/own/o.rb",
+  "Boundary",
+  "/x/b.rb"
+ ],
+ "frames": [
+  [
+   1,
+   1,
+   0,
+   1,
+   1,
+   false
+  ],
+  [
+   2,
+   2,
+   2,
+   3,
+   1,
+   false
+  ],
+  [
+   3,
+   3,
+   4,
+   5,
+   1,
+   false
+  ],
+  [
+   4,
+   4,
+   6,
+   7,
+   1,
+   false
+  ]
+ ],
+ "samples": [
+  {
+   "sample_index": 0,
+   "values": [
+    10
+   ],
+   "location_ids": [
+    1,
+    3,
+    4
+   ],
+   "stack": [
+    0,
+    2,
+    3
+   ]
+  },
+  {
+   "sample_index": 1,
+   "values": [
+    -10
+   ],
+   "location_ids": [
+    2,
+    3,
+    4
+   ],
+   "stack": [
+    1,
+    2,
+    3
+   ]
+  }
+ ]
+}

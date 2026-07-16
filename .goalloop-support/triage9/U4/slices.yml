@@ -1,0 +1,5 @@
+slices:
+  - name: "(all)"
+    paths: ["/special/**"]
+    metadata:
+      intended: special-only

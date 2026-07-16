@@ -1,0 +1,5 @@
+schema_version: clankerprof.runtime_rules.v1
+name: test
+core_native_default_category: Native Core
+native_path_patterns:
+  - regex:/native/

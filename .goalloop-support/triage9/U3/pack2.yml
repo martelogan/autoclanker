@@ -1,0 +1,7 @@
+schema_version: clankerprof.runtime_rules.v1
+name: test2
+core_native_default_category: Native Core
+native_path_markers:
+  - /native/
+native_path_exclude_markers:
+  - /native/app/

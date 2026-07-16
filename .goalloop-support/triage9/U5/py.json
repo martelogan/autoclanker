@@ -1,0 +1,27 @@
+{
+  "parents": {
+    "T": {
+      "categories": [
+        {
+          "files": [
+            "/app/t.rb"
+          ],
+          "folded_from": {},
+          "leaf_functions": {
+            "T": {
+              "count": 2,
+              "cpu_time": 2
+            }
+          },
+          "name": "Other",
+          "pct": 100.0,
+          "samples": 2,
+          "semantic_callers": {},
+          "time_ns": 2
+        }
+      ],
+      "total_time_ns": 2
+    }
+  },
+  "tool": "clankerprof_targets"
+}

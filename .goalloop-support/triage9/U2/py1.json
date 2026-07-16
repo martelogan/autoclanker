@@ -1,0 +1,18 @@
+{
+  "boundaries": [
+    {
+      "attributable_estimates": {},
+      "buckets": [],
+      "domains": [],
+      "name": "Boundary",
+      "pct_of_profile": 0,
+      "samples": 2,
+      "total_time_ns": 0
+    }
+  ],
+  "summary": {
+    "total_time_ns": 0,
+    "unique_frame_count": 4
+  },
+  "tool": "clankerprof_boundaries"
+}

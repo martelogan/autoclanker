@@ -1,0 +1,27 @@
+{
+  "parents": {
+    "T": {
+      "categories": [
+        {
+          "files": [
+            "abb"
+          ],
+          "folded_from": {},
+          "leaf_functions": {
+            "T": {
+              "count": 1,
+              "cpu_time": 1
+            }
+          },
+          "name": "Hit",
+          "pct": 100.0,
+          "samples": 1,
+          "semantic_callers": {},
+          "time_ns": 1
+        }
+      ],
+      "total_time_ns": 1
+    }
+  },
+  "tool": "clankerprof_targets"
+}

@@ -1,0 +1,27 @@
+{
+  "parents": {
+    "T": {
+      "categories": [
+        {
+          "files": [
+            "/native/ext.so"
+          ],
+          "folded_from": {},
+          "leaf_functions": {
+            "Object#new": {
+              "count": 1,
+              "cpu_time": 10
+            }
+          },
+          "name": "Other",
+          "pct": 100.0,
+          "samples": 1,
+          "semantic_callers": {},
+          "time_ns": 10
+        }
+      ],
+      "total_time_ns": 10
+    }
+  },
+  "tool": "clankerprof_targets"
+}

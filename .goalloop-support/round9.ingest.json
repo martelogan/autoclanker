@@ -1,0 +1,27 @@
+[
+ {
+  "title": "Extended-mode regex comments corrupt Rust backreference numbering",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Backref rewrite lacks (?x) extended-mode awareness: '#' line-comment parens counted as groups -> silent renumbering, wrong attribution. Rust-only fix per sketch. #U1"
+ },
+ {
+  "title": "Scope retention still erases nonzero caller/leaf subtrees",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Caller/leaf-pair evidence missing from the subtree-renderable predicates (third sibling of R6-03/R8-01) -> zero-sum categories/domains with signed pairs erased. Both languages. #U2"
+ },
+ {
+  "title": "Core-class categorization bypasses the rule pack's native-path matcher",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Core-class categorization checks positive native markers only, bypassing is_native_path (patterns + exclusions ignored), both languages. Fix: route through is_native_path. #U3"
+ },
+ {
+  "title": "A configured `(all)` slice collides with the implicit fallback",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Configured non-default (all) slice merges with the implicit fallback, absorbing unmatched samples under misleading metadata. Fix: reserve (all) too. #U4"
+ },
+ {
+  "title": "Facts v2 import does not enforce zero-based sample indexes",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. sample_index range-checked but not required to equal array position despite normative stable zero-based order. Fix: positional equality, both languages. #U5"
+ }
+]

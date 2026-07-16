@@ -1,0 +1,6 @@
+cost_kind:
+  Work: "path:/x/**"
+owner:
+  D: "path:/own/**"
+scope:
+  - function: Boundary
