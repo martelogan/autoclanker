@@ -18,6 +18,8 @@ from typing import Any, cast
 
 from goalloop.model import (
     AUDIT_PROMPT_TEMPLATE,
+    DEFAULT_FINDING_SEVERITY,
+    FINDING_SEVERITIES,
     HANDOFF_PROTOCOL,
     Charter,
     LoopPaths,
@@ -54,7 +56,13 @@ def run_init(args: argparse.Namespace) -> int:
     gates = list(args.gate) if args.gate else ["true"]
     paths.root.mkdir(parents=True, exist_ok=True)
     paths.charter.write_text(
-        charter_template(args.name, gates, args.auditor, args.max_audit_rounds),
+        charter_template(
+            args.name,
+            gates,
+            args.auditor,
+            args.max_audit_rounds,
+            audit_convergence=args.audit_convergence,
+        ),
         encoding="utf-8",
     )
     paths.tracker.write_text(tracker_template(args.name), encoding="utf-8")
@@ -126,6 +134,7 @@ def _status_payload(
             "enabled": charter.audit_enabled,
             "rounds": len(rounds),
             "max_rounds": charter.max_audit_rounds,
+            "convergence": charter.audit_convergence,
             "converged": audit_converged(charter, rounds),
         },
     }
@@ -284,14 +293,17 @@ def run_audit_prompt(args: argparse.Namespace) -> int:
         if paths.audit.exists()
         else "(none yet)"
     )
-    print(
-        AUDIT_PROMPT_TEMPLATE.format(
-            name=charter.name,
-            charter=paths.charter.read_text(encoding="utf-8"),
-            tracker=paths.tracker.read_text(encoding="utf-8"),
-            refutations=refutations,
-        )
+    prompt = AUDIT_PROMPT_TEMPLATE.format(
+        name=charter.name,
+        charter=paths.charter.read_text(encoding="utf-8"),
+        tracker=paths.tracker.read_text(encoding="utf-8"),
+        refutations=refutations,
     )
+    if charter.audit_notes is not None:
+        # Charter-carried operator guidance (scope carve-outs, tooling
+        # constraints of the auditor's platform); part of the locked policy.
+        prompt += f"\n--- OPERATOR NOTES ---\n{charter.audit_notes}\n"
+    print(prompt)
     return 0
 
 
@@ -313,8 +325,8 @@ def run_audit_ingest(args: argparse.Namespace) -> int:
     raw = json.loads(findings_path.read_text(encoding="utf-8"))
     if not isinstance(raw, list):
         raise ValueError("Triaged findings must be a JSON array.")
-    confirmed: list[dict[str, str]] = []
-    refuted: list[dict[str, str]] = []
+    confirmed: list[dict[str, str | None]] = []
+    refuted: list[dict[str, str | None]] = []
     for item in cast(list[object], raw):
         if not isinstance(item, dict):
             raise ValueError("Each triaged finding must be an object.")
@@ -327,6 +339,16 @@ def run_audit_ingest(args: argparse.Namespace) -> int:
                 "Each finding needs title, verdict (confirmed|refuted), and "
                 "evidence (the reproduction, or the refutation proof)."
             )
+        raw_severity = finding.get("severity")
+        severity: str | None = None
+        if raw_severity is not None:
+            if raw_severity not in FINDING_SEVERITIES:
+                raise ValueError(
+                    f"Finding severity must be one of {sorted(FINDING_SEVERITIES)}; "
+                    f"got {raw_severity!r}. Omit it to count as "
+                    f"{DEFAULT_FINDING_SEVERITY} for convergence."
+                )
+            severity = str(raw_severity)
         for label, value in (("title", title), ("evidence", evidence)):
             if "|" in value or "\n" in value or "\r" in value:
                 raise ValueError(
@@ -334,7 +356,7 @@ def run_audit_ingest(args: argparse.Namespace) -> int:
                     f"would corrupt the tracker table): {value!r}"
                 )
         (confirmed if verdict == "confirmed" else refuted).append(
-            {"title": title, "evidence": evidence}
+            {"title": title, "evidence": evidence, "severity": severity}
         )
 
     wave = f"R{round_number}"
@@ -348,12 +370,16 @@ def run_audit_ingest(args: argparse.Namespace) -> int:
     audit_lines: list[str] = [f"\n## Round {round_number}\n"]
     for index, finding in enumerate(confirmed, start=1):
         requirement_id = f"{wave}-{index:02d}"
+        severity = finding["severity"]
+        severity_note = f" ({severity})" if severity else ""
         new_rows.append(
             f"| {requirement_id} | {finding['title']} "
-            f"| {finding['evidence']} | todo | audit round {round_number} |"
+            f"| {finding['evidence']} | todo "
+            f"| audit round {round_number}{severity_note} |"
         )
         audit_lines.append(
-            f"- CONFIRMED [{requirement_id}] {finding['title']}: {finding['evidence']}"
+            f"- CONFIRMED [{requirement_id}]{severity_note} "
+            f"{finding['title']}: {finding['evidence']}"
         )
     for finding in refuted:
         audit_lines.append(f"- REFUTED {finding['title']}: {finding['evidence']}")
@@ -376,13 +402,16 @@ def run_audit_ingest(args: argparse.Namespace) -> int:
             "refuted": len(refuted),
         },
     )
+    # Recompute from the files so the reported convergence is exactly what
+    # goal will see (policy-aware, and proof the writer/parser agree).
+    converged = audit_converged(charter, load_audit_rounds(paths))
     _emit(
         {
             "ok": True,
             "round": round_number,
             "confirmed": len(confirmed),
             "refuted": len(refuted),
-            "converged": not confirmed,
+            "converged": converged,
             "rounds_remaining": charter.max_audit_rounds - round_number,
         }
     )
@@ -406,6 +435,7 @@ def run_audit_status(args: argparse.Namespace) -> int:
                 for item in rounds
             ],
             "max_rounds": charter.max_audit_rounds,
+            "convergence": charter.audit_convergence,
             "converged": audit_converged(charter, rounds),
         }
     )
@@ -440,6 +470,14 @@ def register_goalloop_commands(
         help="Command that runs an independent read-only audit (e.g. codex exec).",
     )
     init.add_argument("--max-audit-rounds", type=int, default=10)
+    init.add_argument(
+        "--audit-convergence",
+        choices=("zero", "no_major"),
+        default="zero",
+        help="Convergence policy: zero = a round confirming nothing new; "
+        "no_major = a round confirming nothing critical/major (large "
+        "surfaces where esoteric minor findings never dry up).",
+    )
     _add_root(init)
     _set(init, run_init)
 

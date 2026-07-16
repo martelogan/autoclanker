@@ -38,12 +38,15 @@ def _init_loop(
     gates: tuple[str, ...] = ("true",),
     auditor: str | None = None,
     max_rounds: int = 3,
+    convergence: str | None = None,
 ) -> None:
     argv = ["init", "--name", "demo", "--root", str(root)]
     for gate in gates:
         argv.extend(["--gate", gate])
     if auditor is not None:
         argv.extend(["--auditor", auditor, "--max-audit-rounds", str(max_rounds)])
+    if convergence is not None:
+        argv.extend(["--audit-convergence", convergence])
     assert goalloop_main(argv) == 0
 
 
@@ -124,6 +127,7 @@ def test_status_reports_waves_gates_and_audit_state(
         "enabled": True,
         "rounds": 0,
         "max_rounds": 3,
+        "convergence": "zero",
         "converged": False,
     }
 
@@ -718,3 +722,211 @@ def test_goalloop_init_defaults_to_ten_audit_rounds(
     capsys.readouterr()
     assert goalloop_main(["audit", "status", "--root", str(tmp_path)]) == 0
     assert _last_json(capsys)["max_rounds"] == 10
+
+
+@covers("M10-002")
+def test_audit_no_major_policy_converges_on_minor_only_rounds(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    findings = tmp_path / "findings.json"
+    findings.write_text(
+        json.dumps(
+            [
+                {
+                    "title": "cosmetic spacing",
+                    "verdict": "confirmed",
+                    "evidence": "diff shows a stray space",
+                    "severity": "minor",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    # Under the default zero policy the same round does NOT converge.
+    zero_root = tmp_path / "zero"
+    _init_loop(zero_root, auditor="codex exec")
+    _write_tracker(zero_root, ["| A-01 | first | check | done | |"])
+    capsys.readouterr()
+    assert (
+        goalloop_main(["audit", "ingest", str(findings), "--root", str(zero_root)]) == 0
+    )
+    assert _last_json(capsys)["converged"] is False
+
+    # Under no_major a minor-only round converges; the pending R1 row still
+    # blocks goal on requirements, not on the audit.
+    root = tmp_path / "no_major"
+    _init_loop(root, auditor="codex exec", convergence="no_major")
+    _write_tracker(root, ["| A-01 | first | check | done | |"])
+    capsys.readouterr()
+    assert goalloop_main(["audit", "ingest", str(findings), "--root", str(root)]) == 0
+    payload = _last_json(capsys)
+    assert payload["confirmed"] == 1
+    assert payload["converged"] is True
+    assert goalloop_main(["goal", "--root", str(root)]) == 1
+    assert _last_json(capsys)["reason"] == "requirements pending"
+
+    # The severity travels to the audit log and the tracker Notes.
+    audit_log = (root / AUDIT_FILENAME).read_text(encoding="utf-8")
+    assert "- CONFIRMED [R1-01] (minor) cosmetic spacing" in audit_log
+    rows = {row.requirement_id: row for row in load_requirements(LoopPaths(root=root))}
+    assert "(minor)" in rows["R1-01"].notes
+
+    # A major finding blocks convergence under no_major too.
+    major_root = tmp_path / "major"
+    _init_loop(major_root, auditor="codex exec", convergence="no_major")
+    _write_tracker(major_root, ["| A-01 | first | check | done | |"])
+    findings.write_text(
+        json.dumps(
+            [
+                {
+                    "title": "gate bypass",
+                    "verdict": "confirmed",
+                    "evidence": "compare exits 0 on a regression",
+                    "severity": "major",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+    assert (
+        goalloop_main(["audit", "ingest", str(findings), "--root", str(major_root)])
+        == 0
+    )
+    assert _last_json(capsys)["converged"] is False
+
+
+@covers("M10-002")
+def test_audit_severity_vocabulary_and_fail_closed_default(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _init_loop(tmp_path, auditor="codex exec", convergence="no_major")
+    _write_tracker(tmp_path, ["| A-01 | first | check | done | |"])
+    findings = tmp_path / "findings.json"
+
+    findings.write_text(
+        json.dumps(
+            [
+                {
+                    "title": "x",
+                    "verdict": "confirmed",
+                    "evidence": "e",
+                    "severity": "huge",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+    assert (
+        goalloop_main(["audit", "ingest", str(findings), "--root", str(tmp_path)]) == 2
+    )
+    assert "severity must be one of" in capsys.readouterr().err
+
+    # Absent severity counts as major: the round must NOT converge even
+    # under no_major (fail-closed — unlabeled findings never converge a loop).
+    findings.write_text(
+        json.dumps([{"title": "unlabeled", "verdict": "confirmed", "evidence": "e"}]),
+        encoding="utf-8",
+    )
+    assert (
+        goalloop_main(["audit", "ingest", str(findings), "--root", str(tmp_path)]) == 0
+    )
+    assert _last_json(capsys)["converged"] is False
+    rounds = load_audit_rounds(LoopPaths(root=tmp_path))
+    assert rounds[-1].confirmed_severities == ["major"]
+
+
+@covers("M10-002")
+def test_audit_notes_append_an_operator_section_to_the_prompt(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _init_loop(tmp_path, auditor="codex exec")
+    _write_tracker(tmp_path, ["| A-01 | first | check | done | |"])
+    capsys.readouterr()
+    assert goalloop_main(["audit", "prompt", "--root", str(tmp_path)]) == 0
+    assert "--- OPERATOR NOTES ---" not in capsys.readouterr().out
+
+    charter_path = tmp_path / "goalloop.charter.md"
+    charter_path.write_text(
+        charter_path.read_text(encoding="utf-8").replace(
+            "  max_rounds: 3\n",
+            "  max_rounds: 3\n  notes: |\n"
+            "    Build single-hypothesis fixtures by hand; no fuzzing sweeps.\n",
+        ),
+        encoding="utf-8",
+    )
+    assert goalloop_main(["lock", "--root", str(tmp_path)]) == 0
+    capsys.readouterr()
+    assert goalloop_main(["audit", "prompt", "--root", str(tmp_path)]) == 0
+    out = capsys.readouterr().out
+    assert "--- OPERATOR NOTES ---" in out
+    assert "no fuzzing sweeps" in out
+
+
+@covers("M10-004")
+def test_convergence_policy_and_notes_join_the_contract_digest(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _init_loop(tmp_path, auditor="codex exec")
+    charter_path = tmp_path / "goalloop.charter.md"
+
+    # Switching the convergence policy drifts the contract until re-locked.
+    charter_path.write_text(
+        charter_path.read_text(encoding="utf-8").replace(
+            "  max_rounds: 3\n", "  max_rounds: 3\n  convergence: no_major\n"
+        ),
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+    assert goalloop_main(["status", "--root", str(tmp_path)]) == 0
+    assert _last_json(capsys)["contract"]["drifted"] is True
+    assert goalloop_main(["lock", "--root", str(tmp_path)]) == 0
+    capsys.readouterr()
+
+    # So does editing operator notes.
+    charter_path.write_text(
+        charter_path.read_text(encoding="utf-8").replace(
+            "  convergence: no_major\n",
+            "  convergence: no_major\n  notes: probe by hand\n",
+        ),
+        encoding="utf-8",
+    )
+    assert goalloop_main(["status", "--root", str(tmp_path)]) == 0
+    assert _last_json(capsys)["contract"]["drifted"] is True
+
+    # Unknown audit keys fail closed instead of silently weakening policy.
+    charter_path.write_text(
+        charter_path.read_text(encoding="utf-8").replace(
+            "  notes: probe by hand\n", "  convergance: zero\n"
+        ),
+        encoding="utf-8",
+    )
+    assert goalloop_main(["status", "--root", str(tmp_path)]) == 2
+    assert "unknown key: convergance" in capsys.readouterr().err
+
+    # And a bad policy value is a parse error, not a silent default.
+    charter_path.write_text(
+        charter_path.read_text(encoding="utf-8")
+        .replace("  convergance: zero\n", "")
+        .replace("  convergence: no_major\n", "  convergence: mostly\n"),
+        encoding="utf-8",
+    )
+    assert goalloop_main(["status", "--root", str(tmp_path)]) == 2
+    assert "audit.convergence must be one of" in capsys.readouterr().err
+
+
+@covers("M10-002")
+def test_init_audit_convergence_flag_round_trips(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _init_loop(tmp_path, auditor="codex exec", convergence="no_major")
+    assert "convergence: no_major" in (tmp_path / "goalloop.charter.md").read_text(
+        encoding="utf-8"
+    )
+    capsys.readouterr()
+    assert goalloop_main(["audit", "status", "--root", str(tmp_path)]) == 0
+    payload = _last_json(capsys)
+    assert payload["convergence"] == "no_major"
+    assert payload["converged"] is False

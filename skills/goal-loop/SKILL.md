@@ -50,10 +50,17 @@ Run it standalone (`goalloop …`) or via the umbrella (`autoclanker goalloop �
    `goalloop audit prompt` and feed it to the independent auditor (a different
    model/agent, read-only). Triage its findings by attempting reproduction,
    write the triaged JSON (`title` / `verdict: confirmed|refuted` /
-   `evidence`), and run `goalloop audit ingest findings.json` — confirmed
-   findings become a new `R<N>` tracker wave to implement; refutations enter
-   the log so the auditor cannot re-raise them without new evidence. Loop
-   until a round confirms nothing new; past `max_rounds`, escalate to a human.
+   `evidence`, plus optional `severity: critical|major|minor` — omitted
+   counts as major), and run `goalloop audit ingest findings.json` —
+   confirmed findings become a new `R<N>` tracker wave to implement;
+   refutations enter the log so the auditor cannot re-raise them without new
+   evidence. Loop until a round satisfies the convergence policy: the default
+   (`zero`) needs a round confirming nothing new; on large surfaces init with
+   `--audit-convergence no_major` so a minor-only round converges. Use
+   `audit.notes` in the charter for scope carve-outs and auditor-platform
+   constraints (e.g. steering away from fuzzing-style sweeps that content
+   filters kill) — notes and policy are part of the locked contract. Past
+   `max_rounds`, escalate to a human.
 
 ## Bayesian guidance (optional)
 

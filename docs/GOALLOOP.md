@@ -15,7 +15,7 @@ are commodity; the contract below is the durable part.
 
 | File | Role |
 | --- | --- |
-| `goalloop.charter.md` | The goal definition: YAML frontmatter (`name`, `gates`, optional `audit: {auditor, max_rounds}`) plus an Outcome / Evidence / Scope bounds / Stop conditions body. |
+| `goalloop.charter.md` | The goal definition: YAML frontmatter (`name`, `gates`, optional `audit: {auditor, max_rounds, convergence, notes}`) plus an Outcome / Evidence / Scope bounds / Stop conditions body. Unknown audit keys are a validation error — a typo must never silently weaken the audit policy. |
 | `goalloop.tracker.md` | Single source of execution state: wave-grouped requirement rows `| ID | Requirement | Verify | Status | Notes |`. IDs must match `<WAVE>-<NUMBER>` (uppercase wave token with optional trailing digits, dash, digits — e.g. `A-01`, `B2-03`, `R1-02`); malformed IDs are a hard error, never silently skipped, and `R<N>` waves are reserved for audit ingestion. Status vocabulary: `todo`, `doing`, `done`, `blocked`, `dropped` (dropped requires a reason in Notes). Duplicate IDs are rejected. |
 | `goalloop.audit.md` | Append-only adversarial audit log: `## Round N` sections with `- CONFIRMED [R<N>-XX] …` and `- REFUTED <title>: <proof>` lines. |
 | `goalloop.history.jsonl` | Append-only JSONL event stream (`init`, `lock`, `goal`, `audit_ingest`). |
@@ -28,7 +28,8 @@ artifact), and use exit codes: 0 success, 1 not-met/gate-failure
 (gate exit codes propagate verbatim), 2 validation error. Also available as
 `autoclanker goalloop …`.
 
-- `goalloop init --name N [--gate CMD]... [--auditor CMD] [--max-audit-rounds K]`
+- `goalloop init --name N [--gate CMD]... [--auditor CMD] [--max-audit-rounds K]
+  [--audit-convergence zero|no_major]`
   — scaffold the charter and tracker; refuses to overwrite an existing loop.
   `K` defaults to 10: audits should run as long as needed for convergence,
   with the cap as a runaway backstop rather than an expected stop.
@@ -58,17 +59,30 @@ artifact), and use exit codes: 0 success, 1 not-met/gate-failure
 - `goalloop audit prompt` — the auditor charter: an independent, read-only
   auditor is told to refute completion, must attempt reproduction for every
   finding, must not re-raise refuted findings without new evidence, and must
-  answer in strict JSON.
+  answer in strict JSON. When the charter carries `audit.notes`, the prompt
+  ends with an `--- OPERATOR NOTES ---` section — the place for scope
+  carve-outs and auditor-platform constraints (see "at scale" below); notes
+  are part of the locked audit policy.
 - `goalloop audit ingest FINDINGS.json` — ingest **triaged** findings (the
   implementor attempts reproduction first): a JSON array of
-  `{"title", "verdict": "confirmed"|"refuted", "evidence"}`. Confirmed
-  findings are appended to the tracker as a new `R<N>` wave (so the ordinary
-  loop machinery drives the fixes); refutations go to the audit log. Rounds
-  past `max_rounds` are rejected with instructions to escalate to a human.
-- `goalloop audit status` — per-round confirmed/refuted counts and convergence.
+  `{"title", "verdict": "confirmed"|"refuted", "evidence"}` with an optional
+  `"severity": "critical"|"major"|"minor"` per finding. Confirmed findings
+  are appended to the tracker as a new `R<N>` wave (so the ordinary loop
+  machinery drives the fixes), with the severity recorded on the tracker row
+  and the audit-log line; refutations go to the audit log. Rounds past
+  `max_rounds` are rejected with instructions to escalate to a human.
+- `goalloop audit status` — per-round confirmed/refuted counts, the
+  convergence policy, and convergence state.
 
-**Convergence:** the audit converges when a completed round confirms nothing
-new. With no auditor configured, the audit phase is vacuously converged.
+**Convergence:** under the default policy (`zero`) the audit converges when a
+completed round confirms nothing new. Under `audit.convergence: no_major` it
+converges when a round confirms nothing of critical or major severity — a
+minor-only round converges. A finding ingested without a severity counts as
+major (fail-closed: an unlabeled finding must never be what lets the audit
+converge). With no auditor configured, the audit phase is vacuously
+converged. The convergence policy and notes join the contract digest, so
+changing either mid-loop is goalpost-moving: `goal` blocks until an explicit
+re-lock.
 
 ## The loop protocol (what makes it deterministic)
 
@@ -112,8 +126,40 @@ The audit phase pits two independent agents against each other:
 4. `goalloop audit ingest` turns confirmed findings into a new tracker wave;
    the ordinary loop fixes them; the next round's auditor sees the refutation
    log and cannot re-raise dead findings without new evidence.
-5. A round with zero confirmed findings converges the audit; `goalloop goal`
-   can now pass. Past `max_rounds`, the loop refuses to continue and escalates.
+5. A round satisfying the convergence policy converges the audit;
+   `goalloop goal` can now pass. Past `max_rounds`, the loop refuses to
+   continue and escalates.
+
+## Adversarial audits at scale
+
+The clankerprof v2 review (10 rounds, 101 confirmed findings; see
+`docs/CLANKERPROF_ADVERSARIAL_AUDIT.md`) is the reference run for large
+surfaces. What it taught:
+
+- **Batch the triage.** Reproduction triage is mechanical; a few batched
+  verifier agents at moderate effort re-reproduce a whole round for a
+  fraction of the cost of one high-effort agent per finding, with no loss —
+  judgment lives in the fix clusters, not the triage.
+- **Expect auditor-platform interference.** External auditor platforms may
+  content-filter fuzzing-style probing (byte-mutation sweeps over binary
+  inputs pattern-match to security tooling) and kill the session mid-audit,
+  losing its findings. Use `audit.notes` to steer the auditor toward
+  hand-built single-hypothesis fixtures, and keep the audit prompt compact —
+  a tracker full of malformed-input language is itself trigger surface.
+- **Choose the convergence policy by surface size.** `zero` suits small,
+  bounded surfaces. On a large surface a max-effort frontier auditor keeps
+  finding progressively more esoteric true positives indefinitely — the
+  signal that matters is severity migration, which `no_major` encodes.
+- **Interruptions are cheap by design.** All state is files, so network
+  drops, credit exhaustion, and killed auditor sessions cost only the
+  in-flight step; resume from the tracker.
+
+Deferred candidates (judged not yet worth building; recorded so future
+sessions don't re-derive them): direct ingestion of raw auditor JSON without
+implementor triage (removes the reproduction discipline that caught real
+auditor false alarms), per-round token budgets (the harness driving the loop
+meters spend better than the loop can), and severity-weighted round caps
+(max_rounds plus `no_major` covers the observed need).
 
 ## Bayesian guidance over a goal loop (autoclanker adapter)
 

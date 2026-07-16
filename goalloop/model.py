@@ -28,6 +28,13 @@ HISTORY_FILENAME: Final = "goalloop.history.jsonl"
 
 VALID_STATUSES: Final = frozenset({"todo", "doing", "done", "blocked", "dropped"})
 FINISHED_STATUSES: Final = frozenset({"done", "dropped"})
+CONVERGENCE_POLICIES: Final = frozenset({"zero", "no_major"})
+FINDING_SEVERITIES: Final = frozenset({"critical", "major", "minor"})
+# Findings ingested without a severity count as major for convergence:
+# an unlabeled finding must never be what lets the audit converge.
+DEFAULT_FINDING_SEVERITY: Final = "major"
+BLOCKING_SEVERITIES: Final = frozenset({"critical", "major"})
+_AUDIT_KEYS: Final = frozenset({"auditor", "max_rounds", "convergence", "notes"})
 REQUIREMENT_ID_RE: Final = re.compile(r"^[A-Z]+\d*-\d+$")
 _TRACKER_HEADER_CELLS: Final = ("ID", "Requirement", "Verify", "Status", "Notes")
 _WAVE_RE: Final = re.compile(r"^##\s+Wave\s+(\S+)")
@@ -45,6 +52,8 @@ class Charter:
     gates: tuple[str, ...]
     auditor: str | None
     max_audit_rounds: int
+    audit_convergence: str
+    audit_notes: str | None
     body: str
 
     @property
@@ -73,6 +82,9 @@ class Requirement:
 class AuditRound:
     number: int
     confirmed_ids: list[str] = field(default_factory=_string_list)
+    # Parallel to confirmed_ids; unlabeled findings read as the fail-closed
+    # DEFAULT_FINDING_SEVERITY so legacy logs keep their exact semantics.
+    confirmed_severities: list[str] = field(default_factory=_string_list)
     refuted_titles: list[str] = field(default_factory=_string_list)
 
 
@@ -131,21 +143,46 @@ def load_charter(paths: LoopPaths) -> Charter:
     raw_audit = payload.get("audit")
     auditor: str | None = None
     max_rounds = 10
+    convergence = "zero"
+    notes: str | None = None
     if raw_audit is not None:
         if not isinstance(raw_audit, dict):
             raise ValueError(f"{CHARTER_FILENAME} audit block must be a mapping.")
         audit_payload = cast(dict[str, object], raw_audit)
+        unknown = sorted(set(audit_payload) - _AUDIT_KEYS)
+        if unknown:
+            # A typo here would silently weaken the audit policy; fail closed.
+            raise ValueError(
+                f"{CHARTER_FILENAME} audit block has unknown key: {unknown[0]}. "
+                f"Known keys: {', '.join(sorted(_AUDIT_KEYS))}."
+            )
         raw_auditor = audit_payload.get("auditor")
         auditor = str(raw_auditor) if raw_auditor else None
         raw_rounds = audit_payload.get("max_rounds", 10)
         if isinstance(raw_rounds, bool) or not isinstance(raw_rounds, int):
             raise ValueError(f"{CHARTER_FILENAME} audit.max_rounds must be an integer.")
         max_rounds = raw_rounds
+        raw_convergence = audit_payload.get("convergence", "zero")
+        if raw_convergence not in CONVERGENCE_POLICIES:
+            raise ValueError(
+                f"{CHARTER_FILENAME} audit.convergence must be one of "
+                f"{sorted(CONVERGENCE_POLICIES)}."
+            )
+        convergence = str(raw_convergence)
+        raw_notes = audit_payload.get("notes")
+        if raw_notes is not None:
+            if not isinstance(raw_notes, str) or not raw_notes.strip():
+                raise ValueError(
+                    f"{CHARTER_FILENAME} audit.notes must be a non-empty string."
+                )
+            notes = raw_notes
     return Charter(
         name=name,
         gates=gates,
         auditor=auditor,
         max_audit_rounds=max_rounds,
+        audit_convergence=convergence,
+        audit_notes=notes,
         body=text[match.end() :],
     )
 
@@ -233,9 +270,15 @@ def load_audit_rounds(paths: LoopPaths) -> list[AuditRound]:
             continue
         if current is None:
             continue
-        confirmed = re.match(r"^- CONFIRMED \[([A-Z]+\d*-\d+)\]", line)
+        confirmed = re.match(
+            r"^- CONFIRMED \[([A-Z]+\d*-\d+)\](?:\s+\((critical|major|minor)\))?",
+            line,
+        )
         if confirmed:
             current.confirmed_ids.append(confirmed.group(1))
+            current.confirmed_severities.append(
+                confirmed.group(2) or DEFAULT_FINDING_SEVERITY
+            )
             continue
         refuted = re.match(r"^- REFUTED (.+?):", line)
         if refuted:
@@ -249,12 +292,21 @@ def contract_digest(charter: Charter) -> str:
     The prose body is deliberately excluded: it may evolve freely, but changing
     the definition of green mid-loop must be an explicit, recorded act.
     """
+    audit_payload: dict[str, Any] | None = None
+    if charter.audit_enabled:
+        audit_payload = {
+            "auditor": charter.auditor,
+            "max_rounds": charter.max_audit_rounds,
+        }
+        # Non-default policy fields join the digest only when set, so loops
+        # locked before these keys existed keep their digests; changing a
+        # policy is still always a recorded drift + re-lock.
+        if charter.audit_convergence != "zero":
+            audit_payload["convergence"] = charter.audit_convergence
+        if charter.audit_notes is not None:
+            audit_payload["notes"] = charter.audit_notes
     payload: dict[str, Any] = {
-        "audit": (
-            {"auditor": charter.auditor, "max_rounds": charter.max_audit_rounds}
-            if charter.audit_enabled
-            else None
-        ),
+        "audit": audit_payload,
         "gates": list(charter.gates),
         "name": charter.name,
     }
@@ -277,12 +329,24 @@ def locked_contract_digest(paths: LoopPaths) -> str | None:
 
 
 def audit_converged(charter: Charter, rounds: list[AuditRound]) -> bool:
-    """Converged means at least one completed round confirmed nothing new."""
+    """Whether the last completed round satisfies the convergence policy.
+
+    Policy "zero" (default): the round confirmed nothing new. Policy
+    "no_major": the round confirmed nothing of blocking severity — a
+    minor-only round converges (the lesson of large surfaces, where a
+    max-effort auditor can surface esoteric minor findings indefinitely).
+    Unlabeled findings count as DEFAULT_FINDING_SEVERITY (major).
+    """
     if not charter.audit_enabled:
         return True
     if not rounds:
         return False
-    return not rounds[-1].confirmed_ids
+    last = rounds[-1]
+    if charter.audit_convergence == "no_major":
+        return not any(
+            severity in BLOCKING_SEVERITIES for severity in last.confirmed_severities
+        )
+    return not last.confirmed_ids
 
 
 def append_history(paths: LoopPaths, event: Mapping[str, Any]) -> None:
@@ -302,13 +366,20 @@ def charter_template(
     gates: Iterable[str],
     auditor: str | None,
     max_audit_rounds: int,
+    audit_convergence: str = "zero",
 ) -> str:
     frontmatter: dict[str, Any] = {
         "name": name,
         "gates": list(gates),
     }
     if auditor:
-        frontmatter["audit"] = {"auditor": auditor, "max_rounds": max_audit_rounds}
+        audit_block: dict[str, Any] = {
+            "auditor": auditor,
+            "max_rounds": max_audit_rounds,
+        }
+        if audit_convergence != "zero":
+            audit_block["convergence"] = audit_convergence
+        frontmatter["audit"] = audit_block
     rendered = yaml.safe_dump(frontmatter, sort_keys=False).strip()
     return f"""---
 {rendered}
