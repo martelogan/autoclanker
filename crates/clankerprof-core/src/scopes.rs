@@ -3,7 +3,10 @@
 //! `clankerprof/render.py`.
 
 use crate::categorize::{categorize_stack, simplify_category, RuntimeCategoryCache};
-use crate::model::{CategoryStats, DomainStats, Frame, ProfileFacts, TimeNs};
+use crate::model::{
+    CategoryStats, DomainStats, Frame, ProfileFacts, TimeNs, AGGREGATE_BOUNDS_ERROR, AGGREGATE_MAX,
+    AGGREGATE_MIN,
+};
 use crate::rules::RuntimeRuleSet;
 use crate::slices::SliceDefinition;
 use crate::targets::{
@@ -12,8 +15,45 @@ use crate::targets::{
 };
 use indexmap::IndexMap;
 use serde_json::{json, Map, Value};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+
+thread_local! {
+    // Python raises on the first non-finite attributable estimate it builds;
+    // the render helpers here return plain `Value`s, so instead of threading
+    // Results through every nested `json!` the first offender is parked in
+    // this slot and the CLI fails closed (exit 2) before emitting or writing
+    // any artifact — mirroring the pattern-error slot in `targets.rs`.
+    static ATTRIBUTABLE_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+fn record_attributable_error(message: String) {
+    ATTRIBUTABLE_ERROR.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(message);
+        }
+    });
+}
+
+/// Fail closed on any non-finite attributable estimate recorded during
+/// rendering. Must be checked before emitting or writing any artifact.
+pub fn take_attributable_error() -> Result<(), String> {
+    ATTRIBUTABLE_ERROR
+        .with(|slot| slot.borrow_mut().take())
+        .map_or(Ok(()), Err)
+}
+
+/// Attributable estimates — input or scaled — must stay JSON-representable;
+/// a non-finite value records a fail-closed error naming the metric (the
+/// placeholder null below is never emitted because the runner errors first).
+fn finite_attributable(name: &str, estimate: f64) -> Value {
+    if !estimate.is_finite() {
+        record_attributable_error(format!("Attributable estimate for '{name}' is not finite."));
+    }
+    json!(estimate)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FramePredicate {
@@ -146,6 +186,7 @@ struct PredicateMatcher<'a> {
     runtime_cache: RuntimeCategoryCache,
     category_matcher: Option<CategoryMatcher>,
     cache: HashMap<(FramePredicate, (u64, String, String)), bool>,
+    slice_owner_cache: HashMap<(u64, String, String), String>,
 }
 
 fn frame_cache_key(frame: &Frame) -> (u64, String, String) {
@@ -164,7 +205,34 @@ impl<'a> PredicateMatcher<'a> {
             runtime_cache: RuntimeCategoryCache::default(),
             category_matcher: None,
             cache: HashMap::new(),
+            slice_owner_cache: HashMap::new(),
         }
+    }
+
+    fn resolve_slice_owner(&mut self, frame: &Frame) -> String {
+        let cache_key = frame_cache_key(frame);
+        if let Some(cached) = self.slice_owner_cache.get(&cache_key) {
+            return cached.clone();
+        }
+        // Declaration-order first-match over the loaded slice definitions,
+        // mirroring the slices projection's per-frame resolution (scope
+        // configs load no attribute rules); unmatched frames fall back to
+        // the default slice.
+        let mut default = "(all)";
+        let mut resolved: Option<&str> = None;
+        for definition in self.slices {
+            if definition.is_default {
+                default = &definition.name;
+                continue;
+            }
+            if definition.matches_frame(frame, self.rules) {
+                resolved = Some(&definition.name);
+                break;
+            }
+        }
+        let owner = resolved.unwrap_or(default).to_string();
+        self.slice_owner_cache.insert(cache_key, owner.clone());
+        owner
     }
 
     fn unique_frame_count(&self) -> usize {
@@ -266,9 +334,11 @@ impl<'a> PredicateMatcher<'a> {
                     })
                     .unwrap_or(false))
             }
-            "slice" => Ok(self.slices.iter().any(|definition| {
-                definition.name == value && definition.matches_frame(frame, self.rules)
-            })),
+            // Effective ownership, not raw rule matching: overlapping slice
+            // definitions resolve first-match in declaration order (with the
+            // default slice as fallback), so a later definition whose rules
+            // also match never owns the frame.
+            "slice" => Ok(self.resolve_slice_owner(frame) == value),
             _ if DEFAULT_LIBRARY_SELECTORS.contains(&key)
                 || self.rules.library_selector_path_patterns.contains_key(key) =>
             {
@@ -359,6 +429,14 @@ pub fn analyze_boundary_facts(
             ..BoundaryStats::default()
         })
         .collect();
+    // Occurrence-mode attribution counts a sample once per matching frame
+    // occurrence, so scope aggregates are NOT subset sums and can escape the
+    // import-time bound. Re-enforce it during accumulation: the per-boundary
+    // positive/negative occurrence sums cap every subordinate accumulator
+    // (category, leaf, caller-pair, owner), so checking them here keeps all
+    // rendered aggregates inside [AGGREGATE_MIN, AGGREGATE_MAX].
+    let mut positive_occurrence: Vec<TimeNs> = vec![0; results.len()];
+    let mut negative_occurrence: Vec<TimeNs> = vec![0; results.len()];
     let mut runtime_cache = RuntimeCategoryCache::default();
     let mut predicate_matcher = PredicateMatcher::new(&options.runtime_rules, &options.slices);
     predicate_matcher.category_matcher = Some(CategoryMatcher::new(options.categories.clone()));
@@ -380,6 +458,7 @@ pub fn analyze_boundary_facts(
         let value = fact.primary_value();
         let stack = fact.stack.as_slice();
         let leaf = &stack[0];
+        let mut category_error: Option<String> = None;
         let outcome = {
             let matcher_ptr: *mut PredicateMatcher<'_> = &mut predicate_matcher;
             let mut configured_category_for = |frame: &Frame| -> Option<String> {
@@ -387,10 +466,21 @@ pub fn analyze_boundary_facts(
                 // matcher is otherwise unused; the raw pointer sidesteps the
                 // borrow of predicate_matcher held by the closure itself.
                 let matcher = unsafe { &mut *matcher_ptr };
-                let mut category_matcher = matcher.category_matcher.take()?;
-                let result = category_matcher.category_for(frame, matcher).ok().flatten();
+                let Some(mut category_matcher) = matcher.category_matcher.take() else {
+                    return None;
+                };
+                let result = category_matcher.category_for(frame, matcher);
                 matcher.category_matcher = Some(category_matcher);
-                result
+                match result {
+                    Ok(value) => value,
+                    Err(error) => {
+                        // Propagated after categorize_stack returns: swallowing
+                        // predicate errors here silently rebuckets all cost as
+                        // "Other" while Python fails closed.
+                        category_error.get_or_insert(error);
+                        None
+                    }
+                }
             };
             categorize_stack(
                 stack,
@@ -402,6 +492,9 @@ pub fn analyze_boundary_facts(
                 &mut configured_category_for,
             )
         };
+        if let Some(error) = category_error {
+            return Err(error);
+        }
         let category = outcome.category;
         let frame_to_categorize = &stack[outcome.frame_index];
 
@@ -434,6 +527,17 @@ pub fn analyze_boundary_facts(
                 let boundary_stats = &mut results[boundary_index];
                 boundary_stats.total_time += value;
                 boundary_stats.sample_count += 1;
+                if value >= 0 {
+                    positive_occurrence[boundary_index] += value;
+                    if positive_occurrence[boundary_index] > AGGREGATE_MAX {
+                        return Err(AGGREGATE_BOUNDS_ERROR.to_string());
+                    }
+                } else {
+                    negative_occurrence[boundary_index] += value;
+                    if negative_occurrence[boundary_index] < AGGREGATE_MIN {
+                        return Err(AGGREGATE_BOUNDS_ERROR.to_string());
+                    }
+                }
                 if boundary.once_per_sample {
                     counted_once_boundaries.insert(boundary_index);
                 }
@@ -542,27 +646,32 @@ fn scale_attributables(
     value: TimeNs,
 ) -> Value {
     let mut scaled = Map::new();
-    if attributables.is_empty() || total <= 0 {
+    // Signed shares: a -10/-10 row is 100% of its scope, so estimates scale
+    // for any nonzero total; only an exactly-zero total (undefined share)
+    // suppresses them, mirroring the zero-arm of the pct fields.
+    if attributables.is_empty() || total == 0 {
         return Value::Object(scaled);
     }
     for (name, metric_value) in attributables {
         scaled.insert(
             name.clone(),
-            json!(metric_value * (value as f64 / total as f64)),
+            finite_attributable(name, metric_value * (value as f64 / total as f64)),
         );
     }
     Value::Object(scaled)
 }
 
-fn pct(value: TimeNs, total: TimeNs) -> f64 {
+/// Zero-total percentages serialize as integer `0`, matching Python's
+/// `... if total else 0` arms byte-for-byte.
+fn pct(value: TimeNs, total: TimeNs) -> Value {
     if total == 0 {
-        0.0
+        json!(0)
     } else {
-        value as f64 / total as f64 * 100.0
+        json!(value as f64 / total as f64 * 100.0)
     }
 }
 
-pub fn render_boundary_json(result: &BoundaryAnalysisResult, top: Option<usize>) -> Value {
+pub fn render_boundary_json(result: &BoundaryAnalysisResult, top: Option<i64>) -> Value {
     json!({
         "boundaries": result
             .boundaries
@@ -577,14 +686,24 @@ pub fn render_boundary_json(result: &BoundaryAnalysisResult, top: Option<usize>)
     })
 }
 
-fn truncated<T>(items: Vec<T>, top: Option<usize>) -> Vec<T> {
-    match top {
-        Some(limit) => items.into_iter().take(limit).collect(),
-        None => items,
-    }
+fn truncated<T>(mut items: Vec<T>, top: Option<i64>) -> Vec<T> {
+    // Python renders ranked sections with list[:top], so a negative limit
+    // drops entries from the tail instead of rejecting.
+    crate::slices::apply_python_limit(&mut items, top);
+    items
 }
 
-fn render_boundary(boundary: &BoundaryStats, profile_total: TimeNs, top: Option<usize>) -> Value {
+/// Rendered totals may exceed i64 (aggregate bound allows up to u64::MAX),
+/// so read them back through both integer views before widening.
+fn time_ns_of(value: &Value) -> TimeNs {
+    value
+        .as_i64()
+        .map(TimeNs::from)
+        .or_else(|| value.as_u64().map(TimeNs::from))
+        .unwrap_or(0)
+}
+
+fn render_boundary(boundary: &BoundaryStats, profile_total: TimeNs, top: Option<i64>) -> Value {
     let total = boundary.total_time;
     let bucketed: HashSet<&str> = boundary
         .buckets
@@ -601,24 +720,32 @@ fn render_boundary(boundary: &BoundaryStats, profile_total: TimeNs, top: Option<
     leftover_sorted.sort_by(|left, right| right.1.cpu_time.cmp(&left.1.cpu_time));
     let leftover: Vec<String> = leftover_sorted
         .into_iter()
-        .filter(|(category, stats)| !bucketed.contains(category.as_str()) && stats.cpu_time > 0)
+        .filter(|(category, stats)| {
+            !bucketed.contains(category.as_str()) && category_renderable(stats)
+        })
         .map(|(category, _)| category.clone())
         .collect();
     if !leftover.is_empty() {
         buckets.push(render_bucket(boundary, "Other", &leftover));
     }
+    // A bucket is kept while any category row rendered: signed categories can
+    // cancel to a zero bucket total without being omittable zero rows.
     let mut buckets: Vec<Value> = buckets
         .into_iter()
-        .filter(|bucket| bucket["time_ns"].as_i64().unwrap_or(0) > 0)
+        .filter(|bucket| {
+            bucket["categories"]
+                .as_array()
+                .is_some_and(|rows| !rows.is_empty())
+        })
         .collect();
-    buckets.sort_by_key(|bucket| std::cmp::Reverse(bucket["time_ns"].as_i64().unwrap_or(0)));
+    buckets.sort_by_key(|bucket| std::cmp::Reverse(time_ns_of(&bucket["time_ns"])));
 
     let mut domains_sorted: Vec<(&String, &DomainStats)> = boundary.domains.iter().collect();
     domains_sorted.sort_by(|left, right| right.1.cpu_time.cmp(&left.1.cpu_time));
     let domains: Vec<Value> = truncated(
         domains_sorted
             .into_iter()
-            .filter(|(_, stats)| stats.cpu_time > 0)
+            .filter(|(_, stats)| domain_renderable(stats))
             .map(|(name, stats)| render_domain(boundary, name, stats, top))
             .collect(),
         top,
@@ -627,7 +754,7 @@ fn render_boundary(boundary: &BoundaryStats, profile_total: TimeNs, top: Option<
     let attributable_estimates: Map<String, Value> = boundary
         .attributables
         .iter()
-        .map(|(name, value)| (name.clone(), json!(value)))
+        .map(|(name, value)| (name.clone(), finite_attributable(name, *value)))
         .collect();
 
     json!({
@@ -641,6 +768,50 @@ fn render_boundary(boundary: &BoundaryStats, profile_total: TimeNs, top: Option<
     })
 }
 
+// A category may be omitted only when its aggregate AND its entire rendered
+// subtree are zero: signed leaf functions, folded-from rows, and
+// caller-to-leaf pairs can each cancel to a zero category total without
+// being omittable zero rows. Every map the category renderer emits
+// participates here.
+fn category_renderable(stats: &CategoryStats) -> bool {
+    stats.cpu_time != 0
+        || stats
+            .functions
+            .values()
+            .any(|metrics| metrics.cpu_time != 0)
+        || stats.folded_from.values().any(|time_ns| *time_ns != 0)
+        || stats
+            .caller_leaf_pairs
+            .values()
+            .any(|metrics| metrics.cpu_time != 0)
+}
+
+// Same every-level subtree rule as category_renderable: every map the
+// domain renderer emits (cost kinds plus per-file functions, cost kinds,
+// and caller-to-leaf pairs) participates in the keep decision.
+fn domain_renderable(stats: &DomainStats) -> bool {
+    stats.cpu_time != 0
+        || stats
+            .cost_kinds
+            .values()
+            .any(|metrics| metrics.cpu_time != 0)
+        || stats.files.values().any(|file_stats| {
+            file_stats.cpu_time != 0
+                || file_stats
+                    .functions
+                    .values()
+                    .any(|metrics| metrics.cpu_time != 0)
+                || file_stats
+                    .cost_kinds
+                    .values()
+                    .any(|metrics| metrics.cpu_time != 0)
+                || file_stats
+                    .caller_leaf_pairs
+                    .values()
+                    .any(|metrics| metrics.cpu_time != 0)
+        })
+}
+
 fn render_bucket(boundary: &BoundaryStats, label: &str, categories: &[String]) -> Value {
     let total = boundary.total_time;
     let category_rows: Vec<Value> = categories
@@ -649,13 +820,13 @@ fn render_bucket(boundary: &BoundaryStats, label: &str, categories: &[String]) -
             boundary
                 .categories
                 .get(category)
-                .filter(|stats| stats.cpu_time > 0)
+                .filter(|stats| category_renderable(stats))
                 .map(|stats| render_category(boundary, category, stats))
         })
         .collect();
     let cpu_time: TimeNs = category_rows
         .iter()
-        .map(|row| row["time_ns"].as_i64().unwrap_or(0))
+        .map(|row| time_ns_of(&row["time_ns"]))
         .sum();
     let samples: u64 = category_rows
         .iter()
@@ -686,14 +857,14 @@ fn render_metrics_object<'a>(
 
 fn render_category(boundary: &BoundaryStats, category: &str, stats: &CategoryStats) -> Value {
     let total = boundary.total_time;
-    let mut pairs_sorted: Vec<(&String, &crate::model::CallerMetrics)> =
+    let mut pairs_sorted: Vec<(&(String, String), &crate::model::CallerMetrics)> =
         stats.caller_leaf_pairs.iter().collect();
     pairs_sorted.sort_by(|left, right| right.1.cpu_time.cmp(&left.1.cpu_time));
     json!({
         "attributable_estimates": scale_attributables(&boundary.attributables, total, stats.cpu_time),
-        "caller_leaf_pairs": pairs_sorted.into_iter().map(|(pair, metrics)| json!({
+        "caller_leaf_pairs": pairs_sorted.into_iter().map(|((caller, leaf), metrics)| json!({
             "attributable_estimates": scale_attributables(&boundary.attributables, total, metrics.cpu_time),
-            "pair": pair,
+            "pair": format!("{caller} -> {leaf}"),
             "pct": pct(metrics.cpu_time, total),
             "samples": metrics.count,
             "time_ns": metrics.cpu_time,
@@ -712,7 +883,7 @@ fn render_domain(
     boundary: &BoundaryStats,
     name: &str,
     stats: &DomainStats,
-    top: Option<usize>,
+    top: Option<i64>,
 ) -> Value {
     let total = boundary.total_time;
     let mut cost_kinds_sorted: Vec<_> = stats.cost_kinds.iter().collect();
@@ -769,31 +940,77 @@ fn render_domain(
 // ---------------------------------------------------------------------------
 // Config loading, mirroring the Python CLI's boundary config parsing.
 
-fn config_to_json(path: &Path) -> Result<Value, String> {
+/// Top-level sections whose table KEY ORDER is semantic: configured cost
+/// kinds and owners evaluate first-match-wins in declaration order.
+const ORDERED_CONFIG_SECTIONS: [&str; 4] = ["cost_kind", "category", "owner", "domain"];
+
+/// Parse the config into a serde_json tree plus the declaration order of the
+/// order-sensitive tables. serde_json's Map re-sorts keys alphabetically, so
+/// the order is captured from the order-preserving YAML/TOML values before
+/// conversion (toml is built with preserve_order for exactly this reason).
+fn config_to_json(path: &Path) -> Result<(Value, HashMap<String, Vec<String>>), String> {
     let payload = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    if path.extension().and_then(|ext| ext.to_str()) == Some("toml") {
+    let mut order: HashMap<String, Vec<String>> = HashMap::new();
+    let value = if path.extension().and_then(|ext| ext.to_str()) == Some("toml") {
         let value: toml::Value = toml::from_str(&payload).map_err(|error| error.to_string())?;
-        serde_json::to_value(value).map_err(|error| error.to_string())
+        if let toml::Value::Table(table) = &value {
+            for section in ORDERED_CONFIG_SECTIONS {
+                if let Some(toml::Value::Table(inner)) = table.get(section) {
+                    order.insert(section.to_string(), inner.keys().cloned().collect());
+                }
+            }
+        }
+        serde_json::to_value(value).map_err(|error| error.to_string())?
     } else {
         let value: serde_yaml::Value =
             serde_yaml::from_str(&payload).map_err(|error| error.to_string())?;
-        serde_json::to_value(value).map_err(|error| error.to_string())
+        crate::rules::require_string_keys(&value)?;
+        if let serde_yaml::Value::Mapping(mapping) = &value {
+            for section in ORDERED_CONFIG_SECTIONS {
+                let key = serde_yaml::Value::String(section.to_string());
+                if let Some(serde_yaml::Value::Mapping(inner)) = mapping.get(&key) {
+                    order.insert(
+                        section.to_string(),
+                        inner
+                            .keys()
+                            .filter_map(|item| item.as_str().map(String::from))
+                            .collect(),
+                    );
+                }
+            }
+        }
+        serde_json::to_value(value).map_err(|error| error.to_string())?
+    };
+    Ok((value, order))
+}
+
+/// Iterate a config table's entries in declaration order.
+fn ordered_entries<'a>(
+    table: &'a Map<String, Value>,
+    order: Option<&Vec<String>>,
+) -> Vec<(&'a String, &'a Value)> {
+    match order {
+        Some(names) => names
+            .iter()
+            .filter_map(|name| table.get_key_value(name))
+            .collect(),
+        None => table.iter().collect(),
     }
 }
 
 fn string_values(value: &Value, field_name: &str) -> Result<Vec<String>, String> {
+    let message = || format!("{field_name} must be a string or array of strings.");
     match value {
         Value::String(text) => Ok(vec![text.clone()]),
-        Value::Array(items) => Ok(items
+        Value::Array(items) => items
             .iter()
-            .map(|item| match item {
-                Value::String(text) => text.clone(),
-                other => other.to_string(),
+            .map(|item| {
+                // Python str() and serde's Display disagree on bool/number
+                // spellings, so non-string items fail closed in both.
+                item.as_str().map(String::from).ok_or_else(message)
             })
-            .collect()),
-        _ => Err(format!(
-            "{field_name} must be a string or array of strings."
-        )),
+            .collect(),
+        _ => Err(message()),
     }
 }
 
@@ -857,11 +1074,17 @@ fn predicate_expr(
                     }
                 }
             };
+            let any = children("any")?;
+            let all = children("all")?;
+            let not_ = children("not")?;
+            if predicates.is_empty() && any.is_empty() && all.is_empty() && not_.is_empty() {
+                return Err(format!("{field_name} predicate table cannot be empty."));
+            }
             Ok(FramePredicateExpr {
                 predicates,
-                any: children("any")?,
-                all: children("all")?,
-                not_: children("not")?,
+                any,
+                all,
+                not_,
             })
         }
         _ => Err(format!(
@@ -936,6 +1159,7 @@ fn aliased_config_value<'a>(
 fn load_boundary_categories(
     raw: Option<&Value>,
     section_name: &str,
+    order: Option<&Vec<String>>,
 ) -> Result<Vec<BoundaryCategoryDefinition>, String> {
     let Some(raw) = raw else {
         return Ok(Vec::new());
@@ -944,7 +1168,7 @@ fn load_boundary_categories(
         return Err(format!("[{section_name}] must be an object."));
     };
     let mut categories = Vec::new();
-    for (name, raw_value) in table {
+    for (name, raw_value) in ordered_entries(table, order) {
         categories.push(BoundaryCategoryDefinition {
             name: name.clone(),
             predicates: predicate_expr(raw_value, &format!("{section_name} {name}"), "path")?,
@@ -956,6 +1180,7 @@ fn load_boundary_categories(
 fn load_boundary_domains(
     raw: Option<&Value>,
     section_name: &str,
+    order: Option<&Vec<String>>,
 ) -> Result<Vec<BoundaryDomainDefinition>, String> {
     let Some(raw) = raw else {
         return Ok(Vec::new());
@@ -964,14 +1189,13 @@ fn load_boundary_domains(
         return Err(format!("[{section_name}] must be an object."));
     };
     let mut domains = Vec::new();
-    for (name, raw_value) in table {
+    for (name, raw_value) in ordered_entries(table, order) {
         let field_name = format!("{section_name} {name}");
         let (fallback, expression) = match raw_value {
             Value::Object(mapping) => {
-                let fallback = mapping
-                    .get("fallback")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
+                // Python evaluates `bool(fallback)` truthiness, so any present
+                // value counts by shape — never silently coerced to false.
+                let fallback = mapping.get("fallback").is_some_and(python_truthy);
                 let mut stripped = mapping.clone();
                 stripped.remove("fallback");
                 (
@@ -990,55 +1214,105 @@ fn load_boundary_domains(
     Ok(domains)
 }
 
-fn boundary_predicate_value(raw_boundary: &Map<String, Value>) -> Result<Value, String> {
+/// Python `bool()` truthiness over parsed JSON shapes (mirrors the reference
+/// implementation's `bool(mapping.get("fallback", False))`).
+fn python_truthy(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(flag) => *flag,
+        Value::Number(number) => number.as_f64() != Some(0.0),
+        Value::String(text) => !text.is_empty(),
+        Value::Array(items) => !items.is_empty(),
+        Value::Object(mapping) => !mapping.is_empty(),
+    }
+}
+
+fn boundary_predicate_value(
+    raw_boundary: &Map<String, Value>,
+    section_name: &str,
+) -> Result<Value, String> {
     for key in ["selector", "matcher", "match"] {
         if let Some(value) = raw_boundary.get(key) {
             return Ok(value.clone());
         }
     }
     if let Some(raw_function) = raw_boundary.get("function") {
+        // Non-string function values fail closed: Python str() and Rust
+        // Display disagree on bool/number spellings, so neither is trusted.
+        let message = format!("{section_name}.function must be a string or array of strings.");
         return Ok(match raw_function {
-            Value::Array(items) => Value::Array(
-                items
-                    .iter()
-                    .map(|item| {
-                        Value::String(format!(
-                            "name_eq:{}",
-                            item.as_str().map_or_else(|| item.to_string(), String::from)
-                        ))
-                    })
-                    .collect(),
-            ),
-            other => Value::String(format!(
-                "name_eq:{}",
-                other
-                    .as_str()
-                    .map_or_else(|| other.to_string(), String::from)
-            )),
+            Value::Array(items) => {
+                let mut predicates = Vec::new();
+                for item in items {
+                    let Some(text) = item.as_str() else {
+                        return Err(message);
+                    };
+                    predicates.push(Value::String(format!("name_eq:{text}")));
+                }
+                Value::Array(predicates)
+            }
+            Value::String(text) => Value::String(format!("name_eq:{text}")),
+            _ => return Err(message),
         });
     }
     Err("Each scope must define selector, matcher, match, or function.".to_string())
 }
 
-fn boundary_label(raw_boundary: &Map<String, Value>, raw_predicates: &Value) -> String {
-    for key in ["label", "name", "function"] {
-        if let Some(value) = raw_boundary.get(key) {
-            if let Some(text) = value.as_str() {
+fn boundary_label(
+    raw_boundary: &Map<String, Value>,
+    raw_predicates: &Value,
+    section_name: &str,
+) -> Result<String, String> {
+    for key in ["label", "name"] {
+        match raw_boundary.get(key) {
+            None | Some(Value::Null) => {}
+            Some(Value::String(text)) => {
+                // Python's or-chain skips falsy values, so an empty string
+                // falls through to the next key.
                 if !text.is_empty() {
-                    return text.to_string();
+                    return Ok(text.clone());
                 }
-            } else if !value.is_null() {
-                return value.to_string();
+            }
+            Some(_) => {
+                return Err(format!("{section_name}.{key} must be a string."));
             }
         }
     }
-    match raw_predicates {
+    match raw_boundary.get("function") {
+        None | Some(Value::Null) => {}
+        Some(Value::String(text)) if !text.is_empty() => return Ok(text.clone()),
+        Some(Value::String(_)) => {}
+        Some(Value::Array(items)) if !items.is_empty() => {
+            // Python labels a multi-function scope with str(list); mirror
+            // repr() for the validated array-of-strings shape.
+            let rendered: Vec<String> = items
+                .iter()
+                .map(|item| python_str_repr(item.as_str().unwrap_or_default()))
+                .collect();
+            return Ok(format!("[{}]", rendered.join(", ")));
+        }
+        Some(Value::Array(_)) => {}
+        // boundary_predicate_value already rejected other function shapes.
+        Some(_) => {}
+    }
+    Ok(match raw_predicates {
         Value::String(text) => text.clone(),
+        // Array entries are validated as strings before this fallback runs.
         Value::Array(items) => items
             .first()
-            .map(|item| item.as_str().map_or_else(|| item.to_string(), String::from))
-            .unwrap_or_else(|| "boundary".to_string()),
+            .and_then(Value::as_str)
+            .map_or_else(|| "boundary".to_string(), String::from),
         _ => "boundary".to_string(),
+    })
+}
+
+/// Python repr() for a plain string: single quotes unless the text contains a
+/// single quote and no double quote.
+fn python_str_repr(text: &str) -> String {
+    if text.contains('\'') && !text.contains('"') {
+        format!("\"{text}\"")
+    } else {
+        format!("'{text}'")
     }
 }
 
@@ -1051,24 +1325,67 @@ fn load_boundaries(
     };
     let mut boundaries = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
+    const KNOWN_ENTRY_KEYS: [&str; 11] = [
+        "selector",
+        "matcher",
+        "match",
+        "function",
+        "label",
+        "name",
+        "count",
+        "rollup",
+        "bucket",
+        "attributables",
+        "exclude_descendants",
+    ];
     for item in items {
         let Value::Object(raw_boundary) = item else {
             return Err("Each boundary entry must be an object.".to_string());
         };
-        let raw_predicates = boundary_predicate_value(raw_boundary)?;
-        let label = boundary_label(raw_boundary, &raw_predicates);
+        // Entries are fixed-shape: a typoed key (exclude_descendents) must
+        // never silently disable its rule, mirroring the rule-pack principle.
+        let mut unknown_keys: Vec<&str> = raw_boundary
+            .keys()
+            .map(String::as_str)
+            .filter(|key| !KNOWN_ENTRY_KEYS.contains(key))
+            .collect();
+        unknown_keys.sort_unstable();
+        if let Some(first) = unknown_keys.first() {
+            return Err(format!("Unknown {section_name} field: {first}."));
+        }
+        let raw_predicates = boundary_predicate_value(raw_boundary, section_name)?;
+        // Validated before the label fallback, which derives the label from
+        // the first entry: Python str() and serde Display disagree on
+        // non-string spellings, so both implementations reject them here.
+        if let Value::Array(entries) = &raw_predicates {
+            if entries.iter().any(|entry| !entry.is_string()) {
+                return Err(format!("{section_name} selector values must be strings."));
+            }
+        }
+        let label = boundary_label(raw_boundary, &raw_predicates, section_name)?;
+        // The compare focus grammar splits values on ','; a comma-bearing
+        // row name would make focusing it silently gate the split parts.
+        if label.contains(',') {
+            return Err(format!("{section_name} label must not contain ','."));
+        }
         if !seen.insert(label.clone()) {
             return Err(format!("Duplicate boundary label: {label}"));
         }
-        let count = raw_boundary
-            .get("count")
-            .and_then(Value::as_str)
-            .unwrap_or("occurrence");
-        if !matches!(count, "occurrence" | "once_per_sample") {
-            return Err(format!(
-                "{section_name}.count must be occurrence or once_per_sample."
-            ));
-        }
+        // Non-string count values must fail like Python's str()-then-check,
+        // never silently fall back to the occurrence default.
+        let count = match raw_boundary.get("count") {
+            None => "occurrence",
+            Some(Value::String(text))
+                if matches!(text.as_str(), "occurrence" | "once_per_sample") =>
+            {
+                text.as_str()
+            }
+            Some(_) => {
+                return Err(format!(
+                    "{section_name}.count must be occurrence or once_per_sample."
+                ));
+            }
+        };
         let (rollup_name, raw_rollup) = aliased_config_value(
             raw_boundary,
             &["rollup", "bucket"],
@@ -1081,6 +1398,14 @@ fn load_boundaries(
             };
             let mut category_to_bucket: HashMap<String, String> = HashMap::new();
             for (bucket_name, raw_categories) in rollup_table {
+                // Rendering appends an implicit `Other` bucket for unbucketed
+                // cost kinds; a configured `Other` would emit duplicate bucket
+                // rows that the compare gate rejects.
+                if bucket_name == "Other" {
+                    return Err(format!(
+                        "{section_name}.{rollup_name} name 'Other' is reserved for unbucketed cost kinds."
+                    ));
+                }
                 let categories = string_values(
                     raw_categories,
                     &format!("{section_name}.{rollup_name} {bucket_name}"),
@@ -1139,12 +1464,34 @@ pub fn load_boundary_options(
     path: &Path,
     runtime_rules: RuntimeRuleSet,
 ) -> Result<BoundaryAnalysisOptions, String> {
-    let payload = config_to_json(path)?;
+    let (payload, declaration_order) = config_to_json(path)?;
     let Value::Object(payload) = payload else {
         return Err("Boundary config file must be an object.".to_string());
     };
+    // Top-level scope configs are fixed-shape like their entries: a typo such
+    // as `owenr:` must never silently drop a whole section. Map iteration is
+    // sorted, matching Python's sorted() first-offender order.
+    const ALLOWED_TOP_LEVEL: [&str; 7] = [
+        "boundary",
+        "category",
+        "cost_kind",
+        "domain",
+        "owner",
+        "scope",
+        "slices",
+    ];
+    for key in payload.keys() {
+        if !ALLOWED_TOP_LEVEL.contains(&key.as_str()) {
+            return Err(format!("Unknown scope config field: {key}."));
+        }
+    }
     let mut slices: Vec<SliceDefinition> = Vec::new();
-    if let Some(slices_path) = payload.get("slices").and_then(Value::as_str) {
+    if let Some(raw_slices) = payload.get("slices") {
+        // as_str would silently treat a non-string as absent where Python
+        // str()-coerced it into a bogus path; both now fail closed.
+        let slices_path = raw_slices
+            .as_str()
+            .ok_or_else(|| "Boundary config slices must be a string path.".to_string())?;
         let mut resolved = std::path::PathBuf::from(slices_path);
         if resolved.is_relative() {
             if let Some(parent) = path.parent() {
@@ -1152,6 +1499,9 @@ pub fn load_boundary_options(
             }
         }
         slices = crate::slices::load_slices_file(resolved)?;
+        // Scope configs never run slice analysis, so duplicate/multi-default/
+        // reserved-name validation must happen at this loading surface too.
+        crate::slices::validate_slice_definitions(&slices)?;
     }
     let (category_name, raw_categories) = aliased_config_value(
         &payload,
@@ -1164,8 +1514,16 @@ pub fn load_boundary_options(
         aliased_config_value(&payload, &["scope", "boundary"], "scope definitions")?;
     let options = BoundaryAnalysisOptions {
         boundaries: load_boundaries(raw_scopes, &scope_name)?,
-        categories: load_boundary_categories(raw_categories, &category_name)?,
-        domains: load_boundary_domains(raw_domains, &domain_name)?,
+        categories: load_boundary_categories(
+            raw_categories,
+            &category_name,
+            declaration_order.get(&category_name),
+        )?,
+        domains: load_boundary_domains(
+            raw_domains,
+            &domain_name,
+            declaration_order.get(&domain_name),
+        )?,
         slices,
         runtime_rules,
         enhanced_runtime_categorization: true,
@@ -1205,6 +1563,17 @@ pub fn load_boundary_options(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn time_ns_read_back_handles_the_full_aggregate_range() {
+        assert_eq!(time_ns_of(&json!(-5)), -5);
+        assert_eq!(time_ns_of(&json!(i64::MAX)), TimeNs::from(i64::MAX));
+        // Above i64::MAX serde_json stores u64; as_i64-only reads see zero.
+        assert_eq!(
+            time_ns_of(&json!(18_446_744_073_709_551_614_u64)),
+            18_446_744_073_709_551_614_i128
+        );
+    }
 
     #[test]
     fn predicate_parser_matches_python_validation() {
@@ -1268,6 +1637,29 @@ match = "name_eq:X"
     }
 
     #[test]
+    fn rollup_name_other_is_reserved() {
+        // Rendering appends an implicit `Other` bucket for unbucketed cost
+        // kinds; a configured `Other` would emit duplicate bucket rows.
+        let config = r#"
+cost_kind:
+  A: "name:LeafA"
+scope:
+  - function: T
+    rollup:
+      Other: ["A"]
+"#;
+        let path = std::env::temp_dir().join("clankerprof-reserved-other-test.yml");
+        std::fs::write(&path, config).unwrap();
+        let error = load_boundary_options(&path, crate::rules::RuntimeRuleSet::generic().clone())
+            .unwrap_err();
+        std::fs::remove_file(&path).ok();
+        assert_eq!(
+            error,
+            "scope.rollup name 'Other' is reserved for unbucketed cost kinds."
+        );
+    }
+
+    #[test]
     fn boundary_count_mode_and_duplicate_labels_validate() {
         let bad_count = r#"
 [[scope]]
@@ -1281,5 +1673,48 @@ count = "twice"
             .unwrap_err();
         std::fs::remove_file(&path).ok();
         assert!(error.contains("count must be occurrence or once_per_sample"));
+    }
+
+    #[test]
+    fn empty_predicate_tables_and_non_string_counts_fail_closed() {
+        let empty_table = r#"
+cost_kind:
+  Empty: {}
+scope:
+  - function: T
+"#;
+        let path = std::env::temp_dir().join("clankerprof-empty-table-test.yml");
+        std::fs::write(&path, empty_table).unwrap();
+        let error = load_boundary_options(&path, crate::rules::RuntimeRuleSet::generic().clone())
+            .unwrap_err();
+        std::fs::remove_file(&path).ok();
+        assert_eq!(error, "cost_kind Empty predicate table cannot be empty.");
+
+        let int_count = r#"
+scope:
+  - function: T
+    count: 1
+"#;
+        let path = std::env::temp_dir().join("clankerprof-int-count-test.yml");
+        std::fs::write(&path, int_count).unwrap();
+        let error = load_boundary_options(&path, crate::rules::RuntimeRuleSet::generic().clone())
+            .unwrap_err();
+        std::fs::remove_file(&path).ok();
+        assert_eq!(error, "scope.count must be occurrence or once_per_sample.");
+    }
+
+    #[test]
+    fn fallback_flags_follow_python_truthiness() {
+        assert!(python_truthy(&json!(true)));
+        assert!(python_truthy(&json!("yes")));
+        assert!(python_truthy(&json!(1)));
+        assert!(python_truthy(&json!([0])));
+        assert!(!python_truthy(&json!(false)));
+        assert!(!python_truthy(&json!(null)));
+        assert!(!python_truthy(&json!(0)));
+        assert!(!python_truthy(&json!(0.0)));
+        assert!(!python_truthy(&json!("")));
+        assert!(!python_truthy(&json!([])));
+        assert!(!python_truthy(&json!({})));
     }
 }

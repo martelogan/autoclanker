@@ -90,10 +90,27 @@ impl RuntimeMatchRule {
                 .iter()
                 .any(|prefix| name.starts_with(prefix))
             || self.name_patterns.iter().any(|pattern| {
+                // Packs are validated at load, so errors here are a fail-closed
+                // backstop mirroring Python's lazy _match_name_pattern.
                 let resolved = pattern.strip_prefix("regex:").unwrap_or(pattern);
-                crate::targets::compiled_regex(resolved)
-                    .map(|regex| regex.is_match(name))
-                    .unwrap_or(false)
+                let compiled = match crate::targets::raw_compiled_regex(resolved) {
+                    Ok(regex) => regex,
+                    Err(_) => {
+                        crate::targets::record_pattern_error(format!(
+                            "Invalid runtime rule name pattern '{pattern}'."
+                        ));
+                        return false;
+                    }
+                };
+                match compiled.is_match(name) {
+                    Ok(matched) => matched,
+                    Err(_) => {
+                        crate::targets::record_pattern_error(format!(
+                            "Invalid runtime rule name pattern '{pattern}'."
+                        ));
+                        false
+                    }
+                }
             })
     }
 }
@@ -175,19 +192,34 @@ impl RuntimeRuleSet {
     }
 }
 
-fn value_str(value: &Value) -> String {
-    match value {
-        Value::String(text) => text.clone(),
-        Value::Bool(flag) => (if *flag { "True" } else { "False" }).to_string(),
-        Value::Number(number) => number.to_string(),
-        other => format!("{other:?}"),
-    }
+/// Mapping keys reaching this point are pre-validated as strings
+/// (`require_string_keys` at pack load; Python's strict YAML loader mirrors
+/// it), so the fallback below is unreachable in practice.
+fn key_str(value: &Value) -> String {
+    value.as_str().unwrap_or_default().to_string()
+}
+
+fn require_rule_str(value: &Value, key: &str) -> Result<String, String> {
+    value
+        .as_str()
+        .map(ToString::to_string)
+        .ok_or_else(|| format!("Runtime rule field {key} must be a string."))
+}
+
+fn require_entry_str(value: &Value, key: &str) -> Result<String, String> {
+    value
+        .as_str()
+        .map(ToString::to_string)
+        .ok_or_else(|| format!("Runtime rule field {key} entries must be strings."))
 }
 
 fn string_list(mapping: &serde_yaml::Mapping, key: &str) -> Result<Vec<String>, String> {
     match mapping.get(Value::String(key.to_string())) {
         None | Some(Value::Null) => Ok(Vec::new()),
-        Some(Value::Sequence(items)) => Ok(items.iter().map(value_str).collect()),
+        Some(Value::Sequence(items)) => items
+            .iter()
+            .map(|item| require_entry_str(item, key))
+            .collect(),
         Some(_) => Err(format!("Runtime rule field {key} must be an array.")),
     }
 }
@@ -198,10 +230,12 @@ fn string_map(
 ) -> Result<BTreeMap<String, String>, String> {
     match mapping.get(Value::String(key.to_string())) {
         None | Some(Value::Null) => Ok(BTreeMap::new()),
-        Some(Value::Mapping(entries)) => Ok(entries
+        Some(Value::Mapping(entries)) => entries
             .iter()
-            .map(|(entry_key, entry_value)| (value_str(entry_key), value_str(entry_value)))
-            .collect()),
+            .map(|(entry_key, entry_value)| {
+                Ok((key_str(entry_key), require_entry_str(entry_value, key)?))
+            })
+            .collect(),
         Some(_) => Err(format!("Runtime rule field {key} must be an object.")),
     }
 }
@@ -225,13 +259,16 @@ fn selector_pattern_map(
         Some(Value::Mapping(entries)) => {
             let mut result = BTreeMap::new();
             for (selector, patterns) in entries {
-                let selector_name = value_str(selector);
+                let selector_name = key_str(selector);
                 let converted = match patterns {
                     Value::Null => Vec::new(),
                     Value::Sequence(items) => items
                         .iter()
-                        .map(|item| library_pattern(&value_str(item)))
-                        .collect(),
+                        .map(|item| {
+                            let entry_key = format!("{key}.{selector_name}");
+                            Ok(library_pattern(&require_entry_str(item, &entry_key)?))
+                        })
+                        .collect::<Result<Vec<_>, String>>()?,
                     _ => {
                         return Err(format!(
                             "Runtime rule field {key}.{selector_name} must be an array."
@@ -259,7 +296,7 @@ fn match_rules(mapping: &serde_yaml::Mapping, key: &str) -> Result<Vec<RuntimeMa
         };
         let unknown: Vec<String> = entry
             .keys()
-            .map(value_str)
+            .map(key_str)
             .filter(|entry_key| !KNOWN_MATCH_RULE_KEYS.contains(&entry_key.as_str()))
             .collect();
         if !unknown.is_empty() {
@@ -272,10 +309,10 @@ fn match_rules(mapping: &serde_yaml::Mapping, key: &str) -> Result<Vec<RuntimeMa
         };
         let native_category = match entry.get(Value::String("native_category".to_string())) {
             None | Some(Value::Null) => None,
-            Some(value) => Some(value_str(value)),
+            Some(value) => Some(require_rule_str(value, "native_category")?),
         };
         rules.push(RuntimeMatchRule {
-            category: value_str(category),
+            category: require_rule_str(category, "category")?,
             native_category,
             name_contains: string_list(entry, "name_contains")?,
             name_prefixes: string_list(entry, "name_prefixes")?,
@@ -285,8 +322,8 @@ fn match_rules(mapping: &serde_yaml::Mapping, key: &str) -> Result<Vec<RuntimeMa
         if let Some(rule) = rules.last() {
             for pattern in &rule.name_patterns {
                 let resolved = pattern.strip_prefix("regex:").unwrap_or(pattern);
-                if crate::targets::compiled_regex(resolved).is_none() {
-                    return Err(format!("Invalid runtime rule name pattern {pattern:?}."));
+                if crate::targets::raw_compiled_regex(resolved).is_err() {
+                    return Err(format!("Invalid runtime rule name pattern '{pattern}'."));
                 }
             }
         }
@@ -313,11 +350,11 @@ fn aliased_string_list(
     })
 }
 
-fn string_field(mapping: &serde_yaml::Mapping, key: &str, default: &str) -> String {
+fn string_field(mapping: &serde_yaml::Mapping, key: &str, default: &str) -> Result<String, String> {
     mapping
         .get(Value::String(key.to_string()))
-        .map(value_str)
-        .unwrap_or_else(|| default.to_string())
+        .map(|value| require_rule_str(value, key))
+        .unwrap_or_else(|| Ok(default.to_string()))
 }
 
 pub fn runtime_rules_from_mapping(
@@ -328,7 +365,7 @@ pub fn runtime_rules_from_mapping(
 ) -> Result<RuntimeRuleSet, String> {
     let mut unknown: Vec<String> = mapping
         .keys()
-        .map(value_str)
+        .map(key_str)
         .filter(|key| !KNOWN_RULE_PACK_KEYS.contains(&key.as_str()))
         .collect();
     if !unknown.is_empty() {
@@ -338,14 +375,14 @@ pub fn runtime_rules_from_mapping(
             unknown.join(", ")
         ));
     }
-    let schema_version = string_field(mapping, "schema_version", RUNTIME_RULES_SCHEMA_VERSION);
+    let schema_version = string_field(mapping, "schema_version", RUNTIME_RULES_SCHEMA_VERSION)?;
     if schema_version != RUNTIME_RULES_SCHEMA_VERSION {
         return Err(format!(
             "Unsupported runtime rules schema version: {schema_version:?}; expected {RUNTIME_RULES_SCHEMA_VERSION:?}."
         ));
     }
     Ok(RuntimeRuleSet {
-        name: string_field(mapping, "name", name),
+        name: string_field(mapping, "name", name)?,
         core_classes,
         verbose,
         enabled: true,
@@ -389,10 +426,53 @@ pub fn runtime_rules_from_mapping(
             mapping,
             "core_native_default_category",
             "Runtime Core (Native)",
-        ),
-        stdlib_category: string_field(mapping, "stdlib_category", "Runtime Stdlib"),
-        internals_category: string_field(mapping, "internals_category", "Runtime Internals"),
+        )?,
+        stdlib_category: string_field(mapping, "stdlib_category", "Runtime Stdlib")?,
+        internals_category: string_field(mapping, "internals_category", "Runtime Internals")?,
     })
+}
+
+/// Shared with Python's strict YAML loader: clankerprof YAML inputs reject
+/// non-string mapping keys (bool/number/null keys have no shared spelling
+/// between str() and serde's Display, so neither implementation coerces).
+pub const YAML_KEY_MESSAGE: &str = "YAML mapping keys must be strings.";
+
+/// serde_yaml represents only local (`!name`) tags as `Value::Tagged` —
+/// global tags are resolved or ignored at parse. Python's strict loader
+/// mirrors that split and rejects local tags with this same message.
+pub const YAML_LOCAL_TAG_MESSAGE: &str = "YAML local tags are not supported in clankerprof inputs.";
+pub const YAML_MERGE_KEY_MESSAGE: &str = "YAML merge keys are not supported in clankerprof inputs.";
+
+/// Walk a parsed YAML tree and reject any non-string mapping key or
+/// local-tagged value.
+pub fn require_string_keys(value: &Value) -> Result<(), String> {
+    match value {
+        Value::Mapping(mapping) => {
+            for (key, item) in mapping {
+                if !key.is_string() {
+                    return Err(YAML_KEY_MESSAGE.to_string());
+                }
+                if key.as_str() == Some("<<") {
+                    // serde_yaml never applies merges, so `<<` arrives as an
+                    // ordinary key that would silently become metadata while
+                    // PyYAML would have expanded it. Post-parse the quoted
+                    // "<<" spelling is indistinguishable from a merge key;
+                    // both fail closed in both engines.
+                    return Err(YAML_MERGE_KEY_MESSAGE.to_string());
+                }
+                require_string_keys(item)?;
+            }
+            Ok(())
+        }
+        Value::Sequence(items) => {
+            for item in items {
+                require_string_keys(item)?;
+            }
+            Ok(())
+        }
+        Value::Tagged(_) => Err(YAML_LOCAL_TAG_MESSAGE.to_string()),
+        _ => Ok(()),
+    }
 }
 
 pub fn load_runtime_rules_str(
@@ -402,6 +482,7 @@ pub fn load_runtime_rules_str(
     verbose: bool,
 ) -> Result<RuntimeRuleSet, String> {
     let value: Value = serde_yaml::from_str(payload).map_err(|error| error.to_string())?;
+    require_string_keys(&value)?;
     let Value::Mapping(mapping) = value else {
         return Err(format!("Runtime rule pack {name} must be a YAML object."));
     };
@@ -426,14 +507,106 @@ pub fn ruby_rules(core_classes: BTreeSet<String>, verbose: bool) -> Result<Runti
     load_runtime_rules_str(RUBY_PACK_YAML, "ruby", core_classes, verbose)
 }
 
+/// First CSV field of each record with Python `csv.reader` default-dialect
+/// semantics, scanning the whole payload so quoted fields may span record
+/// separators (line splitting tore multiline quoted fields apart). Pinned
+/// empirically against csv.reader: a quote is special only at the exact
+/// start of a field; `""` inside a quoted field unescapes; after a closing
+/// quote another `"` re-enters the quoted field as a literal quote while
+/// any other character appends and continues unquoted (non-strict); an
+/// unterminated quote runs to end of input; the `#` comment check applies
+/// after unquoting and trimming.
 fn core_classes_from_csv(payload: &str) -> BTreeSet<String> {
-    payload
-        .lines()
-        .filter_map(|line| line.split(',').next())
-        .map(str::trim)
-        .filter(|value| !value.is_empty() && !value.starts_with('#'))
-        .map(ToString::to_string)
-        .collect()
+    enum State {
+        StartField,
+        InField,
+        InQuoted,
+        QuoteInQuoted,
+    }
+    let mut values = BTreeSet::new();
+    let mut chars = payload.chars().peekable();
+    while chars.peek().is_some() {
+        let mut first_field = String::new();
+        let mut in_first_field = true;
+        let mut state = State::StartField;
+        while let Some(ch) = chars.next() {
+            let record_break = match state {
+                State::StartField => match ch {
+                    '"' => {
+                        state = State::InQuoted;
+                        false
+                    }
+                    ',' => {
+                        in_first_field = false;
+                        false
+                    }
+                    '\n' | '\r' => true,
+                    other => {
+                        if in_first_field {
+                            first_field.push(other);
+                        }
+                        state = State::InField;
+                        false
+                    }
+                },
+                State::InField => match ch {
+                    ',' => {
+                        in_first_field = false;
+                        state = State::StartField;
+                        false
+                    }
+                    '\n' | '\r' => true,
+                    other => {
+                        if in_first_field {
+                            first_field.push(other);
+                        }
+                        false
+                    }
+                },
+                State::InQuoted => {
+                    if ch == '"' {
+                        state = State::QuoteInQuoted;
+                    } else if in_first_field {
+                        first_field.push(ch);
+                    }
+                    false
+                }
+                State::QuoteInQuoted => match ch {
+                    '"' => {
+                        if in_first_field {
+                            first_field.push('"');
+                        }
+                        state = State::InQuoted;
+                        false
+                    }
+                    ',' => {
+                        in_first_field = false;
+                        state = State::StartField;
+                        false
+                    }
+                    '\n' | '\r' => true,
+                    other => {
+                        if in_first_field {
+                            first_field.push(other);
+                        }
+                        state = State::InField;
+                        false
+                    }
+                },
+            };
+            if record_break {
+                if ch == '\r' && chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                break;
+            }
+        }
+        let value = first_field.trim().to_string();
+        if !value.is_empty() && !value.starts_with('#') {
+            values.insert(value);
+        }
+    }
+    values
 }
 
 pub fn load_default_ruby_core_classes() -> BTreeSet<String> {
@@ -448,6 +621,44 @@ pub fn load_ruby_core_classes(path: impl AsRef<Path>) -> Result<BTreeSet<String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn core_classes_csv_first_field_matches_python_csv_reader() {
+        // Quoted fields unwrap, doubled quotes unescape, quoted commas stay
+        // inside the field, unquoted lines split at the first comma, and
+        // the '#' comment check applies after unquoting+trim.
+        let parsed = core_classes_from_csv(
+            "\"Array\"\nHash,ignored\n\"Set\",ignored\n\"Em\"\"bed\"\n\"Com,ma\"\n\n\"#quoted-comment\"\n#comment\n",
+        );
+        let expected: BTreeSet<String> = ["Array", "Hash", "Set", "Em\"bed", "Com,ma"]
+            .into_iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(parsed, expected);
+    }
+
+    #[test]
+    fn core_classes_csv_record_scanning_matches_python_csv_reader() {
+        // Every expectation below is pinned against CPython csv.reader
+        // (default dialect, file opened newline=""), the documented contract.
+        // Quoted fields span newlines; quotes are special only at exact
+        // field start; after a closing quote a bare char continues the
+        // field unquoted while another quote re-enters the quoted state.
+        let cases: [(&str, &[&str]); 7] = [
+            ("\"Weird\nClass\"\n", &["Weird\nClass"]),
+            ("\"A\r\nB\"\r\nPlain\r\n", &["A\r\nB", "Plain"]),
+            ("\"a\"b,c\n", &["ab"]),
+            ("a\"b\"c,d\n", &["a\"b\"c"]),
+            ("\"a\"\",c\n", &["a\",c"]),
+            ("\"unterminated", &["unterminated"]),
+            ("x,\"quoted\nsecond\"\ny\n", &["x", "y"]),
+        ];
+        for (payload, expected) in cases {
+            let parsed = core_classes_from_csv(payload);
+            let expected: BTreeSet<String> = expected.iter().map(ToString::to_string).collect();
+            assert_eq!(parsed, expected, "payload {payload:?}");
+        }
+    }
 
     #[test]
     fn packaged_generic_pack_parses_with_expected_fields() {

@@ -229,7 +229,9 @@ clankerprof targets \
   --output tmp/target-summary.csv
 ```
 
-`simple-csv` writes one CSV row per category. The same rows are wrapped below
+`simple-csv` writes one CSV row per category (categories other than `Other`
+whose share magnitude is below 0.1% are omitted as noise; negative shares of
+any magnitude are rendered). The same rows are wrapped below
 as a table so the signal is visible in a README:
 
 | Parent | Category | CPU % | p90 ms est. | Main app callsites | Low-level work |

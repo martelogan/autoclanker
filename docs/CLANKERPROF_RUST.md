@@ -45,6 +45,11 @@ cargo run -p clankerprof-core --bin clankerprof-rs -- \
   --slices slices.yml --scopes-config scopes.toml --include-facts
 ```
 
+Each report section applies the same validation as the standalone
+subcommand it composes: an empty target config errors exactly like
+`targets` (`--config or --target is required.`), and option grammars
+(`--top`) are validated unconditionally, before any section renders.
+
 Slice comparison:
 
 ```bash
@@ -58,12 +63,17 @@ The Python test suite includes `tests/test_clankerprof_rust_parity.py`, which
 generates public synthetic pprof fixtures and compares Rust output against
 Python `clankerprof` output. The fixture matrix covers raw and gzipped
 profiles, inline frames, folded locations, sparse pprof function IDs, generic
-target attribution, generic slice attribution, and slice comparison.
+target attribution, generic slice attribution, scope decomposition, slice and
+boundary comparison, facts export/replay, and the report/compare flag matrix.
 
-Python `clankerprof scopes` is currently the reference implementation for
-scope/cost-kind/rollup/owner decomposition. The Rust core should not claim that
-projection until it has equivalent fixture parity for cached predicates,
-residual exclusions, owner cost-kind rows, and fact replay.
+Python `clankerprof scopes` remains the reference implementation for
+scope/cost-kind/rollup/owner decomposition. The Rust core has byte-level
+fixture parity for that projection — including cached predicates, residual
+exclusions, owner cost-kind rows, and fact replay — pinned by
+`test_clankerprof_rust_scopes_match_python_boundary_decomposition`,
+`test_clankerprof_rust_scopes_legacy_aliases_and_boundaries_subcommand`, and
+`test_clankerprof_rust_scopes_replay_facts_identically` (see
+`docs/CLANKERPROF_PARITY.md` for the full capability matrix).
 
 Cargo-specific validation:
 
@@ -91,5 +101,6 @@ CLANKERPROF_REAL_PROFILE_PARITY=1 \
 The helper writes only temporary outputs. It reports Python-side `facts`,
 `targets`, `boundaries`, and `slices` when caller-provided expected artifacts
 match. It reports `rust_facts`, `rust_targets`, and compatible `rust_slices`
-when those Rust parity checks pass. Rust scope decomposition is not claimed
-until the Rust core has equivalent fixture coverage.
+when those Rust parity checks pass. The helper does not yet run a Rust scopes
+leg against local goldens; Rust scope decomposition parity is covered at the
+fixture level by the synthetic parity suite (`docs/CLANKERPROF_PARITY.md`).

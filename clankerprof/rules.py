@@ -8,7 +8,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Final, cast
 
-import yaml
+from clankerprof.jsonio import parse_strict_yaml
 
 RUNTIME_RULES_SCHEMA_VERSION: Final = "clankerprof.runtime_rules.v1"
 
@@ -132,13 +132,25 @@ class RuntimeRuleSet:
     internals_category: str = "Runtime Internals"
 
 
+def _require_rule_str(value: object, key: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"Runtime rule field {key} must be a string.")
+    return value
+
+
+def _require_entry_str(value: object, key: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"Runtime rule field {key} entries must be strings.")
+    return value
+
+
 def _string_tuple(payload: Mapping[str, object], key: str) -> tuple[str, ...]:
     value = payload.get(key, [])
     if value is None:
         return ()
     if not isinstance(value, list):
         raise ValueError(f"Runtime rule field {key} must be an array.")
-    return tuple(str(item) for item in cast(list[object], value))
+    return tuple(_require_entry_str(item, key) for item in cast(list[object], value))
 
 
 def _string_map(payload: Mapping[str, object], key: str) -> dict[str, str]:
@@ -148,7 +160,7 @@ def _string_map(payload: Mapping[str, object], key: str) -> dict[str, str]:
     if not isinstance(value, dict):
         raise ValueError(f"Runtime rule field {key} must be an object.")
     return {
-        str(raw_key): str(raw_value)
+        str(raw_key): _require_entry_str(raw_value, key)
         for raw_key, raw_value in cast(dict[object, object], value).items()
     }
 
@@ -170,7 +182,8 @@ def _string_tuple_map(
         if not isinstance(raw_patterns, list):
             raise ValueError(f"Runtime rule field {key}.{raw_key} must be an array.")
         result[str(raw_key)] = tuple(
-            str(item) for item in cast(list[object], raw_patterns)
+            _require_entry_str(item, f"{key}.{raw_key}")
+            for item in cast(list[object], raw_patterns)
         )
     return result
 
@@ -207,17 +220,27 @@ def _load_match_rules(
             raise ValueError(f"Unknown {key} entry keys: {', '.join(unknown_keys)}.")
         if "category" not in raw_item:
             raise ValueError(f"Each {key} entry must include category.")
+        name_patterns = _string_tuple(raw_item, "name_patterns")
+        for pattern in name_patterns:
+            # Eager validation at load, matching the Rust port: a bad pattern
+            # fails when the pack is read, not when a frame first reaches it.
+            try:
+                re.compile(pattern.removeprefix("regex:"))
+            except re.error as exc:
+                raise ValueError(
+                    f"Invalid runtime rule name pattern '{pattern}'."
+                ) from exc
         rules.append(
             RuntimeMatchRule(
-                category=str(raw_item["category"]),
+                category=_require_rule_str(raw_item["category"], "category"),
                 native_category=(
-                    str(raw_item["native_category"])
+                    _require_rule_str(raw_item["native_category"], "native_category")
                     if raw_item.get("native_category") is not None
                     else None
                 ),
                 name_contains=_string_tuple(raw_item, "name_contains"),
                 name_prefixes=_string_tuple(raw_item, "name_prefixes"),
-                name_patterns=_string_tuple(raw_item, "name_patterns"),
+                name_patterns=name_patterns,
                 except_paths=frozenset(_string_tuple(raw_item, "except_paths")),
             )
         )
@@ -234,7 +257,9 @@ def runtime_rules_from_mapping(
     unknown_keys = sorted(set(payload) - _KNOWN_RULE_PACK_KEYS)
     if unknown_keys:
         raise ValueError(f"Unknown runtime rule pack keys: {', '.join(unknown_keys)}.")
-    schema_version = payload.get("schema_version", RUNTIME_RULES_SCHEMA_VERSION)
+    schema_version = _require_rule_str(
+        payload.get("schema_version", RUNTIME_RULES_SCHEMA_VERSION), "schema_version"
+    )
     if schema_version != RUNTIME_RULES_SCHEMA_VERSION:
         raise ValueError(
             "Unsupported runtime rules schema version: "
@@ -246,7 +271,7 @@ def runtime_rules_from_mapping(
         "legacy_caller_fallback_name_prefixes",
     )
     return RuntimeRuleSet(
-        name=str(payload.get("name", name)),
+        name=_require_rule_str(payload.get("name", name), "name"),
         core_classes=frozenset(core_classes),
         verbose=verbose,
         enabled=True,
@@ -292,11 +317,17 @@ def runtime_rules_from_mapping(
         core_semantic_categories=_string_map(payload, "core_semantic_categories"),
         core_stdlib_categories=_string_map(payload, "core_stdlib_categories"),
         core_internal_categories=_string_map(payload, "core_internal_categories"),
-        core_native_default_category=str(
-            payload.get("core_native_default_category", "Runtime Core (Native)")
+        core_native_default_category=_require_rule_str(
+            payload.get("core_native_default_category", "Runtime Core (Native)"),
+            "core_native_default_category",
         ),
-        stdlib_category=str(payload.get("stdlib_category", "Runtime Stdlib")),
-        internals_category=str(payload.get("internals_category", "Runtime Internals")),
+        stdlib_category=_require_rule_str(
+            payload.get("stdlib_category", "Runtime Stdlib"), "stdlib_category"
+        ),
+        internals_category=_require_rule_str(
+            payload.get("internals_category", "Runtime Internals"),
+            "internals_category",
+        ),
     )
 
 
@@ -307,7 +338,7 @@ def load_runtime_rules(
     verbose: bool = False,
 ) -> RuntimeRuleSet:
     resource = resources.files("clankerprof.runtime_rules").joinpath(f"{name}.yml")
-    payload = yaml.safe_load(resource.read_text(encoding="utf-8"))
+    payload = parse_strict_yaml(resource.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"Runtime rule pack {name} must be a YAML object.")
     return runtime_rules_from_mapping(
@@ -325,7 +356,7 @@ def load_runtime_rules_file(
     verbose: bool = False,
 ) -> RuntimeRuleSet:
     rules_path = Path(path)
-    payload = yaml.safe_load(rules_path.read_text(encoding="utf-8"))
+    payload = parse_strict_yaml(rules_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"Runtime rule file {rules_path} must be a YAML object.")
     return runtime_rules_from_mapping(

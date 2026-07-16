@@ -1,18 +1,47 @@
 use crate::categorize::{categorize_stack, RuntimeCategoryCache};
 use crate::facts::{sample_facts_to_json_value, SAMPLE_FACTS_SCHEMA_VERSION};
 use crate::model::{CategoryStats, Frame, FunctionMetrics, ProfileFacts, TimeNs};
+use fancy_regex::Regex;
 use indexmap::IndexMap;
-use regex::Regex;
 use serde_json::value::RawValue;
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::sync::{Mutex, OnceLock};
+use std::cell::RefCell;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::{Arc, Mutex, OnceLock};
 
-// Category precedence is first-match-wins in config order, and ranked arrays
-// break ties by first-seen order, matching the Python reference; both need
-// insertion-ordered maps, never BTreeMap.
+// Category precedence is first-match-wins in config order, ranked arrays
+// break ties by first-seen order, and parents emit in first-seen encounter
+// order across every row format, matching the Python reference; all of them
+// need insertion-ordered maps, never BTreeMap.
 pub type TargetConfig = IndexMap<String, IndexMap<String, String>>;
-pub type TargetResults = BTreeMap<String, IndexMap<String, CategoryStats>>;
+pub type TargetResults = IndexMap<String, IndexMap<String, CategoryStats>>;
+
+thread_local! {
+    // Python raises on the first invalid user pattern it evaluates; the hot
+    // matchers here return plain bools through the categorization engine, so
+    // instead of threading Results through every closure the first pattern
+    // error is parked in this slot and the CLI fails closed (exit 2) before
+    // emitting or writing any artifact. Lazy like Python: a pattern that no
+    // frame ever reaches raises in neither implementation.
+    static PATTERN_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn record_pattern_error(message: String) {
+    PATTERN_ERROR.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(message);
+        }
+    });
+}
+
+/// Fail closed on any user-pattern error recorded during analysis/rendering.
+/// Must be checked before emitting or writing any artifact.
+pub fn take_pattern_error() -> Result<(), String> {
+    PATTERN_ERROR
+        .with(|slot| slot.borrow_mut().take())
+        .map_or(Ok(()), Err)
+}
 
 pub use crate::rules::{LibraryPattern, RuntimeRuleSet};
 
@@ -55,6 +84,10 @@ enum PatternMode {
 }
 
 pub fn parse_target_config_json(payload: &str) -> Result<TargetConfig, String> {
+    // The order-preserving RawValue/IndexMap parse below is last-wins on
+    // duplicate member names; screen those out first (syntax errors keep the
+    // established messages of the parse below).
+    crate::jsonio::ensure_no_duplicate_keys(payload)?;
     let parents: IndexMap<String, Box<RawValue>> = serde_json::from_str(payload)
         .map_err(|_| "Target config must be a JSON object.".to_string())?;
     let mut result = TargetConfig::new();
@@ -127,10 +160,12 @@ pub fn analyze_target_facts_with_options(
             stats.sample_count += 1;
             stats.add_function(&leaf.name, value);
             stats.files.insert(frame_to_categorize.filename.clone());
+            // Scan to the root: the first eligible application caller wins
+            // at any depth (an arbitrary nine-frame window silently fell
+            // back to the first native frame under deep native runs).
             let caller = stack
                 .iter()
                 .skip(1)
-                .take(9)
                 .find(|frame| {
                     !frame.filename.starts_with('<')
                         && !is_runtime_stdlib_path(&frame.filename, &options.runtime_rules)
@@ -165,7 +200,7 @@ pub fn render_target_json(results: &TargetResults) -> Value {
                         "folded_from": stats.folded_from,
                         "leaf_functions": render_function_metrics(&stats.functions),
                         "name": category,
-                        "pct": if total == 0 { 0.0 } else { stats.cpu_time as f64 / total as f64 * 100.0 },
+                        "pct": if total == 0 { json!(0) } else { json!(stats.cpu_time as f64 / total as f64 * 100.0) },
                         "samples": stats.sample_count,
                         "semantic_callers": stats.semantic_callers.iter().map(|(leaf, metrics)| {
                             (leaf.clone(), json!({
@@ -228,15 +263,25 @@ pub fn match_category_pattern(pattern: &str, path: &str, rules: &RuntimeRuleSet)
         PatternMode::Library => {
             match_library_selector(&resolved_pattern, path, rules, selector.as_deref())
         }
-        PatternMode::Auto => {
-            if match_regex(&resolved_pattern, path) {
-                return true;
+        PatternMode::Auto => match try_match_regex(&resolved_pattern, path) {
+            // Mirrors Python match_category_pattern: a valid-regex match wins;
+            // no-match falls through to path matching for path-like patterns;
+            // an invalid regex falls back to path matching iff it looks like a
+            // path, otherwise the projection fails closed.
+            Ok(true) => true,
+            Ok(false) => {
+                looks_like_path_pattern(&resolved_pattern)
+                    && match_path_pattern(&resolved_pattern, path, rules)
             }
-            if looks_like_path_pattern(&resolved_pattern) {
-                return match_path_pattern(&resolved_pattern, path, rules);
+            Err(error) => {
+                if looks_like_path_pattern(&resolved_pattern) {
+                    match_path_pattern(&resolved_pattern, path, rules)
+                } else {
+                    record_pattern_error(error);
+                    false
+                }
             }
-            false
-        }
+        },
     }
 }
 
@@ -298,8 +343,25 @@ pub fn extract_library_path(
     for pattern in patterns {
         match pattern {
             LibraryPattern::Regex(pattern) => {
-                let regex = compiled_regex(pattern)?;
-                let Some(captures) = regex.captures(&normalized) else {
+                let regex = match raw_compiled_regex(pattern) {
+                    Ok(regex) => regex,
+                    Err(detail) => {
+                        record_pattern_error(format!(
+                            "Invalid library regex pattern '{pattern}': {detail}"
+                        ));
+                        return None;
+                    }
+                };
+                let captures = match regex.captures(&normalized) {
+                    Ok(captures) => captures,
+                    Err(detail) => {
+                        record_pattern_error(format!(
+                            "Invalid library regex pattern '{pattern}': {detail}"
+                        ));
+                        return None;
+                    }
+                };
+                let Some(captures) = captures else {
                     continue;
                 };
                 let whole_match = captures.get(0)?;
@@ -380,17 +442,249 @@ fn normalize_profile_path(path: &str) -> String {
 /// Memoized regex compilation: rule-pack and config patterns are evaluated
 /// once per unique frame path across hot per-frame loops, so compiling on
 /// every call dominated runtime. Patterns come from configs, so the cache is
-/// small and bounded per process.
-pub(crate) fn compiled_regex(pattern: &str) -> Option<Regex> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Option<Regex>>>> = OnceLock::new();
+/// small and bounded per process. fancy-regex is used because the documented
+/// pattern language is Python's (lookaround included); the Err arm carries
+/// the engine's own detail so callers can build their contract messages.
+pub(crate) fn raw_compiled_regex(pattern: &str) -> Result<Arc<Regex>, String> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Result<Arc<Regex>, String>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let mut guard = cache.lock().expect("regex cache poisoned");
     if let Some(entry) = guard.get(pattern) {
         return entry.clone();
     }
-    let compiled = Regex::new(pattern).ok();
+    let compiled = match Regex::new(pattern) {
+        Ok(regex) => Ok(Arc::new(regex)),
+        Err(error) => {
+            // Python allows numeric backreferences to named groups; fancy-regex
+            // demands named backrefs whenever any named group exists. Retry
+            // with `\N` rewritten to `\k<name>` for named group N so those
+            // Python-dialect patterns compile; the original error is kept when
+            // the rewrite does not apply or still fails.
+            let retried = if error
+                .to_string()
+                .contains("Numbered backref/call not allowed")
+            {
+                rewrite_numeric_backrefs_to_named(pattern)
+                    .and_then(|rewritten| Regex::new(&rewritten).ok())
+            } else {
+                None
+            };
+            match retried {
+                Some(regex) => Ok(Arc::new(regex)),
+                None => Err(error.to_string()),
+            }
+        }
+    };
     guard.insert(pattern.to_string(), compiled.clone());
     compiled
+}
+
+/// Rewrite `\N` backreferences that target a NAMED capture group into
+/// `\k<name>`, tracking capture-group numbering the way Python does (named
+/// and unnamed groups share one numbering; `(?:`/lookaround/`(?P=` do not
+/// count). Returns None when no rewrite applies. Character classes are left
+/// untouched (`\1` inside a class is an octal escape, not a backref).
+/// Under a leading `(?x)`-style global flag group, `#` line comments never
+/// count toward numbering and are never rewritten; scoped `(?x:...)` /
+/// `(?-x:...)` groups and mid-pattern global `x` flags bail out (None) so
+/// the engine's own error stands rather than risking miscounted groups.
+fn rewrite_numeric_backrefs_to_named(pattern: &str) -> Option<String> {
+    let mut names: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
+    let chars: Vec<char> = pattern.chars().collect();
+    let (leading_flags_end, x_mode) = leading_global_flags(&chars);
+    let mut group = 0usize;
+    let mut in_class = false;
+    let mut i = 0usize;
+    while i < chars.len() {
+        match chars[i] {
+            '\\' => {
+                i += 2;
+                continue;
+            }
+            '#' if x_mode && !in_class => {
+                // (?x) line comment: runs to the end of the line or pattern;
+                // its contents never count toward group numbering.
+                while i < chars.len() && chars[i] != '\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            '[' if !in_class => in_class = true,
+            ']' if in_class => in_class = false,
+            '(' if !in_class => {
+                if chars.get(i + 1) == Some(&'?') && chars.get(i + 2) == Some(&'#') {
+                    // CPython comment group: ends at the first ')' with no
+                    // escape processing; its contents never count as groups.
+                    let Some(close) = skip_regex_comment(&chars, i) else {
+                        return None;
+                    };
+                    i = close + 1;
+                    continue;
+                }
+                if chars.get(i + 1) == Some(&'?') {
+                    if chars.get(i + 2) == Some(&'P') && chars.get(i + 3) == Some(&'<') {
+                        group += 1;
+                        let mut name = String::new();
+                        let mut j = i + 4;
+                        while j < chars.len() && chars[j] != '>' {
+                            name.push(chars[j]);
+                            j += 1;
+                        }
+                        if j >= chars.len() {
+                            return None;
+                        }
+                        names.insert(group, name);
+                    } else if regex_flag_group_enables_x(&chars, i) && i >= leading_flags_end {
+                        // A scoped `(?x:...)`/`(?-x:...)` group or a
+                        // mid-pattern global `x` flag changes comment
+                        // semantics partway through; numbering under partial
+                        // x-mode is not worth modeling — fail closed to the
+                        // engine's own error.
+                        return None;
+                    }
+                } else {
+                    group += 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if names.is_empty() {
+        return None;
+    }
+    let mut out = String::with_capacity(pattern.len());
+    let mut changed = false;
+    let mut in_class = false;
+    let mut i = 0usize;
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch == '#' && x_mode && !in_class {
+            // Copy (?x) line comments verbatim so a literal \N inside a
+            // comment is never rewritten (numbering already skipped them).
+            while i < chars.len() && chars[i] != '\n' {
+                out.push(chars[i]);
+                i += 1;
+            }
+            continue;
+        }
+        if ch == '\\' && !in_class && i + 1 < chars.len() {
+            let next = chars[i + 1];
+            if next.is_ascii_digit() && next != '0' {
+                let mut j = i + 1;
+                let mut digits = String::new();
+                while j < chars.len() && chars[j].is_ascii_digit() {
+                    digits.push(chars[j]);
+                    j += 1;
+                }
+                if let Some(name) = digits.parse::<usize>().ok().and_then(|n| names.get(&n)) {
+                    out.push_str("\\k<");
+                    out.push_str(name);
+                    out.push('>');
+                    changed = true;
+                } else {
+                    out.push('\\');
+                    out.push_str(&digits);
+                }
+                i = j;
+                continue;
+            }
+            out.push(ch);
+            out.push(next);
+            i += 2;
+            continue;
+        }
+        if ch == '('
+            && !in_class
+            && chars.get(i + 1) == Some(&'?')
+            && chars.get(i + 2) == Some(&'#')
+        {
+            // Copy comment groups verbatim so a literal \N inside a comment
+            // is never rewritten (group counting already skipped them).
+            let Some(close) = skip_regex_comment(&chars, i) else {
+                return None;
+            };
+            out.extend(&chars[i..=close]);
+            i = close + 1;
+            continue;
+        }
+        if ch == '[' && !in_class {
+            in_class = true;
+        } else if ch == ']' && in_class {
+            in_class = false;
+        }
+        out.push(ch);
+        i += 1;
+    }
+    changed.then_some(out)
+}
+
+/// Scan the leading run of global inline-flag groups (`(?aiLmsux)` — flag
+/// letters then `)`, no `:`) the way CPython requires global flags at the
+/// pattern start. Returns (index just past the run, whether `x` was set).
+fn leading_global_flags(chars: &[char]) -> (usize, bool) {
+    let mut i = 0usize;
+    let mut has_x = false;
+    while chars.get(i) == Some(&'(') && chars.get(i + 1) == Some(&'?') {
+        let mut j = i + 2;
+        let mut saw_flag = false;
+        let mut group_x = false;
+        while let Some(&c) = chars.get(j) {
+            if "aiLmsux".contains(c) {
+                saw_flag = true;
+                group_x |= c == 'x';
+                j += 1;
+            } else {
+                break;
+            }
+        }
+        if !saw_flag || chars.get(j) != Some(&')') {
+            break;
+        }
+        has_x |= group_x;
+        i = j + 1;
+    }
+    (i, has_x)
+}
+
+/// True when the `(?...` group starting at `start` is an inline-flag group
+/// (global `(?...x...)` or scoped `(?...x...:` / `(?...-...x...:`) whose
+/// flags mention `x` on either side of a `-`.
+fn regex_flag_group_enables_x(chars: &[char], start: usize) -> bool {
+    let mut j = start + 2;
+    let mut saw_x = false;
+    let mut saw_flag_or_dash = false;
+    while let Some(&c) = chars.get(j) {
+        if "aiLmsux".contains(c) || c == '-' {
+            saw_flag_or_dash = true;
+            saw_x |= c == 'x';
+            j += 1;
+        } else {
+            break;
+        }
+    }
+    saw_flag_or_dash && saw_x && matches!(chars.get(j), Some(&')') | Some(&':'))
+}
+
+/// Index of the `)` closing a CPython `(?#...)` comment starting at `start`,
+/// or None when unterminated (the pattern is malformed; the caller lets the
+/// engine's own error stand).
+fn skip_regex_comment(chars: &[char], start: usize) -> Option<usize> {
+    let mut j = start + 3;
+    while j < chars.len() {
+        if chars[j] == ')' {
+            return Some(j);
+        }
+        j += 1;
+    }
+    None
+}
+
+/// Non-recording compile with the shared contract message; auto-mode needs
+/// the error value to decide between path fallback and failing closed.
+pub(crate) fn try_compiled_regex(pattern: &str) -> Result<Arc<Regex>, String> {
+    raw_compiled_regex(pattern)
+        .map_err(|detail| format!("Invalid regex pattern '{pattern}': {detail}"))
 }
 
 fn has_glob_token(pattern: &str) -> bool {
@@ -404,24 +698,75 @@ fn looks_like_path_pattern(pattern: &str) -> bool {
         || pattern.starts_with("../")
 }
 
+/// Regex match that fails closed: compile or match errors are recorded in the
+/// pattern-error slot (first error wins) and count as no-match so the caller
+/// keeps its bool shape; the CLI turns the slot into an exit-2 envelope.
 pub(crate) fn match_regex(pattern: &str, path: &str) -> bool {
-    compiled_regex(pattern)
-        .map(|regex| regex.is_match(&normalize_profile_path(path)))
-        .unwrap_or(false)
+    match try_match_regex(pattern, path) {
+        Ok(matched) => matched,
+        Err(error) => {
+            record_pattern_error(error);
+            false
+        }
+    }
+}
+
+/// Non-recording variant for auto-mode, which mirrors Python's behavior of
+/// falling back to path matching when an invalid pattern looks like a path.
+pub(crate) fn try_match_regex(pattern: &str, path: &str) -> Result<bool, String> {
+    let regex = try_compiled_regex(pattern)?;
+    regex
+        .is_match(&normalize_profile_path(path))
+        .map_err(|detail| format!("Invalid regex pattern '{pattern}': {detail}"))
 }
 
 fn glob_matches(pattern: &str, path: &str) -> bool {
-    let regex = glob_to_regex(pattern);
-    match_regex(&regex, path)
+    // Glob-derived regexes are internally generated and always compile; a
+    // None translation is fnmatch's never-matching class.
+    glob_to_regex(pattern)
+        .map(|regex| match_regex(&regex, path))
+        .unwrap_or(false)
 }
 
-fn glob_to_regex(pattern: &str) -> String {
-    let mut output = String::from("^");
-    for character in pattern.chars() {
+/// Translate a glob into a regex with CPython `fnmatch.translate` semantics —
+/// the Python reference routes glob patterns through `fnmatch`, so bracket
+/// classes (`[ab]`, `[!ab]`, ranges, a literal `]` in first position, an
+/// unterminated `[` treated as a literal) must all behave identically here.
+/// Returns `None` for patterns fnmatch translates to a never-matching class
+/// (an empty range like `[z-a]`), since the regex crate has no `(?!)`.
+fn glob_to_regex(pattern: &str) -> Option<String> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let n = chars.len();
+    // (?s) mirrors fnmatch's re.DOTALL wrapper so `*`/`?` cross newlines.
+    let mut output = String::from("(?s)^");
+    let mut i = 0;
+    while i < n {
+        let character = chars[i];
+        i += 1;
         match character {
             '*' => output.push_str(".*"),
             '?' => output.push('.'),
-            '.' | '+' | '(' | ')' | '|' | '^' | '$' | '{' | '}' | '[' | ']' | '\\' => {
+            '[' => {
+                let mut j = i;
+                if j < n && chars[j] == '!' {
+                    j += 1;
+                }
+                if j < n && chars[j] == ']' {
+                    j += 1;
+                }
+                while j < n && chars[j] != ']' {
+                    j += 1;
+                }
+                if j >= n {
+                    // Unterminated class stays a literal '[' (fnmatch parity).
+                    output.push_str("\\[");
+                } else {
+                    let stuff: Vec<char> = chars[i..j].to_vec();
+                    i = j + 1;
+                    output.push_str(&translate_glob_class(&stuff)?);
+                }
+            }
+            '.' | '+' | '(' | ')' | '|' | '^' | '$' | '{' | '}' | ']' | '\\' => {
                 output.push('\\');
                 output.push(character);
             }
@@ -429,18 +774,110 @@ fn glob_to_regex(pattern: &str) -> String {
         }
     }
     output.push('$');
-    output
+    Some(output)
+}
+
+/// Bracket-class body translation ported from CPython fnmatch.translate,
+/// emitting escapes the regex crate accepts (it rejects Python's bare `]`
+/// first-position literal and treats bare `[` as nested-class syntax).
+/// Returns `None` when range normalization empties the class (never match).
+fn translate_glob_class(stuff: &[char]) -> Option<String> {
+    let raw: String = stuff.iter().collect();
+    let chunks: Vec<String> = if !raw.contains('-') {
+        vec![raw.clone()]
+    } else {
+        // Split on range-forming hyphens exactly the way CPython does, then
+        // merge away inverted (empty) ranges like `z-a`.
+        let mut chunks: Vec<String> = Vec::new();
+        let mut start = 0usize;
+        let mut k = if stuff.first() == Some(&'!') { 2 } else { 1 };
+        loop {
+            let Some(offset) = stuff[k.min(stuff.len())..]
+                .iter()
+                .position(|&item| item == '-')
+                .map(|position| position + k.min(stuff.len()))
+            else {
+                break;
+            };
+            chunks.push(stuff[start..offset].iter().collect());
+            start = offset + 1;
+            k = offset + 3;
+        }
+        let tail: String = stuff[start..].iter().collect();
+        if tail.is_empty() {
+            let last = chunks.last_mut()?;
+            last.push('-');
+        } else {
+            chunks.push(tail);
+        }
+        let mut index = chunks.len().saturating_sub(1);
+        while index > 0 {
+            let left_last = chunks[index - 1].chars().last();
+            let right_first = chunks[index].chars().next();
+            if let (Some(left), Some(right)) = (left_last, right_first) {
+                if left > right {
+                    let merged: String = chunks[index - 1]
+                        .chars()
+                        .take(chunks[index - 1].chars().count() - 1)
+                        .chain(chunks[index].chars().skip(1))
+                        .collect();
+                    chunks[index - 1] = merged;
+                    chunks.remove(index);
+                }
+            }
+            index -= 1;
+        }
+        chunks
+    };
+    let escaped: Vec<String> = chunks
+        .iter()
+        .map(|chunk| {
+            let mut item = String::new();
+            for character in chunk.chars() {
+                // '\\' and '-' per CPython; '[', ']', '&', '~', '|' because
+                // the regex crate gives them class-level meaning Python
+                // doesn't (nested classes and set operations).
+                if matches!(character, '\\' | '-' | '[' | ']' | '&' | '~' | '|') {
+                    item.push('\\');
+                }
+                item.push(character);
+            }
+            item
+        })
+        .collect();
+    let mut body = escaped.join("-");
+    if body.is_empty() {
+        // CPython emits the never-matching (?!) here; signal it upward.
+        return None;
+    }
+    if body == "!" {
+        return Some(".".to_string());
+    }
+    if let Some(rest) = body.strip_prefix('!') {
+        body = format!("^{rest}");
+    } else if body.starts_with('^') {
+        body = format!("\\{body}");
+    }
+    Some(format!("[{body}]"))
 }
 
 fn normalize_library_component(component: &str, rules: &RuntimeRuleSet) -> String {
     let normalized = component.trim_matches('/');
     for pattern in &rules.library_name_suffix_patterns {
-        let Some(regex) = compiled_regex(pattern) else {
-            continue;
+        let regex = match try_compiled_regex(pattern) {
+            Ok(regex) => regex,
+            Err(error) => {
+                record_pattern_error(error);
+                continue;
+            }
         };
-        if let Some(found) = regex.find(normalized) {
-            if found.start() > 0 {
+        match regex.find(normalized) {
+            Ok(Some(found)) if found.start() > 0 => {
                 return normalized[..found.start()].to_string();
+            }
+            Ok(_) => {}
+            Err(detail) => {
+                record_pattern_error(format!("Invalid regex pattern '{pattern}': {detail}"));
             }
         }
     }
@@ -454,4 +891,169 @@ pub fn is_runtime_stdlib_path(path: &str, rules: &RuntimeRuleSet) -> bool {
             .stdlib_path_markers
             .iter()
             .any(|marker| path.contains(marker))
+}
+
+#[cfg(test)]
+mod backref_tests {
+    use super::{rewrite_numeric_backrefs_to_named, try_match_regex};
+
+    #[test]
+    fn numeric_backrefs_to_named_groups_compile_and_match() {
+        // Python allows `(?P<x>…)\1`; fancy-regex requires `\k<x>` once any
+        // named group exists. The compile path rewrites and retries.
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named(r"(?P<x>/app)\1").as_deref(),
+            Some(r"(?P<x>/app)\k<x>")
+        );
+        // Numbering counts unnamed groups too; classes and escapes are inert.
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named(r"(a)(?P<x>b)[\1]\\\1\2").as_deref(),
+            Some(r"(a)(?P<x>b)[\1]\\\1\k<x>")
+        );
+        // No named groups (or no applicable backref): nothing to rewrite.
+        assert_eq!(rewrite_numeric_backrefs_to_named(r"(a)\1"), None);
+        assert_eq!(rewrite_numeric_backrefs_to_named(r"(?P<x>a)b"), None);
+        assert_eq!(try_match_regex(r"(?P<x>/app)\1", "/app/app"), Ok(true));
+        assert_eq!(try_match_regex(r"(?P<x>/app)\1", "/app/x"), Ok(false));
+    }
+
+    #[test]
+    fn numeric_backref_rewrite_understands_extended_mode_comments() {
+        // Under a leading (?x), a `#` line comment's parentheses never count
+        // toward CPython group numbering and its digits are never rewritten.
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?x)# (\n(?P<a>a)(?P<b>b)\\2").as_deref(),
+            Some("(?x)# (\n(?P<a>a)(?P<b>b)\\k<b>")
+        );
+        // Comment text is copied verbatim, digits inside it untouched.
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?x)# \\1 (\n(?P<a>a)\\1").as_deref(),
+            Some("(?x)# \\1 (\n(?P<a>a)\\k<a>")
+        );
+        // `#` inside a character class is literal even under (?x).
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?x)[#(](?P<a>a)\\1").as_deref(),
+            Some("(?x)[#(](?P<a>a)\\k<a>")
+        );
+        // Combined leading flags enable x-mode too.
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?ix)# (\n(?P<a>a)\\1").as_deref(),
+            Some("(?ix)# (\n(?P<a>a)\\k<a>")
+        );
+        // Without x-mode, `#` is an ordinary literal and `(` counts.
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("# ((?P<a>a)\\2").as_deref(),
+            Some("# ((?P<a>a)\\k<a>")
+        );
+        // Scoped or mid-pattern x flags change comment semantics partway
+        // through: fail closed so the engine's own error stands.
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?x:# )(?P<a>a)\\1"),
+            None
+        );
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?-x:a)(?P<a>a)\\1"),
+            None
+        );
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("a(?x)# (\n(?P<a>a)\\1"),
+            None
+        );
+        // Non-x scoped flags do not bail and do not count as groups.
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?i:z)(?P<a>a)\\1").as_deref(),
+            Some("(?i:z)(?P<a>a)\\k<a>")
+        );
+        // End-to-end: the rewritten pattern compiles and matches like Python.
+        assert_eq!(
+            try_match_regex("(?x)# (\n(?P<a>a)(?P<b>b)\\2", "abb"),
+            Ok(true)
+        );
+        assert_eq!(
+            try_match_regex("(?x)# (\n(?P<a>a)(?P<b>b)\\2", "aba"),
+            Ok(false)
+        );
+    }
+}
+
+#[cfg(test)]
+mod glob_tests {
+    use super::glob_matches;
+
+    #[test]
+    fn glob_matches_follows_cpython_fnmatch_semantics() {
+        // Expectations generated from CPython 3.11 fnmatch.fnmatch — the
+        // Python reference routes glob patterns straight through fnmatch.
+        let table: &[(&str, &str, bool)] = &[
+            ("/app/[ab].rb", "/app/a.rb", true),
+            ("/app/[ab].rb", "/app/b.rb", true),
+            ("/app/[ab].rb", "/app/c.rb", false),
+            ("/app/[!ab].rb", "/app/a.rb", false),
+            ("/app/[!ab].rb", "/app/c.rb", true),
+            ("/app/[a-c].rb", "/app/b.rb", true),
+            ("/app/[a-c].rb", "/app/d.rb", false),
+            ("/app/[z-a].rb", "/app/a.rb", false),
+            ("/app/[z-a].rb", "/app/z.rb", false),
+            ("/app/[ab.rb", "/app/[ab.rb", true),
+            ("/app/[ab.rb", "/app/a.rb", false),
+            ("/app/[]a].rb", "/app/].rb", true),
+            ("/app/[]a].rb", "/app/a.rb", true),
+            ("/app/[]a].rb", "/app/x.rb", false),
+            ("/app/[!]a].rb", "/app/x.rb", true),
+            ("/app/[!]a].rb", "/app/].rb", false),
+            ("/app/[!]a].rb", "/app/a.rb", false),
+            ("/app/[a-].rb", "/app/-.rb", true),
+            ("/app/[a-].rb", "/app/a.rb", true),
+            ("/app/[a-].rb", "/app/b.rb", false),
+            ("/app/[^a].rb", "/app/^.rb", true),
+            ("/app/[^a].rb", "/app/a.rb", true),
+            ("/app/[^a].rb", "/app/b.rb", false),
+            ("/app/[[].rb", "/app/[.rb", true),
+            ("/app/[[].rb", "/app/a.rb", false),
+            ("/app/[a-c-e].rb", "/app/b.rb", true),
+            ("/app/[a-c-e].rb", "/app/-.rb", true),
+            ("/app/[a-c-e].rb", "/app/e.rb", true),
+            ("/app/[a-c-e].rb", "/app/d.rb", false),
+            ("/app/*[0-9]?.rb", "/app/x42.rb", true),
+            ("/app/*[0-9]?.rb", "/app/x4.rb", false),
+        ];
+        for (pattern, path, expected) in table {
+            assert_eq!(
+                glob_matches(pattern, path),
+                *expected,
+                "pattern {pattern:?} vs path {path:?}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod regex_comment_tests {
+    use super::rewrite_numeric_backrefs_to_named;
+
+    #[test]
+    fn comment_parentheses_do_not_count_as_groups() {
+        // The '(' inside the comment must not shift group numbering: \2 is
+        // the second real capture group (?P<b>...).
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?P<a>/srv)(?#()(?P<b>/app)\\2"),
+            Some("(?P<a>/srv)(?#()(?P<b>/app)\\k<b>".to_string())
+        );
+    }
+
+    #[test]
+    fn backrefs_inside_comments_are_never_rewritten() {
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?P<a>x)(?#\\1)\\1"),
+            Some("(?P<a>x)(?#\\1)\\k<a>".to_string())
+        );
+    }
+
+    #[test]
+    fn unterminated_comment_returns_none() {
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?P<a>x)(?#oops\\1"),
+            None
+        );
+    }
 }

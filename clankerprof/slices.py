@@ -75,7 +75,7 @@ class SliceFrameStats:
     time_ns: TimeNs = 0
 
 
-def _slice_frame_stats_by_string() -> dict[str, SliceFrameStats]:
+def _slice_frame_stats_by_key() -> dict[tuple[str, str], SliceFrameStats]:
     return {}
 
 
@@ -87,8 +87,10 @@ def _time_by_string() -> dict[str, TimeNs]:
 class SliceStats:
     name: str
     time_ns: TimeNs = 0
-    frames: dict[str, SliceFrameStats] = field(
-        default_factory=_slice_frame_stats_by_string
+    # Tuple identity: a "name\0filename" string key merged distinct frames
+    # whose symbols contained the delimiter.
+    frames: dict[tuple[str, str], SliceFrameStats] = field(
+        default_factory=_slice_frame_stats_by_key
     )
     unattributed_gems: dict[str, TimeNs] = field(default_factory=_time_by_string)
     unattributed_libraries: dict[str, TimeNs] = field(default_factory=_time_by_string)
@@ -108,6 +110,21 @@ GC_PSEUDO_SLICE = "(gc)"
 
 
 UNCOLLAPSIBLE_PSEUDO_SLICE = "(uncollapsible)"
+
+
+# The implicit fallback row for unmatched samples: a configured slice under
+# this name would silently merge with the fallback, absorbing samples its
+# paths never matched under the configured metadata.
+ALL_PSEUDO_SLICE = "(all)"
+
+
+RESERVED_SLICE_NAMES = (ALL_PSEUDO_SLICE, GC_PSEUDO_SLICE, UNCOLLAPSIBLE_PSEUDO_SLICE)
+
+
+RESERVED_SLICE_NAMES_MESSAGE = (
+    "The names (all), (gc) and (uncollapsible) are reserved for analyzer "
+    "pseudo-outputs."
+)
 
 
 def _match_frame_predicate(
@@ -251,21 +268,6 @@ class _SliceMatcher:
                 return definition.name
         return self._default_slice
 
-    def _sample_has_descendant_attribute_for_slice(
-        self,
-        stack: Sequence[Frame],
-        slice_name: str,
-    ) -> bool:
-        for rule in self._options.attributes:
-            if not rule.descendant or rule.target_slice != slice_name:
-                continue
-            if any(
-                self.matches_predicate(candidate, rule.key, rule.value)
-                for candidate in stack
-            ):
-                return True
-        return False
-
     def _filter_matches(
         self,
         item: _SliceFilter,
@@ -278,10 +280,10 @@ class _SliceMatcher:
                 self.slice_without_descendant_attributes(frame) == item.value
                 for frame in frames
             )
-            if not matched and self._sample_has_descendant_attribute_for_slice(
-                stack,
-                item.value,
-            ):
+            # Rescue via the sample's EFFECTIVE attribution: the first-match
+            # winning rule's target, not the mere existence of any losing
+            # descendant rule targeting the slice.
+            if not matched and self.slice_for_sample(bottom, stack) == item.value:
                 matched = True
             return not matched if item.inverted else matched
         if item.key == "slice":
@@ -294,7 +296,11 @@ class _SliceMatcher:
                 self.matches_predicate(frame, item.key, item.value) for frame in frames
             )
         if item.inverted:
-            return any(not matched for matched in matches)
+            # Negation binds to descendant EXISTENCE: a stack containing the
+            # forbidden frame must not pass just because some other frame
+            # fails to match. (Bottom filters are single-frame, where the
+            # two formulas coincide.)
+            return not any(matches)
         return any(matches)
 
     def filters_match_sample(self, stack: Sequence[Frame], bottom: Frame) -> bool:
@@ -325,6 +331,47 @@ def analyze_slices(
     return analyze_slice_facts(profile.sample_facts(), options)
 
 
+def validate_slice_definitions(slices: Sequence[SliceDefinition]) -> None:
+    """Shared definition validation for every slice-loading surface.
+
+    Scope configs load slice files without ever running slice analysis, so
+    the checks must not live only inside `analyze_slice_facts`.
+    """
+    default_names = [item.name for item in slices if item.is_default]
+    if len(default_names) > 1:
+        raise ValueError(
+            "Slice config declares multiple default slices: "
+            f"{', '.join(default_names)}. Exactly one slice may set default."
+        )
+    seen_names: set[str] = set()
+    for item in slices:
+        # Duplicate names silently merged with first/last-wins metadata that
+        # diverged across implementations; fail closed like multiple defaults.
+        if item.name in seen_names:
+            raise ValueError(
+                f"Slice config declares duplicate slice name: {item.name}. "
+                "Each slice name may be defined once."
+            )
+        seen_names.add(item.name)
+        # A user slice under (gc)/(uncollapsible) would be attributed and
+        # then unconditionally stripped at render; one under (all) would
+        # silently merge with the implicit fallback row (R9-04 reversed the
+        # earlier judgment that the merge was benign — it absorbs unmatched
+        # samples under the configured metadata).
+        if item.name in RESERVED_SLICE_NAMES:
+            raise ValueError(
+                f"Slice config declares reserved pseudo-slice name: {item.name}. "
+                + RESERVED_SLICE_NAMES_MESSAGE
+            )
+        # The compare focus grammar splits values on ','; a comma-bearing
+        # row name would make focusing it silently gate the split parts.
+        if "," in item.name:
+            raise ValueError(
+                f"Slice config declares comma-bearing slice name: {item.name}. "
+                "Slice names must not contain ','."
+            )
+
+
 def analyze_slice_facts(
     sample_facts: SampleFactsInput,
     options: SliceAnalysisOptions,
@@ -334,12 +381,8 @@ def analyze_slice_facts(
     gc_time = 0
     stats_by_slice: dict[str, SliceStats] = {}
     uncollapsible_stats = SliceStats(name=UNCOLLAPSIBLE_PSEUDO_SLICE)
+    validate_slice_definitions(options.slices)
     default_names = [item.name for item in options.slices if item.is_default]
-    if len(default_names) > 1:
-        raise ValueError(
-            "Slice config declares multiple default slices: "
-            f"{', '.join(default_names)}. Exactly one slice may set default."
-        )
     default_slice = default_names[0] if default_names else "(all)"
     matcher = _SliceMatcher(options)
     index = ProfileFactIndex.from_input(sample_facts)
@@ -373,7 +416,7 @@ def analyze_slice_facts(
                 SliceStats(name=GC_PSEUDO_SLICE),
             )
             gc_stats.time_ns += value
-            frame_key = f"{leaf.name}\0{leaf.filename}"
+            frame_key = (leaf.name, leaf.filename)
             frame_stats = gc_stats.frames.setdefault(
                 frame_key,
                 SliceFrameStats(
@@ -391,7 +434,7 @@ def analyze_slice_facts(
             SliceStats(name=slice_name, is_default=slice_name == default_slice),
         )
         slice_stats.time_ns += value
-        frame_key = f"{bottom.name}\0{bottom.filename}"
+        frame_key = (bottom.name, bottom.filename)
         frame_stats = slice_stats.frames.setdefault(
             frame_key,
             SliceFrameStats(
@@ -413,7 +456,7 @@ def analyze_slice_facts(
         if bottom_is_collapsed:
             uncollapsible_stats.time_ns += value
             frame = uncollapsible_frame or bottom
-            frame_key = f"{frame.name}\0{frame.filename}"
+            frame_key = (frame.name, frame.filename)
             frame_stats = uncollapsible_stats.frames.setdefault(
                 frame_key,
                 SliceFrameStats(
@@ -432,5 +475,5 @@ def analyze_slice_facts(
         total_time_ns=total_time,
         slices=ordered,
         gc_time_ns=gc_time,
-        uncollapsible=uncollapsible_stats if uncollapsible_stats.time_ns > 0 else None,
+        uncollapsible=uncollapsible_stats if uncollapsible_stats.time_ns != 0 else None,
     )

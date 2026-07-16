@@ -106,7 +106,7 @@ markers = [
 [tool.ruff]
 line-length = 88
 target-version = "py311"
-extend-exclude = [".local"]
+extend-exclude = [".local", ".goalloop-support"]
 
 [tool.ruff.format]
 docstring-code-format = true

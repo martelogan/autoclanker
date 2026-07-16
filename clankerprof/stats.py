@@ -74,8 +74,10 @@ class CategoryStats:
     semantic_callers: dict[str, SemanticCallerMetrics] = field(
         default_factory=_semantic_metrics_by_string
     )
-    caller_leaf_pairs: dict[str, CallerMetrics] = field(
-        default_factory=_caller_metrics_by_string
+    # Tuple identity: delimiter-composed string keys merged distinct pairs
+    # whose symbols contained the delimiter; display strings are render-time.
+    caller_leaf_pairs: dict[tuple[str, str], CallerMetrics] = field(
+        default_factory=_caller_metrics_by_tuple
     )
 
     def add_function(self, name: str, value: TimeNs) -> None:
@@ -84,8 +86,7 @@ class CategoryStats:
         metrics.cpu_time += value
 
     def add_caller_leaf_pair(self, caller: str, leaf: str, value: TimeNs) -> None:
-        pair_key = f"{caller} -> {leaf}"
-        metrics = self.caller_leaf_pairs.setdefault(pair_key, CallerMetrics())
+        metrics = self.caller_leaf_pairs.setdefault((caller, leaf), CallerMetrics())
         metrics.count += 1
         metrics.cpu_time += value
 

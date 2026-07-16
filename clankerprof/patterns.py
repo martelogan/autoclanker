@@ -41,7 +41,11 @@ class LibraryPath:
 
 
 def format_time(nanoseconds: TimeNs) -> str:
-    milliseconds = nanoseconds / 1_000_000
+    # f64-operand contract shared with the Rust core (R3-04 precedent): round
+    # the aggregate to f64 BEFORE dividing so elapsed-time fields stay
+    # byte-identical above 2**53 (int/int true division would round the exact
+    # rational once and can differ in the last ulp).
+    milliseconds = float(nanoseconds) / 1_000_000.0
     if milliseconds >= 60_000:
         return f"{milliseconds / 60_000:.2f} min"
     if milliseconds >= 1_000:
@@ -161,14 +165,21 @@ def is_runtime_stdlib_path(path: str, rules: RuntimeRuleSet) -> bool:
     return any(marker in path for marker in rules.stdlib_path_markers)
 
 
+def native_path_excluded(
+    path: str, rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES
+) -> bool:
+    """True when the pack's exclude keys veto native-path detection."""
+    if any(marker in path for marker in rules.native_path_exclude_markers):
+        return True
+    return any(
+        match_regex(pattern, path) for pattern in rules.native_path_exclude_patterns
+    )
+
+
 def is_native_path(path: str, rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES) -> bool:
     if not path or path.startswith("<"):
         return True
-    if any(marker in path for marker in rules.native_path_exclude_markers):
-        return False
-    if any(
-        match_regex(pattern, path) for pattern in rules.native_path_exclude_patterns
-    ):
+    if native_path_excluded(path, rules):
         return False
     if any(marker in path for marker in rules.native_path_markers):
         return True
@@ -187,7 +198,12 @@ def _normalize_library_component(component: str, rules: RuntimeRuleSet) -> str:
     if not normalized:
         return normalized
     for pattern in rules.library_name_suffix_patterns:
-        match = re.search(pattern, normalized)
+        try:
+            match = re.search(pattern, normalized)
+        except re.error as exc:
+            # re.error is not a ValueError; unwrapped it would escape the CLI
+            # error envelope as a traceback.
+            raise ValueError(f"Invalid regex pattern {pattern!r}: {exc}") from exc
         if match and match.start() > 0:
             return normalized[: match.start()]
     return normalized
@@ -214,13 +230,20 @@ def extract_library_path(
                     f"Invalid library regex pattern {resolved_pattern!r}: {exc}"
                 ) from exc
             if match:
-                component = match.group(1) if match.groups() else match.group(0)
-                relative_path = (
-                    normalized[match.start(1) :] if match.groups() else component
+                # Group 1 names the library when it participated in the match;
+                # otherwise (non-participating optional group, or a pattern
+                # with no groups) the whole match names it. The relative path
+                # always runs from the naming component to the end of the
+                # normalized path — identical to the Rust implementation.
+                component = match.group(1) if match.groups() else None
+                component_start = (
+                    match.start(1) if component is not None else match.start(0)
                 )
+                if component is None:
+                    component = match.group(0)
                 return LibraryPath(
                     name=_normalize_library_component(component, rules),
-                    relative_path=relative_path,
+                    relative_path=normalized[component_start:],
                 )
             continue
         marker = _normalize_profile_path(resolved_pattern).strip("/")

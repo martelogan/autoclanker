@@ -183,15 +183,27 @@ fn attributable_values(
     columns: &[String],
     parent: &str,
     pct: f64,
-) -> Vec<String> {
+) -> Result<Vec<String>, String> {
     columns
         .iter()
         .map(|column| {
-            attributables
+            match attributables
                 .and_then(|table| table.get(column))
                 .and_then(|per_parent| per_parent.get(parent))
-                .map(|value| format!("{:.1}", (pct / 100.0) * value))
-                .unwrap_or_else(|| "N/A".to_string())
+            {
+                None => Ok("N/A".to_string()),
+                Some(value) => {
+                    // A finite metric scaled by a >100% category share can
+                    // overflow; fail closed like the scope estimates.
+                    let estimate = (pct / 100.0) * value;
+                    if !estimate.is_finite() {
+                        return Err(format!(
+                            "Attributable estimate for '{column}' is not finite."
+                        ));
+                    }
+                    Ok(format!("{estimate:.1}"))
+                }
+            }
         })
         .collect()
 }
@@ -199,6 +211,17 @@ fn attributable_values(
 struct CategoryRow<'a> {
     stats: &'a CategoryStats,
     total: TimeNs,
+}
+
+/// Percentage with the shared zero-total arm: valid signed samples can
+/// cancel a parent's total to exactly zero, and every percentage over a
+/// zero total renders as 0 in both implementations — never inf or NaN.
+fn pct_of(numerator: TimeNs, total: TimeNs) -> f64 {
+    if total != 0 {
+        numerator as f64 / total as f64 * 100.0
+    } else {
+        0.0
+    }
 }
 
 fn sorted_categories(
@@ -215,7 +238,7 @@ fn function_summary(row: &CategoryRow<'_>, limit: usize, with_samples: bool) -> 
     top.truncate(limit);
     top.iter()
         .map(|(name, metrics)| {
-            let pct = metrics.cpu_time as f64 / row.total as f64 * 100.0;
+            let pct = pct_of(metrics.cpu_time, row.total);
             if with_samples {
                 format!("{name} ({} samples, {pct:.1}%)", metrics.count)
             } else {
@@ -228,25 +251,19 @@ fn function_summary(row: &CategoryRow<'_>, limit: usize, with_samples: bool) -> 
 
 fn callsites_summary(row: &CategoryRow<'_>, separator: &str) -> String {
     let mut caller_totals: IndexMap<&str, TimeNs> = IndexMap::new();
-    for (pair, metrics) in &row.stats.caller_leaf_pairs {
-        let caller = pair.split(" -> ").next().unwrap_or(pair);
-        *caller_totals.entry(caller).or_insert(0) += metrics.cpu_time;
+    for ((caller, _leaf), metrics) in &row.stats.caller_leaf_pairs {
+        *caller_totals.entry(caller.as_str()).or_insert(0) += metrics.cpu_time;
     }
     let mut top: Vec<_> = caller_totals.into_iter().collect();
     top.sort_by(|left, right| right.1.cmp(&left.1));
     top.truncate(3);
     top.iter()
-        .map(|(caller, time_ns)| {
-            format!(
-                "{caller} ({:.1}%)",
-                *time_ns as f64 / row.total as f64 * 100.0
-            )
-        })
+        .map(|(caller, time_ns)| format!("{caller} ({:.1}%)", pct_of(*time_ns, row.total)))
         .collect::<Vec<_>>()
         .join(separator)
 }
 
-fn top_pairs<'a>(row: &'a CategoryRow<'a>) -> Vec<(&'a String, &'a CallerMetrics)> {
+fn top_pairs<'a>(row: &'a CategoryRow<'a>) -> Vec<(&'a (String, String), &'a CallerMetrics)> {
     let mut pairs: Vec<_> = row.stats.caller_leaf_pairs.iter().collect();
     pairs.sort_by(|left, right| right.1.cpu_time.cmp(&left.1.cpu_time));
     pairs.truncate(3);
@@ -258,7 +275,7 @@ pub fn render_target_csv(
     attributables: Option<&Attributables>,
     simplified: bool,
     legacy_layout: bool,
-) -> String {
+) -> Result<String, String> {
     if legacy_layout {
         return render_legacy_target_csv(results, attributables, simplified);
     }
@@ -303,18 +320,22 @@ pub fn render_target_csv(
     for (parent, categories) in results {
         let total: TimeNs = categories.values().map(|stats| stats.cpu_time).sum();
         for (category, stats) in sorted_categories(categories) {
-            let pct = if total != 0 {
-                stats.cpu_time as f64 / total as f64 * 100.0
-            } else {
-                0.0
-            };
-            if simplified && pct < 0.1 && category != "Other" {
+            let pct = pct_of(stats.cpu_time, total);
+            // The noise gate only hides small nonnegative shares: negative
+            // rows are signed data that must render at any magnitude, and a
+            // zero parent total may omit only exactly-zero rows.
+            if simplified
+                && category != "Other"
+                && stats.cpu_time >= 0
+                && pct.abs() < 0.1
+                && (total != 0 || stats.cpu_time == 0)
+            {
                 continue;
             }
             let row = CategoryRow { stats, total };
             let functions = function_summary(&row, if simplified { 3 } else { 5 }, false);
             let callsites = callsites_summary(&row, "; ");
-            let attributable = attributable_values(attributables, &columns, parent, pct);
+            let attributable = attributable_values(attributables, &columns, parent, pct)?;
             if simplified {
                 let mut record = vec![parent.clone(), category.clone(), format!("{pct:.1}")];
                 record.extend(attributable);
@@ -324,11 +345,11 @@ pub fn render_target_csv(
             }
             let mut pair_columns: Vec<String> = top_pairs(&row)
                 .iter()
-                .map(|(pair, metrics)| {
+                .map(|((caller, leaf), metrics)| {
                     format!(
-                        "{pair} ({} samples, {:.1}%)",
+                        "{caller} -> {leaf} ({} samples, {:.1}%)",
                         metrics.count,
-                        metrics.cpu_time as f64 / total as f64 * 100.0
+                        pct_of(metrics.cpu_time, total)
                     )
                 })
                 .collect();
@@ -354,14 +375,14 @@ pub fn render_target_csv(
             rows.push(record);
         }
     }
-    csv_rows(rows)
+    Ok(csv_rows(rows))
 }
 
 fn render_legacy_target_csv(
     results: &TargetResults,
     attributables: Option<&Attributables>,
     simplified: bool,
-) -> String {
+) -> Result<String, String> {
     let columns = attributable_columns(attributables);
     let mut header = if simplified {
         "Parent Function,Category,CPU %".to_string()
@@ -383,18 +404,22 @@ fn render_legacy_target_csv(
     for (parent, categories) in results {
         let total: TimeNs = categories.values().map(|stats| stats.cpu_time).sum();
         for (category, stats) in sorted_categories(categories) {
-            let pct = if total != 0 {
-                stats.cpu_time as f64 / total as f64 * 100.0
-            } else {
-                0.0
-            };
-            if simplified && pct < 0.1 && category != "Other" {
+            let pct = pct_of(stats.cpu_time, total);
+            // The noise gate only hides small nonnegative shares: negative
+            // rows are signed data that must render at any magnitude, and a
+            // zero parent total may omit only exactly-zero rows.
+            if simplified
+                && category != "Other"
+                && stats.cpu_time >= 0
+                && pct.abs() < 0.1
+                && (total != 0 || stats.cpu_time == 0)
+            {
                 continue;
             }
             let row = CategoryRow { stats, total };
             let functions = function_summary(&row, if simplified { 3 } else { 5 }, !simplified);
             let callsites = callsites_summary(&row, if simplified { "; " } else { ", " });
-            let attributable = attributable_values(attributables, &columns, parent, pct);
+            let attributable = attributable_values(attributables, &columns, parent, pct)?;
             if simplified {
                 let mut line = format!(
                     "{},{},{pct:.1}",
@@ -415,12 +440,11 @@ fn render_legacy_target_csv(
             }
             let mut pair_columns: Vec<String> = top_pairs(&row)
                 .iter()
-                .map(|(pair, metrics)| {
+                .map(|((caller, leaf), metrics)| {
                     quote_legacy_csv(&format!(
-                        "{} ({} samples, {:.1}%)",
-                        pair.replace(" -> ", " \u{2192} "),
+                        "{caller} \u{2192} {leaf} ({} samples, {:.1}%)",
                         metrics.count,
-                        metrics.cpu_time as f64 / total as f64 * 100.0
+                        pct_of(metrics.cpu_time, total)
                     ))
                 })
                 .collect();
@@ -450,7 +474,7 @@ fn render_legacy_target_csv(
             lines.push(line);
         }
     }
-    lines.join("\n")
+    Ok(lines.join("\n"))
 }
 
 pub fn render_target_text(
@@ -488,11 +512,7 @@ pub fn render_target_text(
         lines.push("-".repeat(110));
         let ordered = sorted_categories(categories);
         for (category, stats) in &ordered {
-            let pct = if total != 0 {
-                stats.cpu_time as f64 / total as f64 * 100.0
-            } else {
-                0.0
-            };
+            let pct = pct_of(stats.cpu_time, total);
             lines.push(format!(
                 "{:<35} {:<15} {:>6.2}% {:>9} {:>14} {:>7}",
                 category,
@@ -508,7 +528,7 @@ pub fn render_target_text(
             "{:<35} {:<15} {:>8}",
             "TOTAL",
             format_time(total),
-            "100.00%"
+            if total != 0 { "100.00%" } else { "0.00%" }
         ));
         if show_folded {
             let folded: Vec<_> = ordered
