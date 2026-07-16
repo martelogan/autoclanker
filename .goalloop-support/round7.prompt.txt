@@ -1,3 +1,113 @@
+You are an independent auditor for the goal loop "clankerprof-v2-adversarial-review". The implementing
+agent believes the work is complete. Your job is to refute that.
+
+Audit the repository at the current working directory, read-only. The charter
+and requirement tracker follow. For every problem you believe you found, you
+MUST attempt reproduction (run the failing case, cite exact file:line, show
+the wrong output) — unreproduced suspicions must be labeled as such.
+
+Do not re-raise previously refuted findings (the refutation log follows); if
+you disagree with a refutation, present NEW evidence.
+
+Output STRICT JSON only, matching:
+{"findings": [{"title": str, "severity": "critical|major|minor",
+"claim": str, "reproduction": str, "files": [str]}], "summary": str}
+
+An empty findings list is a valid and welcome answer if the work holds up.
+
+--- CHARTER ---
+---
+name: clankerprof-v2-adversarial-review
+gates:
+- ./bin/dev check
+- cargo test --workspace
+audit:
+  auditor: codex exec --sandbox read-only --cd /Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit
+    -
+  max_rounds: 10
+---
+
+# Charter: clankerprof-v2-adversarial-review
+
+An independent adversarial review of the completed clankerprof v2 effort
+(21 commits, `b23528d^..e9a1c2c` on branch `clankerprof-v2`), run as a
+convergence loop: an external max-effort auditor (GPT-5.6-sol via
+`codex exec`, read-only) tries to refute completion; the implementor
+(Claude, with full context of the v2 effort) triages every finding by
+attempting its reproduction, ingests the triage, and fixes confirmed
+findings behind the standard gates until a round confirms nothing new.
+
+## Outcome
+
+The clankerprof v2 work survives (or is fixed to survive) adversarial
+review along three lenses:
+
+1. **The plan and requirements themselves** — are the 71 requirement rows
+   in `docs/CLANKERPROF_V2_REQUIREMENTS.md` the right set for the goal
+   stated in `docs/CLANKERPROF_V2_PLAN.md`? Were any mis-specified,
+   under-specified, or satisfiable by gaming (vacuous tests, weakened
+   assertions, doc-only "fixes")?
+2. **The implementation against plan + requirements** — correctness of the
+   semantic fixes (D1–D15 defect classes), the architecture split, the
+   facts v2 contract, the Rust port, and the byte-parity claims between
+   Python and Rust.
+3. **The auditor's own independent findings** — bugs, design flaws, test
+   blind spots, unhandled edge cases, or performance regressions the plan
+   never anticipated, discovered by reading the code and running probes.
+
+Done means: every confirmed finding is fixed (in both Python and Rust
+where applicable) behind green gates, every refuted finding has recorded
+proof, and an audit round completes with zero new confirmed findings.
+
+## Evidence
+
+- `docs/CLANKERPROF_V2_PLAN.md` — the plan, defect inventory, decisions,
+  and benchmark appendices.
+- `docs/CLANKERPROF_V2_REQUIREMENTS.md` — the 71-row requirements tracker;
+  `python3 scripts/clankerprof_v2_goal.py --goal` exits 0.
+- `docs/CLANKERPROF_SPEC.md` (normative contracts: sample_facts.v2,
+  runtime_rules.v1, compare gate, CLI stream/error contract) and
+  `docs/CLANKERPROF_PARITY.md` (capability matrix).
+- The implementation: `clankerprof/`, `crates/clankerprof-core/`, their
+  tests in `tests/` (notably `tests/test_clankerprof_rust_parity.py`,
+  byte-level flag-matrix goldens) and `crates/clankerprof-core/src/`
+  unit tests.
+- This loop's gates: `./bin/dev check` (the full required CI gate) and
+  `cargo test --workspace`.
+
+## Scope bounds
+
+- Audit surface is clankerprof only: the `clankerprof/` Python package,
+  `crates/clankerprof-core/`, their tests, docs, rule packs, and the v2
+  plan/requirements documents. `autoclanker` core, `bigbets`, and
+  `goalloop` itself are out of scope (goalloop was reviewed separately).
+- No history rewriting; fixes land as new commits on this audit branch.
+- Any behavior fix must land in Python and Rust together, preserve the
+  byte-parity contract (or update goldens + `docs/CLANKERPROF_PARITY.md`
+  explicitly), and keep `./bin/dev check` deterministic and non-billed.
+- No new runtime dependencies without recording the justification in the
+  tracker Notes.
+- The auditor runs read-only; only the implementor writes code, and only
+  after reproducing a finding.
+
+## Stop conditions
+
+- Audit exceeds max_rounds (10; raised from 3 by Logan on 2026-07-15 after
+  three fully-confirmed rounds — convergence should run as long as needed)
+  without convergence → stop and escalate to
+  Logan with `goalloop audit status` and the open tracker rows.
+- A confirmed finding requires a breaking contract change (e.g. a facts v3
+  schema, changed CLI exit-code semantics, altered compare gate contract)
+  → mark the row `blocked` with notes and escalate rather than change a
+  published contract unilaterally.
+- Gate failures that are environmental (toolchain, network, cargo cache)
+  rather than caused by the work → record in Notes, fix the environment,
+  never weaken a gate to pass.
+- Usage-limit interruption is NOT a stop condition: all state lives in the
+  goalloop files and the worktree; resume from the tracker.
+
+
+--- TRACKER ---
 # clankerprof-v2-adversarial-review — requirements tracker
 
 Single source of execution state for this goal loop. Every row is a checkable
@@ -144,15 +254,102 @@ and this loop's real work.
 | R6-11 | Repeated scalar CLI options have incompatible semantics | Reproduced. Repeated scalar options: argparse last-wins vs clap duplicate rejection. Fix: last-wins everywhere (focus-flag precedent). #Q11 | done | audit round 6; fixed: every non-accumulating Rust option gained self-overrides_with (last-wins, argparse parity); Vec options keep accumulating |
 | R6-12 | Rust silently ignores a non-string scope `slices` path | Reproduced. Non-string scope slices: path silently ignored by Rust as_str; Python treats as path. Fix: reject non-strings, shared message (R3-06 pattern). #Q12 | done | audit round 6; fixed: non-string scope slices rejected with shared message in both languages (was Rust silent-absent vs Python coerced path) |
 
-## Wave R7 — audit round 7 findings
 
-| ID | Requirement | Verify | Status | Notes |
-| --- | --- | --- | --- | --- |
-| R7-01 | Virtual attributes bypass the reserved pseudo-slice names and erase owned time | Reproduced. --allow-virtual-attribute-slices waives ALL target validation incl. the R6-01 reserved names -> attributed-then-stripped time returns. Fix: reservation applies unconditionally. Evidence: .goalloop-support/round7.triage.json#S1 | todo | audit round 7 |
-| R7-02 | Facts v2 accepts an out-of-range primary value index and silently uses value zero | Reproduced. primary_value_index 99 accepted; values[0] fallback silently selects the wrong metric with self-consistent summary. Fix: bound the index against declared value types, both languages. #S2 | todo | audit round 7 |
-| R7-03 | The Rust regex surface still rejects and misinterprets valid Python-dialect constructs outside the documented exceptions | Reproduced. Beyond the R5-02 pinned edges: fancy-regex rejects mixed named+numeric backrefs (fixable mechanically) and silently mis-evaluates conditionals (fail-open). Split resolution per sketch. #S3 | todo | audit round 7 |
-| R7-04 | Percentage slice filtering deletes every row when signed matching time is zero | Reproduced. --by-slice threshold guard short-circuits on zero signed total, deleting every row that the documented 0-pct arm says satisfies the threshold. Fix: zero-arm inside the predicate. #S4 | todo | audit round 7 |
-| R7-05 | The zero-total simple-CSV requirement is vacuous: valid signed targets become header-only | Reproduced. Zero-total targets render header-only simple-csv (all rows 0pct < 0.1); the R4/N zero-total test only asserted no inf/NaN. Fix: magnitude gate on signed time under zero totals; de-vacuous test. #S5 | todo | audit round 7 |
-| R7-06 | Misspelled scope fields are silently ignored and can disable exclusions | Reproduced. Unknown scope entry keys silently ignored -> exclude_descendents typo disables exclusion. Fix: allowlist with shared message, both languages. #S6 | todo | audit round 7 |
-| R7-07 | Empty attribute predicates are accepted as match-all rules | Reproduced. Empty attribute predicate value (name:) matches every frame via substring, reassigning all ownership. Fix: reject empty key/value with existing message, both languages. #S7 | todo | audit round 7 |
-| R7-08 | Rust does not match the Python reference on zero-padded gzip profiles | Reproduced. Zero-padded gzip (member + zero bytes): Python gzip.decompress accepts, Rust MultiGzDecoder errors invalid header. Rust-only per-member loop tolerating trailing zeros to match Python. #S8 | todo | audit round 7 |
+--- PRIOR REFUTATIONS ---
+
+## Round 1
+
+- CONFIRMED [R1-01] Compare accepts truncated or corrupt reports and fails open: Reproduced. Rust coerces non-numeric pct to 0.0 -> false-green exit 0 where Python exits 2 (parity break, fail-open gate); missing slices/boundaries key accepted as empty in both. Full evidence: .goalloop-support/round1.triage.json#F1
+- CONFIRMED [R1-02] NaN thresholds disable regression gating in both implementations: Reproduced in both languages: --threshold-abs/rel nan turns a real 10->20pct regression into stable/exit 0. No finiteness validation anywhere. #F2
+- CONFIRMED [R1-03] Duplicate function names overwrite frame data in compare reports: Reproduced byte-for-byte in both: compare keys frames by function only, overwriting (f,/one)+(f,/two); +5 regression vanishes from top_regressions. #F3
+- CONFIRMED [R1-04] Facts-v2 numeric handling rejects valid IDs, coerces floats, and can panic: Reproduced, worse than claimed: both exporters emit u64 IDs > i64::MAX from real .pb, so Rust rejects its own export (round-trip violation, misleading error); Python truncates 7.9->7; Rust i64 sum overflow panics (debug). #F4
+- CONFIRMED [R1-05] The promised JSON error boundary does not cover CLI usage or Python conversion errors: Reproduced: argparse/clap usage errors print prose (exit 2, no JSON envelope); Python OverflowError from top:.inf escapes as traceback exit 1. #F5
+- CONFIRMED [R1-06] `--output` violates the documented receipt and global-option contract: Reproduced: Python targets --format json --output prints full artifact instead of receipt; Rust prints nothing on all --output writes; compare accepts no --output at all in either language despite spec. #F6
+- CONFIRMED [R1-07] Published Rust CLI parity omits tracked slice-config and compare-alias surfaces: Reproduced: Rust lacks slices --config and compare --focus-scopes despite PARITY.md claims and B3-05 done; tracker note admits deferral. #F7
+- CONFIRMED [R1-08] Rust silently ignores invalid scope predicates and `--by-slice` values: Reproduced: Rust .ok().flatten() drops configured cost-kind predicate errors (all cost -> Other, exit 0) and ignores unparsable --by-slice; Python exits 2 on both. #F8
+- CONFIRMED [R1-09] Rust path/glob matching is not compatible with Python: Reproduced: Rust tokenizes [ as glob but escapes brackets in regex conversion -> path:/app/[ab].rb matches in Python (Application), never in Rust (Other); also affects scopes path predicates. #F9
+- CONFIRMED [R1-10] Rust silently drops later members from valid concatenated gzip profiles: Reproduced: Rust GzDecoder reads only first gzip member; Python decodes all. Valid RFC1952 multi-member profile -> Rust silently returns empty profile, exit 0. #F10
+
+## Round 2
+
+- CONFIRMED [R2-01] Signed minimum slice limits crash the Rust CLI: Reproduced. apply_python_limit negates i64::MIN -> debug panic; also reachable via --top/--unattributed-libraries. Python exits 0 per spec. Fix: unsigned_abs. Evidence: .goalloop-support/round2.triage.json#G1
+- CONFIRMED [R2-02] Rust drops valid scope buckets above i64::MAX: Reproduced. scopes.rs boundary bucket filter/sort read totals via as_i64().unwrap_or(0); valid u64-range bucket (spec's own example) dropped from output. #G2
+- CONFIRMED [R2-03] Occurrence scopes invalidate the aggregate-bound proof and panic Rust: Reproduced. Occurrence-mode scopes multiply sample values by repeat count; bound proof covers subset sums only -> Python emits 2.7e19 out of contract, Rust panics serializing i128. #G3
+- CONFIRMED [R2-04] Rust compare rejects valid u64 report totals: Reproduced. Rust compare rejects summary total_time_ns in (i64::MAX, u64::MAX] that projections validly emit; Python accepts exactly. #G4
+- CONFIRMED [R2-05] Compare still fails open when a row's pct field is missing: Reproduced. Round-1 strictness kept absent-field->0.0: a PRESENT row missing pct is coerced to 0.0 'improvement' exit 0 in BOTH languages, contradicting spec 'never coerced to zero'. Distinguish row-absent (legit 0) from field-absent (error). #G5
+- CONFIRMED [R2-06] Rust regex handling is incompatible and can fail open: Reproduced. Documented Python-regex vocabulary (incl. lookahead example in docs) rejected by Rust regex crate at pack load; explicit bad regex in target config fails OPEN in Rust (exit 0 all-Other) vs Python exit 2. #G6
+- CONFIRMED [R2-07] Signed sample costs disappear from scope rollups: Reproduced. Both languages drop non-positive buckets/categories/owners; negative aggregates (valid signed values) break additivity (bucket sums 10 vs total 5). Fix: drop only zero, keep negatives, document. #G7
+- CONFIRMED [R2-08] Facts-v2 import silently defaults required sample fields: Reproduced. Missing samples[].values / location_ids / stack silently default to empty in BOTH languages despite spec field contract + validation-error guarantee. #G8
+- CONFIRMED [R2-09] Published byte parity fails on valid JSON lexical cases: Reproduced. Python ensure_ascii escapes unicode, Rust emits raw UTF-8; float exponent 1e-06 vs 1e-6 -> non-facts artifacts not byte-identical, contradicting PARITY.md claim. #G9
+- CONFIRMED [R2-10] Rust scope config validation silently substitutes defaults: Reproduced. Rust accepts empty predicate table and non-string count mode that Python rejects exit 2; silent defaults produce ordinary-looking artifacts. #G10
+- CONFIRMED [R2-11] An optional library-regex capture escapes the Python error boundary: Reproduced. Optional regex capture group participating as None -> Python AttributeError traceback exit 1 (escapes envelope); Rust exits 0 with full-match-derived library. Adopt Rust semantics in Python, document. #G11
+- CONFIRMED [R2-12] Rust still omits public runtime-analysis flags: Reproduced. Rust scopes lacks --fold-runtime-internals/--no-enhanced; Rust targets lacks --verbose-runtime-internals; spec claims full runtime-flag parity. #G12
+- CONFIRMED [R2-13] Rust reorders scope cost-kind definitions and changes first-match attribution: Reproduced. Rust routes scope config through sorted serde_json map, losing cost_kind declaration order; first-match-wins picks ASecond where Python picks ZFirst. #G13
+- CONFIRMED [R2-14] Multi-parent target CSV order differs between Python and Rust: Reproduced. Rust targets outer BTreeMap vs Python first-seen parent order -> csv/simple-csv/text row order diverges for non-alphabetical encounter order. #G14
+
+## Round 3
+
+- CONFIRMED [R3-01] Signed negative rows can increase without tripping the compare gate: Reproduced. delta_rel forced 0.0 when neither pct positive -> -10%->-5% row 'stable' exit 0 despite +50% true relative change (and paradoxical top_regressions listing); slice+boundary paths, both languages. Fix: delta vs abs(before), +/-inf at zero baseline. Evidence: .goalloop-support/round3.triage.json#J1
+- CONFIRMED [R3-02] Duplicate top-level report rows remain an order-dependent compare bypass: Reproduced. Duplicate top-level slice/boundary names last-wins -> same multiset reordered flips has_regression; order-dependent gate bypass in both languages. Fix: reject duplicate row names. #J2
+- CONFIRMED [R3-03] Finite attributable inputs can silently become null in Rust: Reproduced. Finite attributable 1.7e308 scaled to inf: Python exit 2 raw json error, Rust exit 0 with null estimate (silent metric loss). Fix: shared finite-check + typed envelope both languages. #J3
+- CONFIRMED [R3-04] Large valid integer totals break byte parity and by-slice selection: Reproduced. Python arbitrary-precision int division vs Rust f64-operand division diverges pct bytes and --by-slice selection for totals > 2^53; also serde_json default lossy float parse (needs float_roundtrip). Fix: Python mirrors Rust op order; enable float_roundtrip. #J4
+- CONFIRMED [R3-05] Negative GC and uncollapsible pseudo-slices are silently discarded: Reproduced. GC and uncollapsible pseudo-slices gated > 0 drop valid negative aggregates in both languages, contradicting spec's negative-rows-rendered rule. Fix: != 0 like R2-07. #J5
+- CONFIRMED [R3-06] String-field validation remains divergent on three public configuration surfaces: Reproduced. Non-string values coerced/dropped divergently on slice paths ([123]), target config patterns (123), rule match lists ([null]). Fix: reject non-strings, identical messages, both languages. #J6
+- CONFIRMED [R3-07] Compare threshold flags accept different numeric grammars: Reproduced. --threshold-abs/rel grammars diverge: Python float() accepts '1_0'/' 2 ', Rust clap rejects. Fix: shared strict f64 grammar (Rust's) in Python. #J7
+- CONFIRMED [R3-08] The Rust guide still says scope parity is not claimed: Reproduced. docs/CLANKERPROF_RUST.md still disclaims scope parity that PARITY.md and the shipped CLI provide. Fix: update stale text. #J8
+
+## Round 4
+
+- CONFIRMED [R4-01] Python compare accepts null nested rows and fails open: Reproduced. Python _optional_rows conflates present null with absent for frames/buckets/categories/domains -> real regression becomes 'improvement' exit 0; Rust already rejects. Python-only fix. Evidence: .goalloop-support/round4.triage.json#K1
+- CONFIRMED [R4-02] Duplicate JSON member names are an order-dependent compare-gate bypass: Reproduced. Duplicate JSON member names last-wins in both loaders -> same multiset reordered flips the gate (object-level cousin of R3-02). Fix: duplicate-member rejection in parse_strict_json + custom serde visitor. #K2
+- CONFIRMED [R4-03] Zero-total target renderers crash or emit infinities: Reproduced. Zero-total signed targets: Python ZeroDivisionError traceback exit 1, Rust inf%/NaN% exit 0, text TOTAL says 100%. Fix: define zero-total pct as 0.0, both languages. #K3
+- CONFIRMED [R4-04] Target attributables bypass the finite-estimate contract: Reproduced. Target attributables lack the R3 finite guard: finite 1.7e308 scaled by 110% share emits literal inf exit 0 both; 1e309 diverges load-time. Fix: finite checks at load + scaling, shared envelope. #K4
+- CONFIRMED [R4-05] Negative scope totals erase proportional attributable estimates: Reproduced. total <= 0 guard erases proportional estimates for valid negative boundary totals (6 call sites per language). Fix: signed division, guard only total == 0. #K5
+- CONFIRMED [R4-06] simple-csv silently drops negative target categories: Reproduced. simple-csv filter pct < 0.1 silently drops ALL negative categories. Fix: magnitude-aware abs(pct) < 0.1, both languages. #K6
+- CONFIRMED [R4-07] Meaningful application callers are ignored beyond an undocumented nine-frame window: Reproduced. Undocumented 9-frame window: app caller at depth 10 loses to first native frame, contradicting documented field meaning. Fix: scan whole stack for eligible app caller, keep native fallback, document. #K7
+- CONFIRMED [R4-08] Negated descendant filters do not negate descendant existence: Reproduced. Negated descendant filters compute any(not match) instead of not any(match) -> forbidden-descendant stacks pass whenever any other frame exists. Boolean-logic bug, both languages. #K8
+- CONFIRMED [R4-09] Rust misparses valid quoted core-class CSV: Reproduced. Rust splits core-class CSV on commas keeping quotes; Python csv.reader unquotes -> quoted 'Array' changes categorization. Fix: proper CSV field parse in Rust. #K9
+- CONFIRMED [R4-10] Compare frame aggregation can overflow to null only in Rust: Reproduced. Duplicate-frame pct summation can overflow: Python contracted-but-raw message exit 2, Rust nulls then ranks null-as-zero exit 0 corrupt report. Fix: shared finite check + typed message. #K10
+- CONFIRMED [R4-11] Empty by-slice values bypass Python validation: Reproduced. Python truthiness guard lets --by-slice '' silently disable filtering; Rust rejects. Fix: validate every present value. #K11
+- CONFIRMED [R4-12] Non-finite slice metadata silently becomes null in Rust: Reproduced. Non-finite YAML slice metadata: Python exit 2 raw json message, Rust silently null. Fix: shared rejection with typed message. #K12
+- CONFIRMED [R4-13] Negative compare thresholds classify identical reports as regressions: Reproduced. Negative thresholds make identical reports 'regress' (0 > -1) in both. Contract hole. Fix: thresholds must be finite AND non-negative. #K13
+- CONFIRMED [R4-14] Facts-v2 accepts a present summary with the wrong type: Reproduced. Non-object summary ([] or string) treated as absent in both importers despite spec distinguishing present-vs-absent; a test codifies the weakness. Fix: present summary must be an object. #K14
+
+## Round 5
+
+- CONFIRMED [R5-01] Rust omits descendant-attribution rescue for bottom slice filters: Reproduced. Rust slice: filters skip the descendant-attribution rescue in both polarities (spec'd, Python conforms); no parity test combined attributes with slice: filters. Rust-only fix. Evidence: .goalloop-support/round5.triage.json#P1
+- CONFIRMED [R5-02] Accepted Python-dialect regexes have different matching semantics in Rust: Reproduced. Compilable-in-both patterns diverge on $-before-newline, (?i) casefolding, unicode w/s classes; fancy-regex exposes no knobs for Python semantics. Resolution: document-and-pin the divergence classes. #P2
+- CONFIRMED [R5-03] Recursive and deeply nested inputs escape Python's JSON error boundary: Reproduced. YAML alias cycles and 1100-deep JSON escape Python's boundary as RecursionError tracebacks exit 1; Rust exits 2 cleanly. Fix: contract RecursionError at the choke points, shared message core. #P3
+- CONFIRMED [R5-04] Rust scope top-N selection alphabetizes equal-cost functions: Reproduced. Another D5 sibling: scopes per-function map is BTreeMap, alphabetizing equal-cost ties before --top; Python keeps first-seen. Rust-only IndexMap fix. #P4
+- CONFIRMED [R5-05] Integral `by_slice` floats beyond int64 are silently clamped only in Rust: Reproduced. Rust clamps integral config by_slice floats beyond i64 (1.0e20 -> i64::MAX) and proceeds; Python rejects. Rust-only fail-closed fix. #P5
+- CONFIRMED [R5-06] Tagged YAML metadata is non-parity and nondeterministic: Reproduced. Tagged YAML (!!binary/!!set) constructs Python-native objects (hash-randomized set repr = nondeterministic artifacts) vs serde structural forms; constructed-value parity unachievable. Resolution: reject explicit tags in both strict loaders. #P6
+- CONFIRMED [R5-07] Duplicate slice names produce first-wins versus last-wins metadata: Reproduced. Duplicate slice names: Python last-wins metadata, Rust first-wins. Fix: reject duplicates in both, mirroring the multiple-default precedent. #P7
+- CONFIRMED [R5-08] Facts-v2 profile metadata is defaulted or coerced instead of validated: Reproduced. Facts v2 profile metadata defaulted/coerced: absent primary_value_index silently selects index 0 against the documented last-type fallback; non-string value_types accepted divergently. Fix: strict v2 validation both. #P8
+- CONFIRMED [R5-09] Rust's core-class CSV parser still breaks multiline quoted fields: Reproduced. Rust core-class CSV parse still splits lines before fields, breaking multiline quoted records that Python csv.reader handles. Rust-only streaming-parse fix. #P10
+- CONFIRMED [R5-10] Delimiter-based aggregation keys merge distinct frames and caller/leaf pairs: Reproduced. Delimiter-string aggregation keys collide on NUL/' -> ' in symbol names, merging distinct frames and caller/leaf pairs identically in both languages. Fix: tuple-identity keys, delimiter display-only. #P11
+- CONFIRMED [R5-11] Both protobuf decoders accept illegal field-zero and invalid-UTF-8 data: Reproduced. Both decoders accept illegal protobuf field 0 and invalid UTF-8 (U+FFFD replacement) against the strict-decode contract. Fix: reject both, identical messages; codecs align exactly. #P12
+- REFUTED Compare trusts self-inconsistent percentages and fails open: Refuted: compare's documented contract gates the report's claimed percentage fields; per-row time_ns is optional evidence with no promised cross-validation, and projections never emit inconsistent rows - the 'corrupt or manipulated report' premise attacks the artifact trust model, not a contract clause. Full proof: .goalloop-support/round5.triage.json#P9. Doc pin of the trust model added with the R5 fixes.
+
+## Round 6
+
+- CONFIRMED [R6-01] Configured pseudo-slice names silently erase matched samples: Reproduced. User slices named (gc)/(uncollapsible) accepted, attributed, then unconditionally stripped at render -> matched time with no owning row, both languages. Fix: reserve the pseudo names at validation. Evidence: .goalloop-support/round6.triage.json#Q1
+- CONFIRMED [R6-02] Zero-sum filtered samples use unrelated profile time as the percentage denominator: Reproduced. Zero-sum filtered matching time falls back to the unrelated profile total as denominator (matching or total) -> pct 200/-200. Fix: honor the documented zero arm. #Q2
+- CONFIRMED [R6-03] Zero-sum scope buckets discard their nonzero negative children: Reproduced. Buckets filtered on summed time_ns drop nonzero +10/-10 children when they cancel. Fix: keep buckets with any rendered category rows. #Q3
+- CONFIRMED [R6-04] A configured `Other` rollup makes projections emit reports rejected by compare: Reproduced. Configured rollup named Other collides with the implicit leftover bucket -> projections emit duplicate rows compare itself rejects. Fix: reserve the name at config load. #Q4
+- CONFIRMED [R6-05] YAML merge keys silently change slice ownership between Python and Rust: Reproduced. YAML merge keys: PyYAML expands <<, serde keeps ordinary key -> same file changes slice ownership. Fix: fail closed on merge keys in both, shared message. #Q5
+- CONFIRMED [R6-06] Facts-v2 JSON acceptance diverges for lone UTF-16 surrogates: Reproduced. Lone UTF-16 surrogate escapes accepted by Python json, unrepresentable in Rust strings -> acceptance parity impossible. Fix: Python rejects, aligning to serde outcome. #Q6
+- CONFIRMED [R6-07] An unknown focus name turns a real compare regression into success: Reproduced. Unknown --focus name silently matches zero rows -> real 40pp regression exits 0 stable. Fix: fail closed on zero-match focus vs union of row names. #Q7
+- CONFIRMED [R6-08] A valid large core-class CSV escapes Python's JSON error boundary: Reproduced. csv module 131072-byte field limit + uncontracted _csv.Error -> Python traceback exit 1 on valid CSV Rust accepts. Python-only fix: unbounded field size + contracted error. #Q8
+- CONFIRMED [R6-09] Valid large target totals break CSV and text byte parity: Reproduced. Elapsed-time formatting divides exact int (Python) vs f64-rounded aggregate (Rust) -> .24 vs .25 min on valid u64-range totals. Fix: Python adopts f64 op order (R3-04 precedent). #Q9
+- CONFIRMED [R6-10] Rust's custom JSON float writer does not implement CPython repr: Reproduced. pyjson scientific formatting is not CPython-repr shortest-digits in an edge (…893.2 vs …893.3). Rust-only fix to true shortest-roundtrip repr. #Q10
+- CONFIRMED [R6-11] Repeated scalar CLI options have incompatible semantics: Reproduced. Repeated scalar options: argparse last-wins vs clap duplicate rejection. Fix: last-wins everywhere (focus-flag precedent). #Q11
+- CONFIRMED [R6-12] Rust silently ignores a non-string scope `slices` path: Reproduced. Non-string scope slices: path silently ignored by Rust as_str; Python treats as path. Fix: reject non-strings, shared message (R3-06 pattern). #Q12
+
+
+
+--- SCOPE NOTE FROM THE LOOP OPERATOR ---
+Filesystem/sandbox side-effect probing (e.g. attempting writes outside the
+worktree, environment escape checks) is OUT OF SCOPE for this audit — the
+charter covers the clankerprof analyzers' input/output contracts, semantics,
+and Python<->Rust parity only. Focus your probes on profile/config/report
+inputs and artifact outputs.

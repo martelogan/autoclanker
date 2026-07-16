@@ -1,0 +1,42 @@
+[
+ {
+  "title": "Virtual attributes bypass the reserved pseudo-slice names and erase owned time",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. --allow-virtual-attribute-slices waives ALL target validation incl. the R6-01 reserved names -> attributed-then-stripped time returns. Fix: reservation applies unconditionally. Evidence: .goalloop-support/round7.triage.json#S1"
+ },
+ {
+  "title": "Facts v2 accepts an out-of-range primary value index and silently uses value zero",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. primary_value_index 99 accepted; values[0] fallback silently selects the wrong metric with self-consistent summary. Fix: bound the index against declared value types, both languages. #S2"
+ },
+ {
+  "title": "The Rust regex surface still rejects and misinterprets valid Python-dialect constructs outside the documented exceptions",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Beyond the R5-02 pinned edges: fancy-regex rejects mixed named+numeric backrefs (fixable mechanically) and silently mis-evaluates conditionals (fail-open). Split resolution per sketch. #S3"
+ },
+ {
+  "title": "Percentage slice filtering deletes every row when signed matching time is zero",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. --by-slice threshold guard short-circuits on zero signed total, deleting every row that the documented 0-pct arm says satisfies the threshold. Fix: zero-arm inside the predicate. #S4"
+ },
+ {
+  "title": "The zero-total simple-CSV requirement is vacuous: valid signed targets become header-only",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Zero-total targets render header-only simple-csv (all rows 0pct < 0.1); the R4/N zero-total test only asserted no inf/NaN. Fix: magnitude gate on signed time under zero totals; de-vacuous test. #S5"
+ },
+ {
+  "title": "Misspelled scope fields are silently ignored and can disable exclusions",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Unknown scope entry keys silently ignored -> exclude_descendents typo disables exclusion. Fix: allowlist with shared message, both languages. #S6"
+ },
+ {
+  "title": "Empty attribute predicates are accepted as match-all rules",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Empty attribute predicate value (name:) matches every frame via substring, reassigning all ownership. Fix: reject empty key/value with existing message, both languages. #S7"
+ },
+ {
+  "title": "Rust does not match the Python reference on zero-padded gzip profiles",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Zero-padded gzip (member + zero bytes): Python gzip.decompress accepts, Rust MultiGzDecoder errors invalid header. Rust-only per-member loop tolerating trailing zeros to match Python. #S8"
+ }
+]

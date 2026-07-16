@@ -1,0 +1,7 @@
+[cost_kind]
+"AppWork" = "path:app/**"
+
+[[scope]]
+label = "Audited"
+function = "S"
+exclude_descendants = "name_eq:Block"

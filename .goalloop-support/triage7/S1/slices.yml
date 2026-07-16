@@ -1,0 +1,3 @@
+slices:
+  - name: App
+    paths: ['/app/*']
