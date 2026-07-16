@@ -23,6 +23,7 @@ run_step "lint" bash "${ROOT_DIR}/bin/dev" lint
 run_step "typecheck" bash "${ROOT_DIR}/bin/dev" typecheck
 run_step "pylint" bash "${ROOT_DIR}/bin/dev" pylint
 run_step "test full" bash "${ROOT_DIR}/bin/dev" test-full
+run_step "rust lane" bash "${ROOT_DIR}/bin/dev" test-rust
 run_step "build" bash "${ROOT_DIR}/bin/dev" build
 run_step "strict environment parity" bash "${ROOT_DIR}/bin/dev" strict-env validate
 

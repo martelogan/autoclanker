@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -10,6 +12,11 @@ class CompareOptions:
     threshold_rel: float = 15.0
     focus_slices: frozenset[str] = frozenset()
     focus_boundaries: frozenset[str] = frozenset()
+
+
+def _finite_or_none(value: float) -> float | None:
+    """Compare artifacts are strict JSON: non-finite ratios serialize as null."""
+    return value if math.isfinite(value) else None
 
 
 def _slice_map(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -118,7 +125,7 @@ def compare_slice_json(
                 "before_pct": before_pct,
                 "after_pct": after_pct,
                 "delta_abs": delta_abs,
-                "delta_rel": delta_rel,
+                "delta_rel": _finite_or_none(delta_rel),
                 "status": status,
                 "frame_deltas": frame_deltas,
             }
@@ -234,7 +241,7 @@ def compare_boundary_json(
                 "before_pct": before_pct,
                 "after_pct": after_pct,
                 "delta_abs": delta_abs,
-                "delta_rel": delta_rel,
+                "delta_rel": _finite_or_none(delta_rel),
                 "status": status,
             }
         )
@@ -253,11 +260,10 @@ def compare_boundary_json(
         "top_regressions": [
             item for item in row_deltas if cast(float, item["delta_abs"]) > 0.1
         ][:10],
-        "top_improvements": [
-            item
-            for item in reversed(row_deltas)
-            if cast(float, item["delta_abs"]) < -0.1
-        ][:10],
+        "top_improvements": sorted(
+            (item for item in row_deltas if cast(float, item["delta_abs"]) < -0.1),
+            key=lambda item: cast(float, item["delta_abs"]),
+        )[:10],
         "has_regression": has_regression,
     }
 
@@ -273,4 +279,9 @@ def compare_json(
         raise ValueError("Compare inputs must use the same clankerprof projection.")
     if before_tool == "clankerprof_boundaries":
         return compare_boundary_json(before, after, options)
-    return compare_slice_json(before, after, options)
+    if before_tool == "clankerprof_slices":
+        return compare_slice_json(before, after, options)
+    raise ValueError(
+        "Compare inputs must be clankerprof_slices or clankerprof_boundaries "
+        f"reports; got tool {before_tool!r}."
+    )

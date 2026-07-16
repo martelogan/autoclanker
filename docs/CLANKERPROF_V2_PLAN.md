@@ -254,3 +254,62 @@ promise in-process), benchmark suite vs Python on large synthetic profiles.
 - Resolve the spec/doc drift items (35) in the same PRs that touch the behavior.
 - clankerprof is not a coverage target and its docs are not doc-sync-tested today, but
   `skills/clankerprof-operator` documents the CLI surface — update it with CLI changes.
+
+## Appendix: measured evidence (updated as waves land)
+
+### A1/A4 — facts v2 compact encoding (2026-07-14)
+
+Synthetic profile: 10,000 samples, 200 unique frames, depth 3–25 (seed 7).
+
+| Artifact | Size | Ratio vs raw pprof |
+| --- | --- | --- |
+| pprof raw | 413,560 B | 1.0x |
+| pprof gzipped | 227,970 B | 0.55x |
+| facts v1 (denormalized, indent=2) | — | ~90x (pre-v2 measurement) |
+| facts v2 compact | 1,668,260 B | 4.0x |
+| facts v2 `--pretty` | 4,918,529 B | 11.9x |
+
+Replay speed: decode+to_sample_facts 179.1 ms; v2 facts replay 57.5 ms —
+replay is now 3.1x faster than re-decoding (v1 replay was slower than
+re-decoding). Python and Rust compact exports verified byte-identical,
+including non-ASCII frame names.
+
+### A3/A4 — projection and decode performance (2026-07-14, same synthetic profile)
+
+Best-of-3 on the 10,000-sample / 200-unique-frame / depth 3–25 profile:
+
+| Stage | Before | After | Change |
+| --- | --- | --- | --- |
+| decode + to_sample_facts (cold) | 179.1 ms | 84.3 ms | 2.1x (frame interning, A4-01) |
+| to_sample_facts (repeat call) | full recompute | 0.08 µs | memoized (A4-01) |
+| facts v2 replay | 57.5 ms | 50.5 ms | shared interned import path |
+| slice analysis (20 slices + filter + collapse) | 197.3 ms | 26.1 ms | 7.6x (typed DSL + frame-identity memoization, A3-03) |
+| targets (20 parents) | — | 43.8 ms | baseline recorded post-A3-02 shared cache |
+
+Boundary analysis additionally skips the exclude-descendants scan entirely
+when no boundary declares exclusions and normalizes exclusion expressions
+once per analysis (A4-03).
+
+### B5 — Rust vs Python end-to-end CLI (2026-07-14, release build)
+
+Same 10,000-sample / 200-frame synthetic profile; best of 3, full process
+time including startup (Python via `uv run clankerprof`, so its numbers
+include ~100 ms of interpreter and import startup — this is the honest
+end-to-end CLI comparison).
+
+| Case | Python | Rust | Speedup |
+| --- | --- | --- | --- |
+| facts | 209.6 ms | 44.6 ms | 4.7x |
+| targets (20 parents) | 210.5 ms | 37.3 ms | 5.6x |
+| slices (20 slices) | 167.3 ms | 65.7 ms | 2.5x |
+| report (targets+slices, single decode) | 378.4 ms (two runs) | 81.6 ms | 4.6x |
+
+`clankerprof-rs report` decodes once and emits multiple projections in one
+run, realizing the sample-facts design's decode-once promise in-process.
+
+B5-01 resolution: regex compilation is memoized per unique pattern
+(`compiled_regex`), and packs carry few patterns (four generic library
+patterns, one ruby native pattern), so compilation is off the hot path
+entirely; a `RegexSet` cannot serve the library-extraction path anyway, which
+needs per-pattern capture groups. Measured end-to-end numbers above confirm
+pattern matching is not a bottleneck.

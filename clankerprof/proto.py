@@ -1,14 +1,32 @@
 from __future__ import annotations
 
 import gzip
+import zlib
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
-from clankerprof.model import Function, Location, Profile, Sample
+from clankerprof.model import (
+    Function,
+    Location,
+    Profile,
+    Sample,
+    ValueType,
+    select_primary_value_index,
+)
 
 
 class PprofDecodeError(ValueError):
     """Raised when profile bytes are not a supported pprof protobuf profile."""
+
+
+_U64_MASK = (1 << 64) - 1
+_INT64_SIGN_BIT = 1 << 63
+
+
+def _to_signed64(value: int) -> int:
+    """Reinterpret an unsigned varint as a two's-complement int64."""
+    value &= _U64_MASK
+    return value - (1 << 64) if value & _INT64_SIGN_BIT else value
 
 
 @dataclass(slots=True)
@@ -33,9 +51,11 @@ class _Reader:
             byte = self.read_byte()
             result |= (byte & 0x7F) << shift
             if byte < 0x80:
-                return result
+                # Varints are 64-bit: bits past 63 from the 10th byte drop,
+                # matching protobuf semantics (and the Rust port exactly).
+                return result & _U64_MASK
             shift += 7
-            if shift > 70:
+            if shift >= 70:
                 raise PprofDecodeError("Invalid protobuf varint.")
 
     def read_key(self) -> tuple[int, int]:
@@ -56,15 +76,21 @@ class _Reader:
             self.read_varint()
             return
         if wire_type == 1:
-            self.pos += 8
+            self._advance(8)
             return
         if wire_type == 2:
             self.read_length_delimited()
             return
         if wire_type == 5:
-            self.pos += 4
+            self._advance(4)
             return
         raise PprofDecodeError(f"Unsupported protobuf wire type: {wire_type}")
+
+    def _advance(self, count: int) -> None:
+        end = self.pos + count
+        if end > len(self.data):
+            raise PprofDecodeError("Skip extends beyond stream.")
+        self.pos = end
 
 
 def _decode_text_index(strings: list[str], index: int) -> str:
@@ -79,6 +105,28 @@ def _read_packed_varints(payload: bytes) -> tuple[int, ...]:
     while not reader.eof():
         values.append(reader.read_varint())
     return tuple(values)
+
+
+@dataclass(slots=True)
+class _RawValueType:
+    type_index: int = 0
+    unit_index: int = 0
+
+
+def _parse_value_type(payload: bytes) -> _RawValueType:
+    reader = _Reader(payload)
+    result = _RawValueType()
+    while not reader.eof():
+        field, wire = reader.read_key()
+        if wire != 0:
+            reader.skip(wire)
+            continue
+        value = _to_signed64(reader.read_varint())
+        if field == 1:
+            result.type_index = value
+        elif field == 2:
+            result.unit_index = value
+    return result
 
 
 @dataclass(slots=True)
@@ -125,7 +173,7 @@ def _parse_function(payload: bytes) -> _RawFunction:
         elif field == 4:
             result.filename = value
         elif field == 5:
-            result.start_line = value
+            result.start_line = _to_signed64(value)
     return result
 
 
@@ -141,7 +189,7 @@ def _parse_line(payload: bytes) -> _RawLine:
         if field == 1:
             result.function_id = value
         elif field == 2:
-            result.line = value
+            result.line = _to_signed64(value)
     return result
 
 
@@ -178,9 +226,12 @@ def _parse_sample(payload: bytes) -> Sample:
                 reader.skip(wire)
         elif field == 2:
             if wire == 0:
-                values.append(reader.read_varint())
+                values.append(_to_signed64(reader.read_varint()))
             elif wire == 2:
-                values.extend(_read_packed_varints(reader.read_length_delimited()))
+                values.extend(
+                    _to_signed64(value)
+                    for value in _read_packed_varints(reader.read_length_delimited())
+                )
             else:
                 reader.skip(wire)
         else:
@@ -192,18 +243,26 @@ def decode_profile_bytes(data: bytes) -> Profile:
     """Decode raw or gzipped pprof protobuf bytes into the typed profile model."""
     try:
         payload = gzip.decompress(data)
+    except (EOFError, zlib.error) as exc:
+        raise PprofDecodeError(f"Truncated or corrupt gzip profile: {exc}") from exc
     except OSError:
         payload = data
 
     reader = _Reader(payload)
     strings: list[str] = []
+    raw_sample_types: list[_RawValueType] = []
+    raw_period_type: _RawValueType | None = None
+    period = 0
+    default_sample_type_index = 0
     raw_functions: list[_RawFunction] = []
     raw_locations: list[_RawLocation] = []
     samples: list[Sample] = []
 
     while not reader.eof():
         field, wire = reader.read_key()
-        if field == 2 and wire == 2:
+        if field == 1 and wire == 2:
+            raw_sample_types.append(_parse_value_type(reader.read_length_delimited()))
+        elif field == 2 and wire == 2:
             samples.append(_parse_sample(reader.read_length_delimited()))
         elif field == 4 and wire == 2:
             raw_locations.append(_parse_location(reader.read_length_delimited()))
@@ -213,6 +272,12 @@ def decode_profile_bytes(data: bytes) -> Profile:
             strings.append(
                 reader.read_length_delimited().decode("utf-8", errors="replace")
             )
+        elif field == 11 and wire == 2:
+            raw_period_type = _parse_value_type(reader.read_length_delimited())
+        elif field == 12 and wire == 0:
+            period = _to_signed64(reader.read_varint())
+        elif field == 14 and wire == 0:
+            default_sample_type_index = _to_signed64(reader.read_varint())
         else:
             reader.skip(wire)
 
@@ -237,11 +302,38 @@ def decode_profile_bytes(data: bytes) -> Profile:
         if item.location_id > 0
     }
 
+    sample_types = tuple(
+        ValueType(
+            type_name=_decode_text_index(strings, raw.type_index),
+            unit=_decode_text_index(strings, raw.unit_index),
+        )
+        for raw in raw_sample_types
+    )
+    period_type = (
+        ValueType(
+            type_name=_decode_text_index(strings, raw_period_type.type_index),
+            unit=_decode_text_index(strings, raw_period_type.unit_index),
+        )
+        if raw_period_type is not None
+        else None
+    )
+    default_sample_type = _decode_text_index(strings, default_sample_type_index)
+    primary_value_index = select_primary_value_index(sample_types, default_sample_type)
+    if primary_value_index != 0:
+        samples = [
+            replace(sample, primary_index=primary_value_index) for sample in samples
+        ]
+
     return Profile(
         string_table=tuple(strings),
         functions=functions,
         locations=locations,
         samples=tuple(samples),
+        sample_types=sample_types,
+        period_type=period_type,
+        period=period,
+        default_sample_type=default_sample_type,
+        primary_value_index=primary_value_index,
     )
 
 

@@ -100,6 +100,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _emit_json(payload: dict[str, JsonValue], output_path: str | None) -> None:
+    raw_output = payload.pop("raw_output", None)
+    if raw_output is not None:
+        print(raw_output)
+        return
     rendered = json.dumps(payload, indent=2, sort_keys=True)
     if output_path is not None:
         Path(output_path).write_text(rendered + "\n", encoding="utf-8")

@@ -1,49 +1,23 @@
+use crate::categorize::{categorize_stack, RuntimeCategoryCache};
 use crate::facts::{sample_facts_to_json_value, SAMPLE_FACTS_SCHEMA_VERSION};
 use crate::model::{CategoryStats, Frame, FunctionMetrics, ProfileFacts, TimeNs};
+use indexmap::IndexMap;
 use regex::Regex;
+use serde_json::value::RawValue;
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::{Mutex, OnceLock};
 
-pub type TargetConfig = BTreeMap<String, BTreeMap<String, String>>;
-pub type TargetResults = BTreeMap<String, BTreeMap<String, CategoryStats>>;
+// Category precedence is first-match-wins in config order, and ranked arrays
+// break ties by first-seen order, matching the Python reference; both need
+// insertion-ordered maps, never BTreeMap.
+pub type TargetConfig = IndexMap<String, IndexMap<String, String>>;
+pub type TargetResults = BTreeMap<String, IndexMap<String, CategoryStats>>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeRuleSet {
-    pub library_path_patterns: Vec<LibraryPattern>,
-    pub library_selector_path_patterns: BTreeMap<String, Vec<LibraryPattern>>,
-    pub library_name_suffix_patterns: Vec<String>,
-    pub stdlib_path_markers: Vec<String>,
-}
+pub use crate::rules::{LibraryPattern, RuntimeRuleSet};
 
-impl RuntimeRuleSet {
-    pub fn generic() -> Self {
-        let mut selector_patterns = BTreeMap::new();
-        selector_patterns.insert(
-            "gem".to_string(),
-            vec![LibraryPattern::Regex("/gems/([^/]+)/".to_string())],
-        );
-        Self {
-            library_path_patterns: vec![
-                LibraryPattern::Regex("/vendor/([^/]+)/".to_string()),
-                LibraryPattern::Regex("/third_party/([^/]+)/".to_string()),
-                LibraryPattern::Regex("/node_modules/((?:@[^/]+/)?[^/]+)/".to_string()),
-                LibraryPattern::Regex("/packages/([^/]+)/".to_string()),
-            ],
-            library_selector_path_patterns: selector_patterns,
-            library_name_suffix_patterns: vec![
-                "-[0-9].*".to_string(),
-                "-[0-9a-fA-F]{7,}.*".to_string(),
-            ],
-            stdlib_path_markers: Vec::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LibraryPattern {
-    Regex(String),
-    Path(String),
-}
+pub const DEFAULT_LIBRARY_SELECTORS: &[&str] =
+    &["dependency", "gem", "library", "package", "vendor"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryPath {
@@ -54,12 +28,20 @@ pub struct LibraryPath {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TargetAnalysisOptions {
     pub runtime_rules: RuntimeRuleSet,
+    pub enhanced_runtime_categorization: bool,
+    pub fold_runtime_internals: bool,
+    pub track_semantic_callers: bool,
+    pub caller_fallback_when_uncategorized: bool,
 }
 
 impl Default for TargetAnalysisOptions {
     fn default() -> Self {
         Self {
-            runtime_rules: RuntimeRuleSet::generic(),
+            runtime_rules: RuntimeRuleSet::generic().clone(),
+            enhanced_runtime_categorization: true,
+            fold_runtime_internals: false,
+            track_semantic_callers: false,
+            caller_fallback_when_uncategorized: false,
         }
     }
 }
@@ -73,17 +55,14 @@ enum PatternMode {
 }
 
 pub fn parse_target_config_json(payload: &str) -> Result<TargetConfig, String> {
-    let value: Value = serde_json::from_str(payload).map_err(|error| error.to_string())?;
-    let Value::Object(parents) = value else {
-        return Err("Target config must be a JSON object.".to_string());
-    };
+    let parents: IndexMap<String, Box<RawValue>> = serde_json::from_str(payload)
+        .map_err(|_| "Target config must be a JSON object.".to_string())?;
     let mut result = TargetConfig::new();
-    for (parent, categories) in parents {
-        let Value::Object(raw_categories) = categories else {
-            return Err(format!("Target config for {parent} must be an object."));
-        };
-        let mut category_map = BTreeMap::new();
-        for (category, pattern) in raw_categories {
+    for (parent, raw_categories) in parents {
+        let categories: IndexMap<String, Value> = serde_json::from_str(raw_categories.get())
+            .map_err(|_| format!("Target config for {parent} must be an object."))?;
+        let mut category_map = IndexMap::new();
+        for (category, pattern) in categories {
             let Some(pattern_text) = pattern.as_str() else {
                 return Err(format!(
                     "Target config pattern for {category} must be a string."
@@ -106,33 +85,65 @@ pub fn analyze_target_facts_with_options(
     options: &TargetAnalysisOptions,
 ) -> TargetResults {
     let mut results = TargetResults::new();
+    let mut runtime_cache = RuntimeCategoryCache::default();
     for fact in facts.samples.iter().filter(|fact| !fact.is_empty()) {
         let value = fact.primary_value();
-        let Some(leaf) = fact.stack.first() else {
+        let stack = fact.stack.as_slice();
+        let Some(leaf) = stack.first() else {
             continue;
         };
-        let target_frames = fact
-            .stack
+        let target_frames = stack
             .iter()
             .filter(|frame| config.contains_key(&frame.name));
+        let mut seen_targets: BTreeSet<&str> = BTreeSet::new();
         for target_frame in target_frames {
-            let parent_results = results.entry(target_frame.name.clone()).or_default();
-            let category = target_category(
-                leaf,
-                config
-                    .get(&target_frame.name)
-                    .expect("target frame from config"),
-                options,
+            if !seen_targets.insert(target_frame.name.as_str()) {
+                continue;
+            }
+            let parent_config = config
+                .get(&target_frame.name)
+                .expect("target frame from config");
+            let mut configured_category_for = |frame: &Frame| {
+                parent_config
+                    .iter()
+                    .find(|(_, pattern)| {
+                        match_category_pattern(pattern, &frame.filename, &options.runtime_rules)
+                    })
+                    .map(|(category, _)| category.clone())
+            };
+            let outcome = categorize_stack(
+                stack,
+                &options.runtime_rules,
+                options.enhanced_runtime_categorization,
+                options.fold_runtime_internals,
+                options.caller_fallback_when_uncategorized,
+                &mut runtime_cache,
+                &mut configured_category_for,
             );
-            let stats = parent_results.entry(category).or_default();
+            let frame_to_categorize = &stack[outcome.frame_index];
+            let parent_results = results.entry(target_frame.name.clone()).or_default();
+            let stats = parent_results.entry(outcome.category).or_default();
             stats.cpu_time += value;
             stats.sample_count += 1;
             stats.add_function(&leaf.name, value);
-            stats.files.insert(leaf.filename.clone());
-            if let Some(caller) = first_non_runtime_file_caller(&fact.stack, &options.runtime_rules)
-                .or_else(|| fact.stack.get(1))
-            {
+            stats.files.insert(frame_to_categorize.filename.clone());
+            let caller = stack
+                .iter()
+                .skip(1)
+                .take(9)
+                .find(|frame| {
+                    !frame.filename.starts_with('<')
+                        && !is_runtime_stdlib_path(&frame.filename, &options.runtime_rules)
+                })
+                .or_else(|| stack.get(1));
+            if let Some(caller) = caller {
                 stats.add_caller_leaf_pair(&caller.name, &leaf.name, value);
+            }
+            if outcome.folded && outcome.folded_category.is_some() {
+                *stats.folded_from.entry(leaf.name.clone()).or_insert(0) += value;
+            }
+            if options.track_semantic_callers && leaf.filename.starts_with('<') && stack.len() > 1 {
+                stats.add_semantic_caller(&leaf.name, &stack[1]);
             }
         }
     }
@@ -156,7 +167,13 @@ pub fn render_target_json(results: &TargetResults) -> Value {
                         "name": category,
                         "pct": if total == 0 { 0.0 } else { stats.cpu_time as f64 / total as f64 * 100.0 },
                         "samples": stats.sample_count,
-                        "semantic_callers": {},
+                        "semantic_callers": stats.semantic_callers.iter().map(|(leaf, metrics)| {
+                            (leaf.clone(), json!({
+                                "caller_files": metrics.caller_files,
+                                "caller_names": metrics.caller_names,
+                                "count": metrics.count,
+                            }))
+                        }).collect::<serde_json::Map<_, _>>(),
                         "time_ns": stats.cpu_time,
                     })
                 }).collect::<Vec<_>>(),
@@ -187,7 +204,7 @@ pub fn assert_sample_facts_schema(payload: &Value) -> Result<(), String> {
     Ok(())
 }
 
-fn render_function_metrics(functions: &BTreeMap<String, FunctionMetrics>) -> Value {
+fn render_function_metrics(functions: &IndexMap<String, FunctionMetrics>) -> Value {
     let mut ordered: Vec<_> = functions.iter().collect();
     ordered.sort_by(|left, right| right.1.cpu_time.cmp(&left.1.cpu_time));
     let mut payload = serde_json::Map::new();
@@ -201,28 +218,6 @@ fn render_function_metrics(functions: &BTreeMap<String, FunctionMetrics>) -> Val
         );
     }
     Value::Object(payload)
-}
-
-fn target_category(
-    leaf: &Frame,
-    parent_config: &BTreeMap<String, String>,
-    options: &TargetAnalysisOptions,
-) -> String {
-    for (category, pattern) in parent_config {
-        if match_category_pattern(pattern, &leaf.filename, &options.runtime_rules) {
-            return category.clone();
-        }
-    }
-    "Other".to_string()
-}
-
-fn first_non_runtime_file_caller<'a>(
-    stack: &'a [Frame],
-    rules: &RuntimeRuleSet,
-) -> Option<&'a Frame> {
-    stack.iter().skip(1).find(|frame| {
-        !frame.filename.starts_with('<') && !is_runtime_stdlib_path(&frame.filename, rules)
-    })
 }
 
 pub fn match_category_pattern(pattern: &str, path: &str, rules: &RuntimeRuleSet) -> bool {
@@ -303,7 +298,7 @@ pub fn extract_library_path(
     for pattern in patterns {
         match pattern {
             LibraryPattern::Regex(pattern) => {
-                let regex = Regex::new(pattern).ok()?;
+                let regex = compiled_regex(pattern)?;
                 let Some(captures) = regex.captures(&normalized) else {
                     continue;
                 };
@@ -382,6 +377,22 @@ fn normalize_profile_path(path: &str) -> String {
     path.replace('\\', "/")
 }
 
+/// Memoized regex compilation: rule-pack and config patterns are evaluated
+/// once per unique frame path across hot per-frame loops, so compiling on
+/// every call dominated runtime. Patterns come from configs, so the cache is
+/// small and bounded per process.
+pub(crate) fn compiled_regex(pattern: &str) -> Option<Regex> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<Regex>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = cache.lock().expect("regex cache poisoned");
+    if let Some(entry) = guard.get(pattern) {
+        return entry.clone();
+    }
+    let compiled = Regex::new(pattern).ok();
+    guard.insert(pattern.to_string(), compiled.clone());
+    compiled
+}
+
 fn has_glob_token(pattern: &str) -> bool {
     pattern.contains('*') || pattern.contains('?') || pattern.contains('[')
 }
@@ -393,8 +404,8 @@ fn looks_like_path_pattern(pattern: &str) -> bool {
         || pattern.starts_with("../")
 }
 
-fn match_regex(pattern: &str, path: &str) -> bool {
-    Regex::new(pattern)
+pub(crate) fn match_regex(pattern: &str, path: &str) -> bool {
+    compiled_regex(pattern)
         .map(|regex| regex.is_match(&normalize_profile_path(path)))
         .unwrap_or(false)
 }
@@ -424,7 +435,7 @@ fn glob_to_regex(pattern: &str) -> String {
 fn normalize_library_component(component: &str, rules: &RuntimeRuleSet) -> String {
     let normalized = component.trim_matches('/');
     for pattern in &rules.library_name_suffix_patterns {
-        let Ok(regex) = Regex::new(pattern) else {
+        let Some(regex) = compiled_regex(pattern) else {
             continue;
         };
         if let Some(found) = regex.find(normalized) {
@@ -436,7 +447,7 @@ fn normalize_library_component(component: &str, rules: &RuntimeRuleSet) -> Strin
     normalized.to_string()
 }
 
-fn is_runtime_stdlib_path(path: &str, rules: &RuntimeRuleSet) -> bool {
+pub fn is_runtime_stdlib_path(path: &str, rules: &RuntimeRuleSet) -> bool {
     !path.is_empty()
         && !path.starts_with('<')
         && rules

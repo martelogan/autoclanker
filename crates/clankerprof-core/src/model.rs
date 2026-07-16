@@ -1,3 +1,4 @@
+use indexmap::IndexMap;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -23,14 +24,44 @@ pub struct Frame {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValueType {
+    pub type_name: String,
+    pub unit: String,
+}
+
+/// Pick the value index projections aggregate, per pprof convention.
+///
+/// `default_sample_type` wins when it names a declared sample type; otherwise
+/// the last declared type is the default. Profiles that declare no sample
+/// types keep index 0.
+pub fn select_primary_value_index(sample_types: &[ValueType], default_sample_type: &str) -> usize {
+    if !default_sample_type.is_empty() {
+        if let Some(index) = sample_types
+            .iter()
+            .position(|value_type| value_type.type_name == default_sample_type)
+        {
+            return index;
+        }
+    }
+    sample_types.len().saturating_sub(1)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sample {
     pub location_ids: Vec<u64>,
     pub values: Vec<TimeNs>,
+    pub primary_index: usize,
 }
 
 impl Sample {
     pub fn primary_value(&self) -> TimeNs {
-        self.values.first().copied().unwrap_or(0)
+        if self.values.is_empty() {
+            return 0;
+        }
+        self.values
+            .get(self.primary_index)
+            .copied()
+            .unwrap_or(self.values[0])
     }
 }
 
@@ -56,6 +87,11 @@ pub struct ProfileFacts {
     pub samples: Vec<SampleFact>,
     pub total_primary_value: TimeNs,
     pub empty_sample_count: usize,
+    pub value_types: Vec<ValueType>,
+    pub period_type: Option<ValueType>,
+    pub period: i64,
+    pub default_sample_type: String,
+    pub primary_value_index: usize,
 }
 
 impl ProfileFacts {
@@ -77,6 +113,11 @@ pub struct Profile {
     pub functions: BTreeMap<u64, Function>,
     pub locations: BTreeMap<u64, Location>,
     pub samples: Vec<Sample>,
+    pub sample_types: Vec<ValueType>,
+    pub period_type: Option<ValueType>,
+    pub period: i64,
+    pub default_sample_type: String,
+    pub primary_value_index: usize,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -94,19 +135,22 @@ pub struct CallerMetrics {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SemanticCallerMetrics {
     pub count: usize,
-    pub caller_names: BTreeMap<String, usize>,
-    pub caller_files: BTreeMap<String, usize>,
+    // First-max-wins summaries need Python's insertion order.
+    pub caller_names: IndexMap<String, usize>,
+    pub caller_files: IndexMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CategoryStats {
     pub cpu_time: TimeNs,
     pub sample_count: usize,
-    pub functions: BTreeMap<String, FunctionMetrics>,
+    // Ranked CSV/text summaries break ties first-seen, like Python dicts.
+    pub functions: IndexMap<String, FunctionMetrics>,
     pub files: BTreeSet<String>,
-    pub folded_from: BTreeMap<String, TimeNs>,
-    pub semantic_callers: BTreeMap<String, SemanticCallerMetrics>,
-    pub caller_leaf_pairs: BTreeMap<String, CallerMetrics>,
+    pub folded_from: IndexMap<String, TimeNs>,
+    pub semantic_callers: IndexMap<String, SemanticCallerMetrics>,
+    // Rendered as a ranked array in scope output; ties break first-seen.
+    pub caller_leaf_pairs: IndexMap<String, CallerMetrics>,
 }
 
 impl CategoryStats {
@@ -123,6 +167,81 @@ impl CategoryStats {
             .or_default();
         metrics.count += 1;
         metrics.cpu_time += value;
+    }
+
+    pub fn add_semantic_caller(&mut self, leaf: &str, caller: &Frame) {
+        let metrics = self.semantic_callers.entry(leaf.to_string()).or_default();
+        metrics.count += 1;
+        *metrics.caller_names.entry(caller.name.clone()).or_insert(0) += 1;
+        *metrics
+            .caller_files
+            .entry(caller.filename.clone())
+            .or_insert(0) += 1;
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DomainFileStats {
+    pub filename: String,
+    pub cpu_time: TimeNs,
+    pub sample_count: usize,
+    pub functions: BTreeMap<String, FunctionMetrics>,
+    // Ranked arrays in scope output; ties break first-seen.
+    pub cost_kinds: IndexMap<String, CallerMetrics>,
+    pub caller_leaf_pairs: IndexMap<(String, String), CallerMetrics>,
+}
+
+impl DomainFileStats {
+    pub fn add(
+        &mut self,
+        owner_function: &str,
+        leaf_function: &str,
+        cost_kind: &str,
+        value: TimeNs,
+    ) {
+        self.cpu_time += value;
+        self.sample_count += 1;
+        let function_metrics = self
+            .functions
+            .entry(owner_function.to_string())
+            .or_default();
+        function_metrics.count += 1;
+        function_metrics.cpu_time += value;
+        let cost_metrics = self.cost_kinds.entry(cost_kind.to_string()).or_default();
+        cost_metrics.count += 1;
+        cost_metrics.cpu_time += value;
+        let pair_metrics = self
+            .caller_leaf_pairs
+            .entry((owner_function.to_string(), leaf_function.to_string()))
+            .or_default();
+        pair_metrics.count += 1;
+        pair_metrics.cpu_time += value;
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DomainStats {
+    pub cpu_time: TimeNs,
+    pub sample_count: usize,
+    pub cost_kinds: IndexMap<String, CallerMetrics>,
+    pub files: IndexMap<String, DomainFileStats>,
+}
+
+impl DomainStats {
+    pub fn add(&mut self, owner: &Frame, leaf: &Frame, cost_kind: &str, value: TimeNs) {
+        self.cpu_time += value;
+        self.sample_count += 1;
+        let cost_metrics = self.cost_kinds.entry(cost_kind.to_string()).or_default();
+        cost_metrics.count += 1;
+        cost_metrics.cpu_time += value;
+        let file_stats =
+            self.files
+                .entry(owner.filename.clone())
+                .or_insert_with(|| DomainFileStats {
+                    filename: owner.filename.clone(),
+                    ..DomainFileStats::default()
+                });
+        file_stats.add(&owner.name, &leaf.name, cost_kind, value);
     }
 }
 
@@ -167,6 +286,11 @@ impl Profile {
             samples,
             total_primary_value,
             empty_sample_count,
+            value_types: self.sample_types.clone(),
+            period_type: self.period_type.clone(),
+            period: self.period,
+            default_sample_type: self.default_sample_type.clone(),
+            primary_value_index: self.primary_value_index,
         }
     }
 }

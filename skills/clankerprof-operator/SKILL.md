@@ -30,7 +30,8 @@ clankerprof slices --profile profile.pb.gz
 clankerprof facts --profile profile.pb.gz --output profile-facts.json
 ```
 
-Use `--facts profile-facts.json` when replaying multiple projections from one
+Facts artifacts are compact JSON by default; add `--pretty` for humans. Use
+`--facts profile-facts.json` when replaying multiple projections from one
 decoded profile. This is also the preferred seam for golden tests and
 cross-language ports.
 
@@ -89,18 +90,27 @@ python scripts/clankerprof/check_real_profile_parity.py \
   --expected-target-json reference-targets.json
 ```
 
-6. Use the Rust core when checking cross-language parity.
+6. Use the Rust core when speed matters or when checking cross-language parity.
 
-`crates/clankerprof-core` is the Rust compatibility implementation for the
-sample-facts engine and generic projections. It should match the Python output
-before downstream tools treat it as an integration boundary.
+`crates/clankerprof-core` is the capabilities-complete Rust implementation:
+facts (export and replay), targets (all formats and runtime flags), slices,
+scopes/boundaries, compare gates, and a single-pass `report` mode. It loads
+the same packaged rule packs the Python package ships (embedded at compile
+time), and the parity suite pins its artifacts byte-for-byte against Python.
 
 ```bash
 cargo run -p clankerprof-core --bin clankerprof-rs -- \
   facts --profile profile.pb.gz --output profile-facts.json
 
 cargo run -p clankerprof-core --bin clankerprof-rs -- \
-  slices --profile profile.pb.gz --slices slices.yml --output slices.json
+  targets --profile profile.pb.gz --config target_config.json --runtime ruby
+
+cargo run -p clankerprof-core --bin clankerprof-rs -- \
+  scopes --profile profile.pb.gz --config scopes.toml
+
+cargo run -p clankerprof-core --bin clankerprof-rs -- \
+  report --profile profile.pb.gz --config target_config.json \
+  --slices slices.yml --scopes-config scopes.toml
 
 CLANKERPROF_REAL_PROFILE_PARITY=1 \
 python scripts/clankerprof/check_real_profile_parity.py \
@@ -116,15 +126,14 @@ python scripts/clankerprof/check_real_profile_parity.py \
 ./bin/dev format
 ./bin/dev exec -- pytest tests/test_clankerprof.py tests/test_package.py tests/test_cli_commands.py -q
 ./bin/dev exec -- pytest tests/test_clankerprof_rust_parity.py -q
-cargo fmt --check
-cargo test -p clankerprof-core
+./bin/dev test-rust
 ./bin/dev check
 ```
 
 ## Cross-Language Port Checklist
 
-- Preserve `clankerprof.sample_facts.v1` byte-level semantics, not Python object
-  internals.
+- Preserve `clankerprof.sample_facts.v2` byte-level semantics, not Python object
+  internals; keep accepting legacy `clankerprof.sample_facts.v1` imports.
 - Preserve sparse pprof IDs, inline frames, folded-location markers, sample
   order, all sample values, and leaf-to-root stack order.
 - Implement target, scope/boundary, and slice projections over sample facts, not over

@@ -19,7 +19,8 @@ from clankerprof.analysis import (
     extract_library_path,
     format_time,
 )
-from clankerprof.model import CategoryStats, TimeNs
+from clankerprof.model import TimeNs
+from clankerprof.stats import CategoryStats
 
 
 def render_target_json(
@@ -933,4 +934,4 @@ def render_slice_json(
 
 
 def render_json_payload(payload: dict[str, object]) -> str:
-    return json.dumps(payload, indent=2, sort_keys=True)
+    return json.dumps(payload, indent=2, sort_keys=True, allow_nan=False)
