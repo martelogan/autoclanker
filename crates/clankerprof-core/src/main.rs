@@ -51,223 +51,353 @@ enum Command {
 #[derive(Args)]
 struct FactsArgs {
     /// Raw or gzipped pprof profile path.
-    #[arg(long)]
+    #[arg(long, overrides_with = "profile")]
     profile: PathBuf,
     /// Write the facts artifact to this path instead of stdout.
-    #[arg(long)]
+    #[arg(long, overrides_with = "output")]
     output: Option<PathBuf>,
     /// Indent the facts artifact for humans (default is compact JSON).
-    #[arg(long)]
+    #[arg(long, overrides_with = "pretty")]
     pretty: bool,
 }
 
 #[derive(Args)]
 struct TargetsArgs {
     /// Raw or gzipped pprof profile path.
-    #[arg(long)]
+    #[arg(long, overrides_with = "profile")]
     profile: Option<PathBuf>,
     /// Read versioned sample-facts JSON instead of a pprof profile.
-    #[arg(long)]
+    #[arg(long, overrides_with = "facts")]
     facts: Option<PathBuf>,
     /// JSON target config mapping parent functions to category patterns.
-    #[arg(long)]
+    #[arg(long, overrides_with = "config")]
     config: Option<PathBuf>,
     /// Minimal mode: add a parent function with no category patterns.
     #[arg(long = "target")]
     targets: Vec<String>,
     /// Runtime rule pack to apply (generic or ruby).
-    #[arg(long, default_value = "generic")]
+    #[arg(long, default_value = "generic", overrides_with = "runtime")]
     runtime: String,
     /// External runtime rule pack YAML (overrides --runtime).
-    #[arg(long)]
+    #[arg(long, overrides_with = "runtime_rules")]
     runtime_rules: Option<PathBuf>,
     /// Core classes CSV override for the ruby runtime.
-    #[arg(long)]
+    #[arg(
+        long,
+        visible_alias = "ruby-core-classes",
+        overrides_with = "core_classes"
+    )]
     core_classes: Option<PathBuf>,
     /// Disable enhanced runtime categorization (caller fallback engages).
-    #[arg(long)]
+    #[arg(long, overrides_with = "no_enhanced")]
     no_enhanced: bool,
     /// Fold runtime-internal leaves into the first meaningful caller.
-    #[arg(long)]
+    #[arg(
+        long,
+        visible_alias = "fold-ruby-internals",
+        overrides_with = "fold_runtime_internals"
+    )]
     fold_runtime_internals: bool,
+    /// Keep verbose-only foldable categories visible in runtime rule packs.
+    #[arg(
+        long,
+        visible_alias = "verbose-ruby-internals",
+        overrides_with = "verbose_runtime_internals"
+    )]
+    verbose_runtime_internals: bool,
     /// Track semantic callers for native leaves.
-    #[arg(long)]
+    #[arg(long, overrides_with = "track_semantic_callers")]
     track_semantic_callers: bool,
     /// Write the semantic-caller CSV to this path.
-    #[arg(long)]
+    #[arg(long, overrides_with = "semantic_callers_csv")]
     semantic_callers_csv: Option<PathBuf>,
     /// JSON file of attributable column -> parent function -> value.
-    #[arg(long)]
+    #[arg(
+        long,
+        visible_alias = "attributables",
+        overrides_with = "cpu_attributables"
+    )]
     cpu_attributables: Option<PathBuf>,
     /// Write the report to this path instead of stdout.
-    #[arg(long)]
+    #[arg(long, overrides_with = "output")]
     output: Option<PathBuf>,
     /// Output format: json, csv, simple-csv, or text.
-    #[arg(long, default_value = "json")]
+    #[arg(long, default_value = "json", overrides_with = "format")]
     format: String,
     /// CSV artifact layout (standard, or compat for the two-file pair).
-    #[arg(long, default_value = "standard")]
-    target_csv_layout: String,
+    #[arg(long, overrides_with = "target_csv_layout")]
+    target_csv_layout: Option<String>,
+    /// Compatibility alias for --target-csv-layout=compat.
+    #[arg(long, overrides_with = "legacy_target_csv_layout")]
+    legacy_target_csv_layout: bool,
 }
 
 #[derive(Args)]
 struct SlicesArgs {
     /// Raw or gzipped pprof profile path.
-    #[arg(long)]
+    #[arg(long, overrides_with = "profile")]
     profile: Option<PathBuf>,
     /// Read versioned sample-facts JSON instead of a pprof profile.
-    #[arg(long)]
+    #[arg(long, overrides_with = "facts")]
     facts: Option<PathBuf>,
+    /// Slice options file (TOML or YAML) merged with CLI flags.
+    #[arg(long, overrides_with = "config")]
+    config: Option<PathBuf>,
     /// Slice definitions YAML file.
-    #[arg(long)]
+    #[arg(long, overrides_with = "slices")]
     slices: Option<PathBuf>,
     /// Attribution override rule '<key>:<value>,to:<slice>', repeatable.
     #[arg(long)]
     attribute: Vec<String>,
     /// Accept --attribute targets that are not declared slices.
-    #[arg(long)]
+    #[arg(long, overrides_with = "allow_virtual_attribute_slices")]
     allow_virtual_attribute_slices: bool,
     /// Runtime rule pack to apply (generic or ruby).
-    #[arg(long, default_value = "generic")]
+    #[arg(long, default_value = "generic", overrides_with = "runtime")]
     runtime: String,
     /// External runtime rule pack YAML (overrides --runtime).
-    #[arg(long)]
+    #[arg(long, overrides_with = "runtime_rules")]
     runtime_rules: Option<PathBuf>,
     /// Core classes CSV override for the ruby runtime.
-    #[arg(long)]
+    #[arg(
+        long,
+        visible_alias = "ruby-core-classes",
+        overrides_with = "core_classes"
+    )]
     core_classes: Option<PathBuf>,
+    /// Keep verbose-only foldable categories visible in runtime rule packs.
+    #[arg(
+        long,
+        visible_alias = "verbose-ruby-internals",
+        overrides_with = "verbose_runtime_internals"
+    )]
+    verbose_runtime_internals: bool,
     /// Bottom-frame filter, repeatable.
     #[arg(long)]
     filter: Vec<String>,
     /// Collapse rule, repeatable.
     #[arg(long)]
     collapse: Vec<String>,
-    /// Limit frames per slice.
-    #[arg(long)]
-    top: Option<usize>,
+    /// Limit frames per slice (negative drops from the tail, Python-style).
+    #[arg(long, allow_negative_numbers = true, overrides_with = "top")]
+    top: Option<String>,
     /// Slice count limit or percentage threshold (bare flag means 0.1%).
-    #[arg(long, num_args = 0..=1, default_missing_value = "0.1%")]
+    /// Negative-number values must parse as values, mirroring argparse.
+    #[arg(long, num_args = 0..=1, default_missing_value = "0.1%", allow_negative_numbers = true, overrides_with = "by_slice")]
     by_slice: Option<String>,
     /// Include filename paths in frame output.
-    #[arg(long)]
+    #[arg(long, overrides_with = "show_paths")]
     show_paths: bool,
     /// Keep native frames eligible as bottom attribution frames.
-    #[arg(long)]
+    #[arg(long, overrides_with = "no_collapse_native")]
     no_collapse_native: bool,
     /// Report unattributed dependency libraries for the default slice
     /// (optionally limited to N entries).
-    #[arg(long, visible_alias = "unattributed-gems", num_args = 0..=1, default_missing_value = "9223372036854775807")]
-    unattributed_libraries: Option<usize>,
+    #[arg(long, visible_alias = "unattributed-gems", num_args = 0..=1, default_missing_value = "9223372036854775807", allow_negative_numbers = true, overrides_with = "unattributed_libraries")]
+    unattributed_libraries: Option<String>,
     /// Write the report to this path instead of stdout.
-    #[arg(long)]
+    #[arg(long, overrides_with = "output")]
     output: Option<PathBuf>,
 }
 
 #[derive(Args)]
 struct ScopesArgs {
     /// Raw or gzipped pprof profile path.
-    #[arg(long)]
+    #[arg(long, overrides_with = "profile")]
     profile: Option<PathBuf>,
     /// Read versioned sample-facts JSON instead of a pprof profile.
-    #[arg(long)]
+    #[arg(long, overrides_with = "facts")]
     facts: Option<PathBuf>,
     /// Scope config (TOML or YAML).
-    #[arg(long)]
+    #[arg(long, overrides_with = "config")]
     config: PathBuf,
-    /// Limit ranked rows per section.
-    #[arg(long)]
-    top: Option<usize>,
+    /// Limit ranked rows per section (negative drops from the tail, Python-style).
+    #[arg(long, allow_negative_numbers = true, overrides_with = "top")]
+    top: Option<String>,
     /// Runtime rule pack to apply (generic or ruby).
-    #[arg(long, default_value = "generic")]
+    #[arg(long, default_value = "generic", overrides_with = "runtime")]
     runtime: String,
     /// External runtime rule pack YAML (overrides --runtime).
-    #[arg(long)]
+    #[arg(long, overrides_with = "runtime_rules")]
     runtime_rules: Option<PathBuf>,
     /// Core classes CSV override for the ruby runtime.
-    #[arg(long)]
+    #[arg(
+        long,
+        visible_alias = "ruby-core-classes",
+        overrides_with = "core_classes"
+    )]
     core_classes: Option<PathBuf>,
+    /// Disable enhanced runtime categorization (caller fallback engages).
+    #[arg(long, overrides_with = "no_enhanced")]
+    no_enhanced: bool,
+    /// Fold runtime-internal leaves into the first meaningful caller.
+    #[arg(
+        long,
+        visible_alias = "fold-ruby-internals",
+        overrides_with = "fold_runtime_internals"
+    )]
+    fold_runtime_internals: bool,
+    /// Keep verbose-only foldable categories visible in runtime rule packs.
+    #[arg(
+        long,
+        visible_alias = "verbose-ruby-internals",
+        overrides_with = "verbose_runtime_internals"
+    )]
+    verbose_runtime_internals: bool,
     /// Write the report to this path instead of stdout.
-    #[arg(long)]
+    #[arg(long, overrides_with = "output")]
     output: Option<PathBuf>,
 }
 
 #[derive(Args)]
 struct ReportArgs {
     /// Raw or gzipped pprof profile path.
-    #[arg(long)]
+    #[arg(long, overrides_with = "profile")]
     profile: Option<PathBuf>,
     /// Read versioned sample-facts JSON instead of a pprof profile.
-    #[arg(long)]
+    #[arg(long, overrides_with = "facts")]
     facts: Option<PathBuf>,
     /// JSON target config; enables the targets section.
-    #[arg(long)]
+    #[arg(long, overrides_with = "config")]
     config: Option<PathBuf>,
     /// Slice definitions YAML; enables the slices section.
-    #[arg(long)]
+    #[arg(long, overrides_with = "slices")]
     slices: Option<PathBuf>,
     /// Scope config (TOML or YAML); enables the scopes section.
-    #[arg(long)]
+    #[arg(long, overrides_with = "scopes_config")]
     scopes_config: Option<PathBuf>,
     /// Include the sample-facts payload as a facts section.
-    #[arg(long)]
+    #[arg(long, overrides_with = "include_facts")]
     include_facts: bool,
-    /// Limit ranked scope rows per section.
-    #[arg(long)]
-    top: Option<usize>,
+    /// Limit ranked scope rows per section (negative drops from the tail, Python-style).
+    #[arg(long, allow_negative_numbers = true, overrides_with = "top")]
+    top: Option<String>,
     /// Runtime rule pack to apply (generic or ruby).
-    #[arg(long, default_value = "generic")]
+    #[arg(long, default_value = "generic", overrides_with = "runtime")]
     runtime: String,
     /// External runtime rule pack YAML (overrides --runtime).
-    #[arg(long)]
+    #[arg(long, overrides_with = "runtime_rules")]
     runtime_rules: Option<PathBuf>,
     /// Core classes CSV override for the ruby runtime.
-    #[arg(long)]
+    #[arg(long, overrides_with = "core_classes")]
     core_classes: Option<PathBuf>,
     /// Write the report to this path instead of stdout.
-    #[arg(long)]
+    #[arg(long, overrides_with = "output")]
     output: Option<PathBuf>,
 }
 
 #[derive(Args)]
 struct CompareArgs {
     /// Baseline report JSON path.
-    #[arg(long)]
+    #[arg(long, overrides_with = "before")]
     before: PathBuf,
     /// Candidate report JSON path.
-    #[arg(long)]
+    #[arg(long, overrides_with = "after")]
     after: PathBuf,
     /// Absolute percentage-point regression threshold.
-    #[arg(long, default_value_t = 2.0)]
-    threshold_abs: f64,
+    // String, not f64: the strict shared grammar (f64::from_str + finiteness,
+    // mirrored by Python's strict_float) owns the error message.
+    #[arg(
+        long,
+        default_value = "2",
+        allow_negative_numbers = true,
+        overrides_with = "threshold_abs"
+    )]
+    threshold_abs: String,
     /// Relative percentage regression threshold.
-    #[arg(long, default_value_t = 15.0)]
-    threshold_rel: f64,
+    #[arg(
+        long,
+        default_value = "15",
+        allow_negative_numbers = true,
+        overrides_with = "threshold_rel"
+    )]
+    threshold_rel: String,
     /// Comma-delimited slice names to gate on.
-    #[arg(long)]
+    #[arg(long, overrides_with = "focus_slices")]
     focus_slices: Option<String>,
     /// Comma-delimited boundary names to gate on.
-    #[arg(long)]
+    #[arg(
+        long,
+        visible_alias = "focus-scopes",
+        overrides_with = "focus_boundaries"
+    )]
     focus_boundaries: Option<String>,
     /// Write the comparison to this path instead of stdout.
-    #[arg(long)]
+    #[arg(long, overrides_with = "output")]
     output: Option<PathBuf>,
 }
 
 fn main() {
-    let cli = Cli::parse();
+    let argv = match hoist_global_output(std::env::args().collect()) {
+        Ok(argv) => argv,
+        Err(error) => exit_with_envelope(&error),
+    };
+    // try_parse keeps usage errors inside the JSON error contract; clap's
+    // default parse() would print prose usage text and exit on its own.
+    let cli = match Cli::try_parse_from(argv) {
+        Ok(cli) => cli,
+        Err(error) => {
+            if matches!(
+                error.kind(),
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+            ) {
+                error.exit();
+            }
+            exit_with_envelope(error.render().to_string().trim_end())
+        }
+    };
     match run(cli) {
         Ok(exit_code) => std::process::exit(exit_code),
-        Err(error) => {
-            eprintln!(
-                "{}",
-                serde_json::json!({
-                    "error": error,
-                    "ok": false,
-                })
-            );
-            std::process::exit(2);
-        }
+        Err(error) => exit_with_envelope(&error),
     }
+}
+
+fn exit_with_envelope(error: &str) -> ! {
+    // Byte-identical to Python's json.dumps({...}, sort_keys=True) envelope.
+    eprintln!(
+        "{}",
+        clankerprof_core::pyjson::dumps_compact(&serde_json::json!({
+            "error": error,
+            "ok": false,
+        }))
+    );
+    std::process::exit(2);
+}
+
+/// Treat a global --output before the subcommand as the subcommand's own,
+/// mirroring the Python CLI's hoist (the moved token lands last, so it wins
+/// over an earlier local --output).
+fn hoist_global_output(argv: Vec<String>) -> Result<Vec<String>, String> {
+    let mut tokens = argv;
+    let mut moved: Vec<String> = Vec::new();
+    let mut index = 1.min(tokens.len());
+    while index < tokens.len() {
+        let item = tokens[index].clone();
+        if !item.starts_with('-') {
+            break;
+        }
+        if item == "--output" {
+            if index + 1 >= tokens.len() {
+                return Err("--output requires a path argument.".to_string());
+            }
+            moved = tokens.drain(index..index + 2).collect();
+            continue;
+        }
+        if item.starts_with("--output=") {
+            moved = vec![tokens.remove(index)];
+            continue;
+        }
+        index += 1;
+    }
+    // Insert right after the subcommand token (not at the end) so a local
+    // --output typed later still wins per the last-wins option rule.
+    let insert_at = if index < tokens.len() {
+        index + 1
+    } else {
+        tokens.len()
+    };
+    tokens.splice(insert_at..insert_at, moved);
+    Ok(tokens)
 }
 
 fn run(cli: Cli) -> Result<i32, String> {
@@ -287,10 +417,14 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
             "report requires at least one of --config, --slices, or --scopes-config.".to_string(),
         );
     }
+    // Integer-grammar validation is unconditional: a malformed --top must
+    // error even when no scopes section consumes it (SPEC integer-flag rule).
+    let top = int64_flag(args.top.as_deref(), TOP_INT_MESSAGE)?;
     let runtime_rules = resolve_runtime_rules(
         &args.runtime,
         args.runtime_rules.as_ref(),
         args.core_classes.as_ref(),
+        false,
     )?;
     // The whole point: decode a single facts model and feed every projection.
     let facts = load_projection_input(args.profile.as_ref(), args.facts.as_ref())?;
@@ -309,6 +443,11 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
         let config_payload =
             std::fs::read_to_string(config_path).map_err(|error| error.to_string())?;
         let config = parse_target_config_json(&config_payload)?;
+        // Same nonempty-config rule as the targets subcommand; the report
+        // sections must not be more lenient than their standalone twins.
+        if config.is_empty() {
+            return Err("--config or --target is required.".to_string());
+        }
         let options = TargetAnalysisOptions {
             runtime_rules: runtime_rules.clone(),
             ..TargetAnalysisOptions::default()
@@ -328,19 +467,20 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
         };
         payload.insert(
             "slices".to_string(),
-            render_slice_json(&analyze_slice_facts(&facts, &options), &options),
+            render_slice_json(&analyze_slice_facts(&facts, &options)?, &options)?,
         );
     }
     if let Some(scopes_config_path) = &args.scopes_config {
         let options = load_boundary_options(scopes_config_path, runtime_rules)?;
         payload.insert(
             "scopes".to_string(),
-            render_boundary_json(&analyze_boundary_facts(&facts, &options)?, args.top),
+            render_boundary_json(&analyze_boundary_facts(&facts, &options)?, top),
         );
     }
-    let rendered = serde_json::to_string_pretty(&serde_json::Value::Object(payload))
-        .map_err(|error| error.to_string())?;
-    emit(&rendered, args.output.as_ref())
+    clankerprof_core::targets::take_pattern_error()?;
+    clankerprof_core::scopes::take_attributable_error()?;
+    let rendered = clankerprof_core::pyjson::dumps_pretty(&serde_json::Value::Object(payload));
+    emit(&rendered, args.output.as_ref(), "clankerprof_report")
 }
 
 fn load_projection_input(
@@ -350,14 +490,13 @@ fn load_projection_input(
     match (profile, facts) {
         (Some(_), Some(_)) => Err("--profile and --facts are mutually exclusive.".to_string()),
         (None, None) => Err("--profile or --facts is required.".to_string()),
-        (Some(profile_path), None) => Ok(load_profile(profile_path)
+        (Some(profile_path), None) => load_profile(profile_path)
             .map_err(|error| error.to_string())?
-            .to_sample_facts()),
+            .to_sample_facts(),
         (None, Some(facts_path)) => {
-            let payload: serde_json::Value = serde_json::from_str(
+            let payload = clankerprof_core::jsonio::parse_strict_json(
                 &std::fs::read_to_string(facts_path).map_err(|error| error.to_string())?,
-            )
-            .map_err(|error| error.to_string())?;
+            )?;
             sample_facts_from_json(&payload)
         }
     }
@@ -368,17 +507,70 @@ fn run_scopes(args: ScopesArgs) -> Result<(), String> {
         &args.runtime,
         args.runtime_rules.as_ref(),
         args.core_classes.as_ref(),
+        args.verbose_runtime_internals,
     )?;
-    let options = load_boundary_options(&args.config, runtime_rules)?;
+    let mut options = load_boundary_options(&args.config, runtime_rules)?;
+    // Mirror the Python CLI's post-config option overrides (run_boundaries):
+    // Python's legacy_no_enhanced_caller_fallback is OR-ed into the caller
+    // fallback at categorize time, so one field carries both here.
+    options.enhanced_runtime_categorization = !args.no_enhanced;
+    options.fold_runtime_internals = args.fold_runtime_internals;
+    options.caller_fallback_when_uncategorized = args.no_enhanced;
     let facts = load_projection_input(args.profile.as_ref(), args.facts.as_ref())?;
-    let payload = render_boundary_json(&analyze_boundary_facts(&facts, &options)?, args.top);
-    let rendered = serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?;
-    emit(&rendered, args.output.as_ref())
+    let payload = render_boundary_json(
+        &analyze_boundary_facts(&facts, &options)?,
+        int64_flag(args.top.as_deref(), TOP_INT_MESSAGE)?,
+    );
+    clankerprof_core::targets::take_pattern_error()?;
+    clankerprof_core::scopes::take_attributable_error()?;
+    let rendered = clankerprof_core::pyjson::dumps_pretty(&payload);
+    emit(&rendered, args.output.as_ref(), "clankerprof_boundaries")
 }
 
-fn emit(rendered: &str, output: Option<&PathBuf>) -> Result<(), String> {
+const TOP_INT_MESSAGE: &str = "--top values must be integers.";
+const UNATTRIBUTED_LIBRARIES_INT_MESSAGE: &str =
+    "--unattributed-libraries values must be integers.";
+
+/// Strict CLI integer grammar shared with Python's strict_int64: optional
+/// sign, ASCII digits, i64 range. clap's typed i64 parse would reject the
+/// same strings but with engine-specific wording.
+fn int64_flag(raw: Option<&str>, message: &str) -> Result<Option<i64>, String> {
+    match raw {
+        None => Ok(None),
+        Some(text) => text
+            .parse::<i64>()
+            .map(Some)
+            .map_err(|_| message.to_string()),
+    }
+}
+
+fn receipt_value(tool: &str, output: &std::path::Path) -> serde_json::Value {
+    serde_json::json!({
+        "ok": true,
+        "output": output.to_string_lossy(),
+        "tool": tool,
+    })
+}
+
+/// Write the artifact and print the standard JSON receipt (byte-identical to
+/// the Python CLI's), or print the rendered payload when no --output was
+/// given.
+fn emit(rendered: &str, output: Option<&PathBuf>, tool: &str) -> Result<(), String> {
+    let receipt = output
+        .map(|path| receipt_value(tool, path))
+        .unwrap_or(serde_json::Value::Null);
+    emit_with_receipt(rendered, output, receipt)
+}
+
+fn emit_with_receipt(
+    rendered: &str,
+    output: Option<&PathBuf>,
+    receipt: serde_json::Value,
+) -> Result<(), String> {
     if let Some(output_path) = output {
         std::fs::write(output_path, format!("{rendered}\n")).map_err(|error| error.to_string())?;
+        let receipt_rendered = clankerprof_core::pyjson::dumps_pretty(&receipt);
+        println!("{receipt_rendered}");
     } else {
         println!("{rendered}");
     }
@@ -387,19 +579,35 @@ fn emit(rendered: &str, output: Option<&PathBuf>) -> Result<(), String> {
 
 fn run_facts(args: FactsArgs) -> Result<(), String> {
     let profile = load_profile(&args.profile).map_err(|error| error.to_string())?;
-    let facts = profile.to_sample_facts();
+    let facts = profile.to_sample_facts()?;
     let rendered = if args.pretty {
         sample_facts_to_pretty_json(&facts).map_err(|error| error.to_string())?
     } else {
         sample_facts_to_compact_json(&facts).map_err(|error| error.to_string())?
     };
-    emit(&rendered, args.output.as_ref())
+    let receipt = match args.output.as_ref() {
+        Some(output_path) => {
+            // The facts receipt carries schema_version and summary like the
+            // Python CLI's.
+            let payload = clankerprof_core::sample_facts_to_json_value(&facts);
+            serde_json::json!({
+                "ok": true,
+                "output": output_path.to_string_lossy(),
+                "schema_version": payload.get("schema_version"),
+                "summary": payload.get("summary"),
+                "tool": "clankerprof_facts",
+            })
+        }
+        None => serde_json::Value::Null,
+    };
+    emit_with_receipt(&rendered, args.output.as_ref(), receipt)
 }
 
 fn resolve_runtime_rules(
     runtime: &str,
     runtime_rules: Option<&PathBuf>,
     core_classes: Option<&PathBuf>,
+    verbose: bool,
 ) -> Result<clankerprof_core::rules::RuntimeRuleSet, String> {
     use clankerprof_core::rules;
     let classes = match core_classes {
@@ -407,12 +615,14 @@ fn resolve_runtime_rules(
         None if runtime == "ruby" => rules::load_default_ruby_core_classes(),
         None => std::collections::BTreeSet::new(),
     };
+    // Verbose reaches only external packs and the ruby pack, mirroring the
+    // Python reference: the packaged generic default never applies it.
     if let Some(path) = runtime_rules {
-        return rules::load_runtime_rules_file(path, classes, false);
+        return rules::load_runtime_rules_file(path, classes, verbose);
     }
     match runtime {
         "generic" => Ok(rules::RuntimeRuleSet::generic().clone()),
-        "ruby" => rules::ruby_rules(classes, false),
+        "ruby" => rules::ruby_rules(classes, verbose),
         other => Err(format!("Unsupported runtime: {other}")),
     }
 }
@@ -421,9 +631,9 @@ fn load_attributables(path: Option<&PathBuf>) -> Result<Option<Attributables>, S
     let Some(path) = path else {
         return Ok(None);
     };
-    let payload: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(path).map_err(|error| error.to_string())?)
-            .map_err(|error| error.to_string())?;
+    let payload = clankerprof_core::jsonio::parse_strict_json(
+        &std::fs::read_to_string(path).map_err(|error| error.to_string())?,
+    )?;
     let serde_json::Value::Object(columns) = payload else {
         return Err("Attributables must be a JSON object.".to_string());
     };
@@ -436,7 +646,7 @@ fn load_attributables(path: Option<&PathBuf>) -> Result<Option<Attributables>, S
         for (key, value) in entries {
             let number = value
                 .as_f64()
-                .ok_or_else(|| format!("Attributable column {name} must be an object."))?;
+                .ok_or_else(|| format!("Attributable column {name} values must be numbers."))?;
             column.insert(key, number);
         }
         result.insert(name, column);
@@ -448,11 +658,18 @@ fn run_targets(args: TargetsArgs) -> Result<(), String> {
     if !matches!(args.format.as_str(), "json" | "csv" | "simple-csv" | "text") {
         return Err(format!("Unsupported --format: {}.", args.format));
     }
-    let compat_layout = match args.target_csv_layout.as_str() {
-        "standard" => false,
-        "compat" => true,
-        other => return Err(format!("Unsupported --target-csv-layout: {other}.")),
-    };
+    if let Some(layout) = args.target_csv_layout.as_deref() {
+        if !matches!(layout, "standard" | "compat") {
+            return Err(format!("Unsupported --target-csv-layout: {layout}."));
+        }
+    }
+    if args.legacy_target_csv_layout && args.target_csv_layout.as_deref() == Some("standard") {
+        return Err(
+            "--legacy-target-csv-layout conflicts with --target-csv-layout=standard.".to_string(),
+        );
+    }
+    let compat_layout =
+        args.legacy_target_csv_layout || args.target_csv_layout.as_deref() == Some("compat");
     if compat_layout && (args.format != "csv" || args.output.is_none()) {
         return Err("--target-csv-layout=compat requires --format csv and --output.".to_string());
     }
@@ -460,6 +677,7 @@ fn run_targets(args: TargetsArgs) -> Result<(), String> {
         &args.runtime,
         args.runtime_rules.as_ref(),
         args.core_classes.as_ref(),
+        args.verbose_runtime_internals,
     )?;
     let mut config = match &args.config {
         Some(config_path) => {
@@ -485,6 +703,9 @@ fn run_targets(args: TargetsArgs) -> Result<(), String> {
         runtime_rules: runtime_rules.clone(),
     };
     let results = analyze_target_facts_with_options(&facts, &config, &options);
+    // Fail closed on invalid user patterns before writing any artifact.
+    clankerprof_core::targets::take_pattern_error()?;
+    clankerprof_core::scopes::take_attributable_error()?;
     if let Some(semantic_csv_path) = &args.semantic_callers_csv {
         if !args.track_semantic_callers {
             return Err("--semantic-callers-csv requires --track-semantic-callers.".to_string());
@@ -498,8 +719,10 @@ fn run_targets(args: TargetsArgs) -> Result<(), String> {
     }
     if args.format == "json" {
         let payload = render_target_json(&results);
-        let rendered = serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?;
-        return emit(&rendered, args.output.as_ref());
+        clankerprof_core::targets::take_pattern_error()?;
+        clankerprof_core::scopes::take_attributable_error()?;
+        let rendered = clankerprof_core::pyjson::dumps_pretty(&payload);
+        return emit(&rendered, args.output.as_ref(), "clankerprof_targets");
     }
     if compat_layout {
         return write_compat_target_csv_artifacts(
@@ -514,7 +737,7 @@ fn run_targets(args: TargetsArgs) -> Result<(), String> {
             attributables.as_ref(),
             args.format == "simple-csv",
             false,
-        )
+        )?
     } else {
         render_target_text(
             &results,
@@ -522,7 +745,9 @@ fn run_targets(args: TargetsArgs) -> Result<(), String> {
             args.track_semantic_callers,
         )
     };
-    emit(&rendered, args.output.as_ref())
+    clankerprof_core::targets::take_pattern_error()?;
+    clankerprof_core::scopes::take_attributable_error()?;
+    emit(&rendered, args.output.as_ref(), "clankerprof_targets")
 }
 
 fn write_compat_target_csv_artifacts(
@@ -537,37 +762,112 @@ fn write_compat_target_csv_artifacts(
     let output_dir = std::path::Path::new("output");
     let verbose_dir = output_dir.join("verbose");
     std::fs::create_dir_all(&verbose_dir).map_err(|error| error.to_string())?;
+    let simplified_path = output_dir.join(base_name);
+    let verbose_path = verbose_dir.join(base_name);
     std::fs::write(
-        output_dir.join(base_name),
-        render_target_csv(results, attributables, true, true),
+        &simplified_path,
+        render_target_csv(results, attributables, true, true)?,
     )
     .map_err(|error| error.to_string())?;
     std::fs::write(
-        verbose_dir.join(base_name),
-        render_target_csv(results, attributables, false, true),
+        &verbose_path,
+        render_target_csv(results, attributables, false, true)?,
     )
     .map_err(|error| error.to_string())?;
+    // Rich receipt matching the Python CLI's compat-layout payload.
+    let receipt = serde_json::json!({
+        "compat_target_csv_layout": true,
+        "legacy_target_csv_layout": true,
+        "ok": true,
+        "output": simplified_path.to_string_lossy(),
+        "outputs": {
+            "simplified_csv": simplified_path.to_string_lossy(),
+            "verbose_csv": verbose_path.to_string_lossy(),
+        },
+        "tool": "clankerprof_targets",
+    });
+    let receipt_rendered = clankerprof_core::pyjson::dumps_pretty(&receipt);
+    println!("{receipt_rendered}");
     Ok(())
 }
 
 fn run_slices(args: SlicesArgs) -> Result<(), String> {
-    let runtime_rules = resolve_runtime_rules(
-        &args.runtime,
-        args.runtime_rules.as_ref(),
-        args.core_classes.as_ref(),
+    // The merge below mirrors the Python reference (run_slices in
+    // clankerprof/cli.py) statement for statement, including the order in
+    // which validation errors surface.
+    let config = load_slices_config(args.config.as_ref())?;
+    let raw_profile = merge_single_value(
+        args.profile.as_ref().map(path_string),
+        config.get("profile"),
+        "profile",
     )?;
+    let raw_facts = merge_single_value(
+        args.facts.as_ref().map(path_string),
+        config.get("facts"),
+        "facts",
+    )?;
+    let profile_path = raw_profile.map(PathBuf::from);
+    let facts_path = raw_facts.map(PathBuf::from);
+    let facts = load_projection_input(profile_path.as_ref(), facts_path.as_ref())?;
+    let raw_slices = merge_single_value(
+        args.slices.as_ref().map(path_string),
+        config.get("slices"),
+        "slices",
+    )?;
+    let cli_top = int64_flag(args.top.as_deref(), TOP_INT_MESSAGE)?;
+    let raw_top = optional_config_int(&config, "top")?;
+    if cli_top.is_some() && raw_top.is_some() {
+        return Err("top specified both on command line and in config file.".to_string());
+    }
+    let top = cli_top.or(raw_top);
+    let raw_by_slice = optional_config_by_slice(&config)?;
+    if args.by_slice.is_some() && raw_by_slice.is_some() {
+        return Err("by_slice specified both on command line and in config file.".to_string());
+    }
+    let by_slice = args.by_slice.clone().or(raw_by_slice);
+    let raw_show_paths = optional_config_bool(&config, "show_paths")?;
+    if args.show_paths && raw_show_paths.is_some() {
+        return Err("show_paths specified both on command line and in config file.".to_string());
+    }
+    let show_paths = args.show_paths || raw_show_paths.unwrap_or(false);
+    let raw_no_collapse_native = optional_config_bool(&config, "no_collapse_native")?;
+    if args.no_collapse_native && raw_no_collapse_native.is_some() {
+        return Err(
+            "no_collapse_native specified both on command line and in config file.".to_string(),
+        );
+    }
+    let no_collapse_native = args.no_collapse_native || raw_no_collapse_native.unwrap_or(false);
+    let cli_unattributed_libraries = int64_flag(
+        args.unattributed_libraries.as_deref(),
+        UNATTRIBUTED_LIBRARIES_INT_MESSAGE,
+    )?;
+    let raw_unattributed_libraries = optional_config_unattributed(&config)?;
+    if cli_unattributed_libraries.is_some() && raw_unattributed_libraries.is_some() {
+        return Err(
+            "unattributed_libraries specified both on command line and in config file \
+             (--unattributed-gems is a compatibility alias)."
+                .to_string(),
+        );
+    }
+    let unattributed_libraries = cli_unattributed_libraries.or(raw_unattributed_libraries);
+    let mut filters = config_string_array(&config, "filters")?;
+    filters.extend(config_string_array(&config, "filter")?);
+    filters.extend(args.filter.iter().cloned());
+    let mut collapse = config_string_array(&config, "collapse")?;
+    collapse.extend(args.collapse.iter().cloned());
+    let mut raw_attributes = config_string_array(&config, "attribute")?;
+    raw_attributes.extend(args.attribute.iter().cloned());
     let mut attributes = Vec::new();
-    for raw in &args.attribute {
+    for raw in &raw_attributes {
         attributes.push(parse_attribute(raw)?);
     }
-    let mut slices_path = args.slices.clone();
+    let mut slices_path = raw_slices.map(PathBuf::from);
     let slice_aware = slices_path.is_some()
-        || args.by_slice.is_some()
+        || by_slice.is_some()
         || !attributes.is_empty()
-        || args
-            .filter
+        || filters
             .iter()
-            .chain(&args.collapse)
+            .chain(&collapse)
             .any(|item| item.trim_start_matches(['!', '<']).starts_with("slice:"));
     if slices_path.is_none() && slice_aware {
         let default_slices = std::path::Path::new("slices.yml");
@@ -575,15 +875,21 @@ fn run_slices(args: SlicesArgs) -> Result<(), String> {
             slices_path = Some(default_slices.to_path_buf());
         }
     }
+    let runtime_rules = resolve_runtime_rules(
+        &args.runtime,
+        args.runtime_rules.as_ref(),
+        args.core_classes.as_ref(),
+        args.verbose_runtime_internals,
+    )?;
     let mut options = SliceAnalysisOptions {
-        filters: args.filter,
-        collapse: args.collapse,
+        filters,
+        collapse,
         attributes,
-        top: args.top,
-        by_slice: args.by_slice,
-        show_paths: args.show_paths,
-        no_collapse_native: args.no_collapse_native,
-        unattributed_libraries: args.unattributed_libraries,
+        top,
+        by_slice,
+        show_paths,
+        no_collapse_native,
+        unattributed_libraries,
         runtime_rules,
         ..SliceAnalysisOptions::default()
     };
@@ -591,10 +897,298 @@ fn run_slices(args: SlicesArgs) -> Result<(), String> {
         options.slices = load_slices_file(slices_path)?;
     }
     validate_slice_options(&options, args.allow_virtual_attribute_slices)?;
-    let facts = load_projection_input(args.profile.as_ref(), args.facts.as_ref())?;
-    let payload = render_slice_json(&analyze_slice_facts(&facts, &options), &options);
-    let rendered = serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?;
-    emit(&rendered, args.output.as_ref())
+    let payload = render_slice_json(&analyze_slice_facts(&facts, &options)?, &options)?;
+    clankerprof_core::targets::take_pattern_error()?;
+    clankerprof_core::scopes::take_attributable_error()?;
+    let rendered = clankerprof_core::pyjson::dumps_pretty(&payload);
+    emit(&rendered, args.output.as_ref(), "clankerprof_slices")
+}
+
+fn path_string(path: &PathBuf) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+/// Exactly the keys run_slices consumes (mirrored in the Python loader): the
+/// config is fixed-shape, so a typo (filterz) must never silently disable
+/// the option it meant to set — the scope-config unknown-key principle.
+const SLICES_CONFIG_KEYS: [&str; 13] = [
+    "profile",
+    "facts",
+    "slices",
+    "top",
+    "by_slice",
+    "show_paths",
+    "no_collapse_native",
+    "unattributed_gems",
+    "unattributed_libraries",
+    "filters",
+    "filter",
+    "collapse",
+    "attribute",
+];
+
+/// Mirror of Python `_load_slices_config`: TOML by suffix, YAML otherwise,
+/// root must be a mapping. Non-string YAML keys are dropped, matching how the
+/// Python dict is only ever read through string keys.
+fn load_slices_config(
+    path: Option<&PathBuf>,
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    const MESSAGE: &str = "Slice config file must be a YAML object.";
+    let Some(path) = path else {
+        return Ok(serde_json::Map::new());
+    };
+    let payload = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let value = if path.extension().and_then(|extension| extension.to_str()) == Some("toml") {
+        let parsed: toml::Value = toml::from_str(&payload).map_err(|error| error.to_string())?;
+        toml_to_json(parsed)
+    } else {
+        let parsed: serde_yaml::Value =
+            serde_yaml::from_str(&payload).map_err(|error| error.to_string())?;
+        clankerprof_core::rules::require_string_keys(&parsed)?;
+        yaml_to_json(parsed)
+    };
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut unknown: Vec<&str> = map
+                .keys()
+                .map(String::as_str)
+                .filter(|key| !SLICES_CONFIG_KEYS.contains(key))
+                .collect();
+            unknown.sort_unstable();
+            if let Some(first) = unknown.first() {
+                return Err(format!("Unknown slice config key: {first}."));
+            }
+            Ok(map)
+        }
+        _ => Err(MESSAGE.to_string()),
+    }
+}
+
+fn json_float(value: f64) -> serde_json::Value {
+    // Python floats flow through unchanged; non-finite values become their
+    // Python str() forms so downstream coercion errors mirror the reference.
+    serde_json::Number::from_f64(value)
+        .map(serde_json::Value::Number)
+        .unwrap_or_else(|| {
+            serde_json::Value::String(if value.is_nan() {
+                "nan".to_string()
+            } else if value > 0.0 {
+                "inf".to_string()
+            } else {
+                "-inf".to_string()
+            })
+        })
+}
+
+fn yaml_to_json(value: serde_yaml::Value) -> serde_json::Value {
+    match value {
+        serde_yaml::Value::Null => serde_json::Value::Null,
+        serde_yaml::Value::Bool(item) => serde_json::Value::Bool(item),
+        serde_yaml::Value::Number(number) => {
+            if let Some(int) = number.as_i64() {
+                serde_json::Value::from(int)
+            } else if let Some(unsigned) = number.as_u64() {
+                serde_json::Value::from(unsigned)
+            } else {
+                json_float(number.as_f64().unwrap_or(f64::NAN))
+            }
+        }
+        serde_yaml::Value::String(item) => serde_json::Value::String(item),
+        serde_yaml::Value::Sequence(items) => {
+            serde_json::Value::Array(items.into_iter().map(yaml_to_json).collect())
+        }
+        serde_yaml::Value::Mapping(mapping) => serde_json::Value::Object(
+            mapping
+                .into_iter()
+                .filter_map(|(key, item)| match key {
+                    serde_yaml::Value::String(key) => Some((key, yaml_to_json(item))),
+                    _ => None,
+                })
+                .collect(),
+        ),
+        // Unreachable from user input: require_string_keys rejects local
+        // tags (the only Tagged producer) before any conversion runs.
+        serde_yaml::Value::Tagged(tagged) => yaml_to_json(tagged.value),
+    }
+}
+
+fn toml_to_json(value: toml::Value) -> serde_json::Value {
+    match value {
+        toml::Value::String(item) => serde_json::Value::String(item),
+        toml::Value::Integer(item) => serde_json::Value::from(item),
+        toml::Value::Float(item) => json_float(item),
+        toml::Value::Boolean(item) => serde_json::Value::Bool(item),
+        toml::Value::Datetime(item) => serde_json::Value::String(item.to_string()),
+        toml::Value::Array(items) => {
+            serde_json::Value::Array(items.into_iter().map(toml_to_json).collect())
+        }
+        toml::Value::Table(table) => serde_json::Value::Object(
+            table
+                .into_iter()
+                .map(|(key, item)| (key, toml_to_json(item)))
+                .collect(),
+        ),
+    }
+}
+
+/// str() coercion for config scalars, matching Python's `_merge_single_value`
+/// and `_string_array` (which stringify whatever the config holds).
+fn python_str(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(item) => item.clone(),
+        serde_json::Value::Bool(true) => "True".to_string(),
+        serde_json::Value::Bool(false) => "False".to_string(),
+        serde_json::Value::Null => "None".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn merge_single_value(
+    cli_value: Option<String>,
+    config_value: Option<&serde_json::Value>,
+    name: &str,
+) -> Result<Option<String>, String> {
+    let config_value = config_value.filter(|value| !value.is_null());
+    if cli_value.is_some() && config_value.is_some() {
+        return Err(format!(
+            "{name} specified both on command line and in config file."
+        ));
+    }
+    if cli_value.is_some() {
+        return Ok(cli_value);
+    }
+    Ok(config_value.map(python_str))
+}
+
+/// Mirror of Python `_optional_int`: bools and non-integral floats are
+/// rejected; magnitudes beyond i64 clamp, which is equivalent for a
+/// truncation limit (Python's unbounded int slices the same way).
+fn optional_config_int(
+    config: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<Option<i64>, String> {
+    let message = format!("{key} in slice config must be an integer.");
+    optional_int_value(config.get(key), &message)
+}
+
+fn optional_int_value(
+    value: Option<&serde_json::Value>,
+    message: &str,
+) -> Result<Option<i64>, String> {
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Bool(_)) => Err(message.to_string()),
+        Some(serde_json::Value::Number(number)) => {
+            if let Some(int) = number.as_i64() {
+                Ok(Some(int))
+            } else if number.as_u64().is_some() {
+                Ok(Some(i64::MAX))
+            } else if let Some(float) = number.as_f64() {
+                if float.is_finite() && float.fract() == 0.0 {
+                    Ok(Some(float.clamp(i64::MIN as f64, i64::MAX as f64) as i64))
+                } else {
+                    Err(message.to_string())
+                }
+            } else {
+                Err(message.to_string())
+            }
+        }
+        Some(serde_json::Value::String(raw)) => raw
+            .trim()
+            .parse::<i64>()
+            .map(Some)
+            .map_err(|_| message.to_string()),
+        Some(_) => Err(message.to_string()),
+    }
+}
+
+fn optional_config_bool(
+    config: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<Option<bool>, String> {
+    match config.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Bool(item)) => Ok(Some(*item)),
+        Some(_) => Err(format!("{key} in slice config must be a boolean.")),
+    }
+}
+
+/// Mirror of Python `_optional_by_slice`: bools toggle the 0.1% default,
+/// integral numbers become count limits, non-integral numbers become
+/// percentage thresholds, and anything else is stringified.
+fn optional_config_by_slice(
+    config: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Option<String>, String> {
+    match config.get("by_slice") {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Bool(true)) => Ok(Some("0.1%".to_string())),
+        Some(serde_json::Value::Bool(false)) => Ok(None),
+        Some(serde_json::Value::Number(number)) => {
+            if let Some(int) = number.as_i64() {
+                Ok(Some(int.to_string()))
+            } else if let Some(unsigned) = number.as_u64() {
+                Ok(Some(unsigned.to_string()))
+            } else if let Some(float) = number.as_f64() {
+                if float.fract() == 0.0 && float.is_finite() {
+                    // Match Python's str(int(value)): the exact integer
+                    // spelling, so values outside i64 fail the strict
+                    // --by-slice parse closed instead of clamping to an
+                    // i64 endpoint and silently proceeding.
+                    if float == 0.0 {
+                        Ok(Some("0".to_string()))
+                    } else {
+                        Ok(Some(format!("{float:.0}")))
+                    }
+                } else {
+                    Ok(Some(format!("{float}%")))
+                }
+            } else {
+                Ok(Some(number.to_string()))
+            }
+        }
+        Some(other) => Ok(Some(python_str(other))),
+    }
+}
+
+fn optional_config_unattributed(
+    config: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Option<i64>, String> {
+    let present: Vec<(&str, &serde_json::Value)> = ["unattributed_gems", "unattributed_libraries"]
+        .iter()
+        .filter_map(|key| {
+            config
+                .get(*key)
+                .filter(|value| !value.is_null())
+                .map(|value| (*key, value))
+        })
+        .collect();
+    let [(key, value)] = present.as_slice() else {
+        if present.is_empty() {
+            return Ok(None);
+        }
+        return Err(
+            "unattributed_gems and unattributed_libraries are aliases; use only one.".to_string(),
+        );
+    };
+    match value {
+        serde_json::Value::Bool(true) => Ok(Some(i64::MAX)),
+        serde_json::Value::Bool(false) => Ok(None),
+        other => {
+            let message = format!("{key} in slice config must be an integer.");
+            optional_int_value(Some(other), &message)
+        }
+    }
+}
+
+fn config_string_array(
+    config: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<Vec<String>, String> {
+    match config.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(Vec::new()),
+        Some(serde_json::Value::Array(items)) => Ok(items.iter().map(python_str).collect()),
+        Some(_) => Err(format!("{key} in slice config must be an array.")),
+    }
 }
 
 fn parse_attribute(raw: &str) -> Result<clankerprof_core::slices::AttributionRule, String> {
@@ -625,6 +1219,13 @@ fn parse_attribute(raw: &str) -> Result<clankerprof_core::slices::AttributionRul
             "Attribute rule filter must be '<key>:<value>': {raw}"
         ));
     };
+    // An empty value would substring-match every frame and silently
+    // reassign all ownership; filters already reject the same shape.
+    if key.is_empty() || value.is_empty() {
+        return Err(format!(
+            "Attribute rule filter must be '<key>:<value>': {raw}"
+        ));
+    }
     if key == "slice" {
         return Err(format!(
             "Attribute rules do not support slice: filters: {raw}"
@@ -705,6 +1306,18 @@ fn validate_slice_options(
                 attribute.key
             ));
         }
+        // The virtual-slice opt-in waives only the must-name-a-configured-
+        // slice rule; a (gc)/(uncollapsible) target would be attributed and
+        // then stripped at render, and an (all) target would merge with the
+        // implicit fallback row.
+        if clankerprof_core::slices::RESERVED_SLICE_NAMES.contains(&attribute.target_slice.as_str())
+        {
+            return Err(format!(
+                "Attribute target names reserved pseudo-slice name: {}. {}",
+                attribute.target_slice,
+                clankerprof_core::slices::RESERVED_SLICE_NAMES_MESSAGE
+            ));
+        }
         if !names.contains(attribute.target_slice.as_str()) && !allow_virtual_attribute_slices {
             return Err(format!(
                 "Unknown slice in --attribute: {}",
@@ -721,28 +1334,47 @@ fn validate_slice_options(
     Ok(())
 }
 
+fn parse_compare_threshold(raw: &str) -> Result<f64, String> {
+    let message = "Compare thresholds must be finite, non-negative numbers.";
+    let value: f64 = raw.parse().map_err(|_| message.to_string())?;
+    // A negative threshold would gate identical reports as regressions.
+    if !value.is_finite() || value < 0.0 {
+        return Err(message.to_string());
+    }
+    Ok(value)
+}
+
 fn run_compare(args: CompareArgs) -> Result<i32, String> {
     let options = CompareOptions {
-        threshold_abs: args.threshold_abs,
-        threshold_rel: args.threshold_rel,
+        threshold_abs: parse_compare_threshold(&args.threshold_abs)?,
+        threshold_rel: parse_compare_threshold(&args.threshold_rel)?,
         focus_slices: split_focus(args.focus_slices.as_deref()),
         focus_boundaries: split_focus(args.focus_boundaries.as_deref()),
     };
-    let before_payload: serde_json::Value = serde_json::from_str(
+    let before_payload = clankerprof_core::jsonio::parse_strict_json(
         &std::fs::read_to_string(&args.before).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?;
-    let after_payload: serde_json::Value = serde_json::from_str(
+    )?;
+    let after_payload = clankerprof_core::jsonio::parse_strict_json(
         &std::fs::read_to_string(&args.after).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?;
+    )?;
     let payload = compare_json(&before_payload, &after_payload, &options)?;
     let has_regression = payload
         .get("has_regression")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    let rendered = serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?;
-    emit(&rendered, args.output.as_ref())?;
+    let rendered = clankerprof_core::pyjson::dumps_pretty(&payload);
+    // The receipt keeps the regression gate intact: has_regression rides
+    // along and the exit code is unchanged by --output.
+    let receipt = match args.output.as_ref() {
+        Some(output_path) => serde_json::json!({
+            "has_regression": has_regression,
+            "ok": true,
+            "output": output_path.to_string_lossy(),
+            "tool": "clankerprof_compare",
+        }),
+        None => serde_json::Value::Null,
+    };
+    emit_with_receipt(&rendered, args.output.as_ref(), receipt)?;
     Ok(if has_regression { 2 } else { 0 })
 }
 
@@ -755,4 +1387,215 @@ fn split_focus(value: Option<&str>) -> BTreeSet<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        hoist_global_output, merge_single_value, optional_config_by_slice, optional_config_int,
+        optional_config_unattributed,
+    };
+
+    fn args(items: &[&str]) -> Vec<String> {
+        items.iter().map(ToString::to_string).collect()
+    }
+
+    fn config(payload: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+        match payload {
+            serde_json::Value::Object(map) => map,
+            _ => unreachable!("test config must be an object"),
+        }
+    }
+
+    #[test]
+    fn config_merge_mirrors_python_optional_value_coercions() {
+        let map = config(serde_json::json!({
+            "top": 3.0,
+            "by_slice": 0.5,
+            "unattributed_libraries": true,
+        }));
+        assert_eq!(optional_config_int(&map, "top"), Ok(Some(3)));
+        assert_eq!(optional_config_by_slice(&map), Ok(Some("0.5%".to_string())));
+        // Integral floats keep Python's str(int(value)) exact spelling, so
+        // out-of-i64-range values fail the strict --by-slice parse closed
+        // downstream instead of clamping to an i64 endpoint (R5-05).
+        for (raw, spelled) in [
+            (serde_json::json!(1.0e20), "100000000000000000000"),
+            (serde_json::json!(-1.0e20), "-100000000000000000000"),
+            (serde_json::json!(5.0), "5"),
+            (serde_json::json!(-0.0), "0"),
+        ] {
+            let big = config(serde_json::json!({ "by_slice": raw }));
+            assert_eq!(
+                optional_config_by_slice(&big),
+                Ok(Some(spelled.to_string()))
+            );
+        }
+        assert_eq!(optional_config_unattributed(&map), Ok(Some(i64::MAX)));
+        let bad = config(serde_json::json!({"top": true}));
+        assert_eq!(
+            optional_config_int(&bad, "top"),
+            Err("top in slice config must be an integer.".to_string())
+        );
+        let fractional = config(serde_json::json!({"top": 2.5}));
+        assert_eq!(
+            optional_config_int(&fractional, "top"),
+            Err("top in slice config must be an integer.".to_string())
+        );
+        let aliases = config(serde_json::json!({
+            "unattributed_gems": 1,
+            "unattributed_libraries": 2,
+        }));
+        assert_eq!(
+            optional_config_unattributed(&aliases),
+            Err(
+                "unattributed_gems and unattributed_libraries are aliases; use only one."
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn config_merge_rejects_values_set_in_both_places() {
+        let error = merge_single_value(
+            Some("cli.pb".to_string()),
+            Some(&serde_json::json!("config.pb")),
+            "profile",
+        )
+        .expect_err("must reject");
+        assert_eq!(
+            error,
+            "profile specified both on command line and in config file."
+        );
+        let merged = merge_single_value(None, Some(&serde_json::json!("config.pb")), "profile")
+            .expect("merge");
+        assert_eq!(merged, Some("config.pb".to_string()));
+    }
+
+    #[test]
+    fn hoist_moves_leading_global_output_after_the_subcommand() {
+        // Inserted directly after the subcommand (not at the end) so a local
+        // --output typed later still wins per the last-wins option rule.
+        let hoisted = hoist_global_output(args(&[
+            "bin", "--output", "out.json", "targets", "--target", "T",
+        ]))
+        .expect("hoist");
+        assert_eq!(
+            hoisted,
+            args(&["bin", "targets", "--output", "out.json", "--target", "T"])
+        );
+    }
+
+    #[test]
+    fn hoist_keeps_a_later_local_output_winning() {
+        let hoisted = hoist_global_output(args(&[
+            "bin",
+            "--output",
+            "global.json",
+            "targets",
+            "--output",
+            "local.json",
+        ]))
+        .expect("hoist");
+        assert_eq!(
+            hoisted,
+            args(&[
+                "bin",
+                "targets",
+                "--output",
+                "global.json",
+                "--output",
+                "local.json"
+            ])
+        );
+    }
+
+    #[test]
+    fn hoist_supports_equals_form_and_leaves_local_flags_alone() {
+        let hoisted = hoist_global_output(args(&[
+            "bin",
+            "--output=global.json",
+            "compare",
+            "--before",
+            "b.json",
+        ]))
+        .expect("hoist");
+        assert_eq!(
+            hoisted,
+            args(&[
+                "bin",
+                "compare",
+                "--output=global.json",
+                "--before",
+                "b.json"
+            ])
+        );
+        let untouched = hoist_global_output(args(&["bin", "targets", "--output", "local.json"]))
+            .expect("hoist");
+        assert_eq!(
+            untouched,
+            args(&["bin", "targets", "--output", "local.json"])
+        );
+    }
+
+    #[test]
+    fn hoist_rejects_global_output_without_a_path() {
+        let error = hoist_global_output(args(&["bin", "--output"])).expect_err("must fail");
+        assert_eq!(error, "--output requires a path argument.");
+    }
+}
+
+#[cfg(test)]
+mod report_validation_tests {
+    use super::{run_report, ReportArgs};
+    use std::path::PathBuf;
+
+    fn report_args() -> ReportArgs {
+        ReportArgs {
+            profile: None,
+            facts: None,
+            config: None,
+            slices: None,
+            scopes_config: None,
+            include_facts: false,
+            top: None,
+            runtime: "generic".to_string(),
+            runtime_rules: None,
+            core_classes: None,
+            output: None,
+        }
+    }
+
+    #[test]
+    fn report_validates_top_before_any_section() {
+        // The hoisted integer-grammar check fires before file IO, so no
+        // fixture files are needed even with a config path supplied.
+        let mut args = report_args();
+        args.config = Some(PathBuf::from("/nonexistent-config.json"));
+        args.top = Some("junk".to_string());
+        assert_eq!(
+            run_report(args).unwrap_err(),
+            "--top values must be integers."
+        );
+    }
+
+    #[test]
+    fn report_rejects_an_empty_target_config_like_targets() {
+        let dir = std::env::temp_dir().join(format!(
+            "clankerprof-report-validation-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let profile = dir.join("profile.pb");
+        // string table [""], one sample value 7 — a minimal valid profile.
+        std::fs::write(&profile, [0x32, 0x00, 0x12, 0x02, 0x10, 0x07]).expect("write profile");
+        let config = dir.join("empty.json");
+        std::fs::write(&config, "{}").expect("write config");
+        let mut args = report_args();
+        args.profile = Some(profile);
+        args.config = Some(config);
+        let error = run_report(args).unwrap_err();
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(error, "--config or --target is required.");
+    }
 }

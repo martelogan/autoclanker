@@ -13,7 +13,14 @@ from clankerprof.categorize import (
     simplify_category,
 )
 from clankerprof.facts import ProfileFactIndex, SampleFactsInput
-from clankerprof.model import Frame, Profile, TimeNs
+from clankerprof.model import (
+    AGGREGATE_BOUNDS_ERROR,
+    AGGREGATE_MAX,
+    AGGREGATE_MIN,
+    Frame,
+    Profile,
+    TimeNs,
+)
 from clankerprof.patterns import (
     DEFAULT_LIBRARY_SELECTORS,
     DEFAULT_RUNTIME_RULES,
@@ -211,6 +218,7 @@ class _FramePredicateMatcher:
         self._runtime_cache = runtime_cache
         self._configured_category_matcher: _BoundaryCategoryMatcher | None = None
         self._cache: dict[tuple[FramePredicate, tuple[int, str, str]], bool] = {}
+        self._slice_owner_cache: dict[tuple[int, str, str], str] = {}
 
     @property
     def unique_frame_count(self) -> int:
@@ -286,11 +294,11 @@ class _FramePredicateMatcher:
                 == value
             )
         if key == "slice":
-            return any(
-                definition.name == value
-                and definition.matches_frame(frame, self._rules)
-                for definition in self._slices
-            )
+            # Effective ownership, not raw rule matching: overlapping slice
+            # definitions resolve first-match in declaration order (with the
+            # default slice as fallback), so a later definition whose rules
+            # also match never owns the frame.
+            return self._resolve_slice_owner(frame) == value
         if key in DEFAULT_LIBRARY_SELECTORS or key in (
             self._rules.library_selector_path_patterns
         ):
@@ -301,6 +309,29 @@ class _FramePredicateMatcher:
             )
             return library_name is not None if value == "*" else library_name == value
         raise ValueError(f"Unsupported predicate key: {key}")
+
+    def _resolve_slice_owner(self, frame: Frame) -> str:
+        cache_key = frame_cache_key(frame)
+        cached = self._slice_owner_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        # Declaration-order first-match over the loaded slice definitions,
+        # mirroring the slices projection's per-frame resolution (scope
+        # configs load no attribute rules); unmatched frames fall back to the
+        # default slice.
+        default = "(all)"
+        resolved: str | None = None
+        for definition in self._slices:
+            if definition.is_default:
+                default = definition.name
+                continue
+            if definition.matches_frame(frame, self._rules):
+                resolved = definition.name
+                break
+        if resolved is None:
+            resolved = default
+        self._slice_owner_cache[cache_key] = resolved
+        return resolved
 
 
 class _BoundaryCategoryMatcher:
@@ -421,6 +452,14 @@ def analyze_boundary_facts(
         )
         for boundary in options.boundaries
     )
+    # Occurrence-mode attribution counts a sample once per matching frame
+    # occurrence, so scope aggregates are NOT subset sums and can escape the
+    # import-time bound. Re-enforce it during accumulation: the per-boundary
+    # positive/negative occurrence sums cap every subordinate accumulator
+    # (category, leaf, caller-pair, owner), so checking them here keeps all
+    # rendered aggregates inside [AGGREGATE_MIN, AGGREGATE_MAX].
+    positive_occurrence = [0] * len(results)
+    negative_occurrence = [0] * len(results)
     index = ProfileFactIndex.from_input(sample_facts)
     runtime_cache = RuntimeCategoryCache(options.runtime_rules)
     predicate_matcher = _FramePredicateMatcher(
@@ -484,6 +523,14 @@ def analyze_boundary_facts(
                 boundary_stats = results[boundary_index]
                 boundary_stats.total_time += value
                 boundary_stats.sample_count += 1
+                if value >= 0:
+                    positive_occurrence[boundary_index] += value
+                    if positive_occurrence[boundary_index] > AGGREGATE_MAX:
+                        raise ValueError(AGGREGATE_BOUNDS_ERROR)
+                else:
+                    negative_occurrence[boundary_index] += value
+                    if negative_occurrence[boundary_index] < AGGREGATE_MIN:
+                        raise ValueError(AGGREGATE_BOUNDS_ERROR)
                 if boundary.count == "once_per_sample":
                     counted_once_boundaries.add(boundary_index)
 

@@ -15,6 +15,7 @@ from clankerprof.patterns import (
     extract_library_name,
     is_native_path,
     is_runtime_stdlib_path,
+    native_path_excluded,
 )
 from clankerprof.rules import (
     RuntimeRuleSet,
@@ -22,16 +23,25 @@ from clankerprof.rules import (
     load_runtime_rules_file,
 )
 
+# The csv module's default 131072-byte field cap is a Python-side guard, not
+# a CSV dialect property; the Rust scanner is unbounded, so fields of any
+# length must parse identically. Portable C-long bound for 32-bit platforms.
+_CSV_FIELD_LIMIT = 2**31 - 1
+
 
 def load_ruby_core_classes(path: str | Path) -> frozenset[str]:
     values: set[str] = set()
-    with Path(path).open(newline="", encoding="utf-8") as handle:
-        for row in csv.reader(handle):
-            if not row:
-                continue
-            value = row[0].strip()
-            if value and not value.startswith("#"):
-                values.add(value)
+    old_limit = csv.field_size_limit(_CSV_FIELD_LIMIT)
+    try:
+        with Path(path).open(newline="", encoding="utf-8") as handle:
+            for row in csv.reader(handle):
+                if not row:
+                    continue
+                value = row[0].strip()
+                if value and not value.startswith("#"):
+                    values.add(value)
+    finally:
+        csv.field_size_limit(old_limit)
     return frozenset(values)
 
 
@@ -40,12 +50,16 @@ def load_default_ruby_core_classes() -> frozenset[str]:
     resource = resources.files("clankerprof.runtime_rules").joinpath(
         "ruby_core_classes.csv"
     )
-    for row in csv.reader(io.StringIO(resource.read_text(encoding="utf-8"))):
-        if not row:
-            continue
-        value = row[0].strip()
-        if value and not value.startswith("#"):
-            values.add(value)
+    old_limit = csv.field_size_limit(_CSV_FIELD_LIMIT)
+    try:
+        for row in csv.reader(io.StringIO(resource.read_text(encoding="utf-8"))):
+            if not row:
+                continue
+            value = row[0].strip()
+            if value and not value.startswith("#"):
+                values.add(value)
+    finally:
+        csv.field_size_limit(old_limit)
     return frozenset(values)
 
 
@@ -173,8 +187,20 @@ def categorize_runtime_frame(frame: Frame, rules: RuntimeRuleSet) -> str | None:
 
     core_class = _direct_core_class(name, rules)
     if core_class is not None:
+        # Core-class explicit-native routing keys on pseudo-paths and the
+        # pack's native_path_markers, now exclusion-aware (markers previously
+        # ignored the exclude keys — a /native/app/ exclusion could not veto
+        # a /native/ marker). native_path_patterns deliberately do NOT
+        # core-route: they feed the pack's general native detection
+        # (runtime-owned checks, native: predicates), where e.g. the ruby
+        # pack's version-dir pattern must not reclassify stdlib or vendored
+        # interpreter files away from stdlib/semantic routing. A pack that
+        # wants pattern-style core routing declares the substring as a
+        # marker. <internal:> keeps precedence (core_internal_categories
+        # below), and <cfunc> stays the fast path.
         explicit_native_path = path == "<cfunc>" or (
             not path.startswith("<internal:")
+            and not native_path_excluded(path, rules)
             and (
                 path.startswith("<")
                 or any(marker in path for marker in rules.native_path_markers)

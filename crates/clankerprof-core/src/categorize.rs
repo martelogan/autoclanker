@@ -8,22 +8,23 @@ use crate::targets::{
 };
 use std::collections::HashMap;
 
+/// True when the pack's exclude keys veto native-path detection.
+pub fn native_path_excluded(path: &str, rules: &RuntimeRuleSet) -> bool {
+    rules
+        .native_path_exclude_markers
+        .iter()
+        .any(|marker| path.contains(marker))
+        || rules
+            .native_path_exclude_patterns
+            .iter()
+            .any(|pattern| match_regex(pattern, path))
+}
+
 pub fn is_native_path(path: &str, rules: &RuntimeRuleSet) -> bool {
     if path.is_empty() || path.starts_with('<') {
         return true;
     }
-    if rules
-        .native_path_exclude_markers
-        .iter()
-        .any(|marker| path.contains(marker))
-    {
-        return false;
-    }
-    if rules
-        .native_path_exclude_patterns
-        .iter()
-        .any(|pattern| match_regex(pattern, path))
-    {
+    if native_path_excluded(path, rules) {
         return false;
     }
     if rules
@@ -127,8 +128,21 @@ pub fn categorize_runtime_frame(frame: &Frame, rules: &RuntimeRuleSet) -> Option
     }
 
     if let Some(core_class) = direct_core_class(name, rules) {
+        // Core-class explicit-native routing keys on pseudo-paths and the
+        // pack's native_path_markers, now exclusion-aware (markers
+        // previously ignored the exclude keys — a /native/app/ exclusion
+        // could not veto a /native/ marker). native_path_patterns
+        // deliberately do NOT core-route: they feed the pack's general
+        // native detection (runtime-owned checks, native: predicates),
+        // where e.g. the ruby pack's version-dir pattern must not
+        // reclassify stdlib or vendored interpreter files away from
+        // stdlib/semantic routing. A pack that wants pattern-style core
+        // routing declares the substring as a marker. <internal:> keeps
+        // precedence (core_internal_categories below), and <cfunc> stays
+        // the fast path.
         let explicit_native_path = path == "<cfunc>"
             || (!path.starts_with("<internal:")
+                && !native_path_excluded(path, rules)
                 && (path.starts_with('<')
                     || rules
                         .native_path_markers

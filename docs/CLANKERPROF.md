@@ -193,7 +193,9 @@ clankerprof targets \
   --output tmp/request-summary.csv
 ```
 
-`simple-csv` writes one CSV row per category. The same rows are wrapped below
+`simple-csv` writes one CSV row per category (categories other than `Other`
+whose share magnitude is below 0.1% are omitted as noise; negative shares of
+any magnitude are rendered). The same rows are wrapped below
 as a table so the important shape is easy to scan:
 
 | Parent | Category | CPU % | p90 ms est. | Main app callsites | Low-level work |
@@ -271,7 +273,9 @@ representative caller -> hot leaf pairs. Owner rows answer a different
 question from slices: they say which observed frame below this specific
 scope drove each cost kind. If authoritative ownership matters, load a slice
 file with `slices = "./slices.yml"` and use `slice:<name>` predicates in
-`[owner]`.
+`[owner]`. The predicate matches a frame only when `<name>` is the frame's
+effective first-match owner under that slice file (declaration order, default
+slice as fallback), exactly as the slices projection would attribute it.
 
 Predicate values can be a plain string, an array of strings with OR semantics,
 or a table with `any`, `all`, and `not`. Supported predicate keys include
@@ -426,6 +430,10 @@ Unknown slice keys are preserved as generic JSON-compatible `metadata` in
 slice output. A nested `metadata:` object is flattened into that same payload,
 so callers can attach labels, contacts, docs, escalation hints, or any other
 domain metadata without teaching `clankerprof` application-specific concepts.
+Non-finite YAML numbers (`.nan`, `.inf`) are rejected at load — they are
+not JSON-compatible, so neither implementation could preserve them.
+Slice names must be unique; a duplicate name is a validation error rather
+than a silent merge.
 
 Common slice options can also live in a YAML config:
 

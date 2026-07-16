@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +9,7 @@ from typing import Literal, cast
 
 from clankerprof.categorize import RuntimeCategoryCache, categorize_stack
 from clankerprof.facts import ProfileFactIndex, SampleFactsInput
+from clankerprof.jsonio import parse_strict_json
 from clankerprof.model import Frame, Profile
 from clankerprof.patterns import (
     DEFAULT_RUNTIME_RULES,
@@ -35,7 +34,7 @@ class TargetAnalysisOptions:
 
 
 def load_json_mapping(path: str | Path) -> dict[str, dict[str, str]]:
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    payload = parse_strict_json(Path(path).read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("Target config must be a JSON object.")
     result: dict[str, dict[str, str]] = {}
@@ -43,9 +42,16 @@ def load_json_mapping(path: str | Path) -> dict[str, dict[str, str]]:
         if not isinstance(categories, dict):
             raise ValueError(f"Target config for {parent} must be an object.")
         raw_categories = cast(dict[object, object], categories)
-        result[str(parent)] = {
-            str(category): str(pattern) for category, pattern in raw_categories.items()
-        }
+        parent_map: dict[str, str] = {}
+        for category, pattern in raw_categories.items():
+            if not isinstance(pattern, str):
+                # Adopt the Rust core's existing message: str() coercion would
+                # spell non-string patterns differently across languages.
+                raise ValueError(
+                    f"Target config pattern for {category} must be a string."
+                )
+            parent_map[str(category)] = pattern
+        result[str(parent)] = parent_map
     return result
 
 
@@ -122,6 +128,9 @@ def analyze_target_facts(
             stats.sample_count += 1
             stats.add_function(leaf.name, value)
             stats.files.add(frame_to_categorize.filename)
+            # Scan to the root: the first eligible application caller wins at
+            # any depth (an arbitrary nine-frame window silently fell back to
+            # the first native frame under deep native runs).
             caller = index.first_caller_after_leaf(
                 fact,
                 lambda frame: (
@@ -131,7 +140,6 @@ def analyze_target_facts(
                         resolved_options.runtime_rules,
                     )
                 ),
-                limit=9,
             )
             if caller is None and len(stack) > 1:
                 caller = stack[1]

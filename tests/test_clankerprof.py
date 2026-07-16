@@ -887,6 +887,225 @@ def test_clankerprof_compare_rejects_wrong_payload_types() -> None:
         )
 
 
+def test_clankerprof_compare_rejects_missing_row_arrays_and_bad_numbers() -> None:
+    report = _compare_slice_report([{"name": "A", "pct": 10.0, "frames": []}])
+    with pytest.raises(ValueError, match="must contain a slices array"):
+        compare_slice_json({"tool": "clankerprof_slices"}, report)
+    with pytest.raises(ValueError, match="must contain a boundaries array"):
+        compare_boundary_json(
+            {"tool": "clankerprof_boundaries"},
+            _compare_boundary_report([]),
+        )
+    with pytest.raises(ValueError, match="Slice field 'pct' must be a number"):
+        compare_slice_json(
+            report,
+            _compare_slice_report([{"name": "A", "pct": "not-a-number"}]),
+        )
+    with pytest.raises(ValueError, match="Frame field 'pct' must be a number"):
+        compare_slice_json(
+            report,
+            _compare_slice_report(
+                [{"name": "A", "pct": 10.0, "frames": [{"function": "f", "pct": True}]}]
+            ),
+        )
+    with pytest.raises(ValueError, match="field 'total_time_ns' must be an integer"):
+        compare_slice_json(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": "later"},
+                "slices": [],
+            },
+            report,
+        )
+    with pytest.raises(
+        ValueError, match="Boundary field 'pct_of_profile' must be a number"
+    ):
+        compare_boundary_json(
+            _compare_boundary_report([{"name": "web", "pct_of_profile": []}]),
+            _compare_boundary_report([]),
+        )
+
+
+def test_clankerprof_compare_rejects_non_finite_thresholds() -> None:
+    before = _compare_slice_report([{"name": "A", "pct": 10.0, "frames": []}])
+    after = _compare_slice_report([{"name": "A", "pct": 20.0, "frames": []}])
+    assert compare_slice_json(before, after)["has_regression"] is True
+    for threshold in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValueError, match="thresholds must be finite"):
+            compare_slice_json(before, after, CompareOptions(threshold_abs=threshold))
+        with pytest.raises(ValueError, match="thresholds must be finite"):
+            compare_boundary_json(
+                _compare_boundary_report([]),
+                _compare_boundary_report([]),
+                CompareOptions(threshold_rel=threshold),
+            )
+
+
+def test_clankerprof_compare_rejects_rows_missing_required_fields() -> None:
+    good = _compare_slice_report([{"name": "hot", "pct": 10.0, "frames": []}])
+    with pytest.raises(ValueError, match="Slice field 'pct' must be a number"):
+        compare_slice_json(good, _compare_slice_report([{"name": "hot"}]))
+    with pytest.raises(ValueError, match="Slice rows must carry a string 'name'"):
+        compare_slice_json(good, _compare_slice_report([{"pct": 10.0}]))
+    with pytest.raises(ValueError, match="Slice rows must be objects"):
+        compare_slice_json(
+            good,
+            _compare_slice_report(cast(list[dict[str, object]], ["hot"])),
+        )
+    with pytest.raises(ValueError, match="Slice field 'frames' must be an array"):
+        compare_slice_json(
+            good,
+            _compare_slice_report([{"name": "hot", "pct": 10.0, "frames": "junk"}]),
+        )
+    with pytest.raises(ValueError, match="Frame rows must be objects"):
+        compare_slice_json(
+            good,
+            _compare_slice_report([{"name": "hot", "pct": 10.0, "frames": ["f"]}]),
+        )
+    with pytest.raises(ValueError, match="Frame rows must carry a string 'function'"):
+        compare_slice_json(
+            good,
+            _compare_slice_report(
+                [{"name": "hot", "pct": 10.0, "frames": [{"pct": 1.0}]}]
+            ),
+        )
+    with pytest.raises(ValueError, match="Report summary must be an object"):
+        compare_slice_json(
+            {"tool": "clankerprof_slices", "slices": [{"name": "hot", "pct": 1.0}]},
+            good,
+        )
+    with pytest.raises(ValueError, match="'total_time_ns' must be an integer"):
+        compare_slice_json(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {},
+                "slices": [{"name": "hot", "pct": 1.0}],
+            },
+            good,
+        )
+    with pytest.raises(ValueError, match="Boundary rows must be objects"):
+        compare_boundary_json(
+            _compare_boundary_report(cast(list[dict[str, object]], ["web"])),
+            _compare_boundary_report([]),
+        )
+    with pytest.raises(ValueError, match="Bucket rows must carry a string 'name'"):
+        compare_boundary_json(
+            _compare_boundary_report(
+                [{"name": "web", "pct_of_profile": 5.0, "buckets": [{"pct": 1.0}]}]
+            ),
+            _compare_boundary_report([]),
+        )
+    # Row-level absence stays legal: names present in only one report compare
+    # against zero instead of failing field validation.
+    removed = compare_slice_json(good, _compare_slice_report([]))
+    assert removed["slices"][0]["after_pct"] == 0.0
+    assert removed["slices"][0]["before_pct"] == 10.0
+
+
+def test_clankerprof_scope_config_rejects_empty_tables_and_bad_count(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path = tmp_path / "facts.json"
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/app/leaf.rb"))
+    parent = builder.location(builder.function("T", "/app/t.rb"))
+    builder.sample((leaf, parent), 7)
+    facts_path.write_text(
+        dumps_sample_facts(decode_profile_bytes(builder.encode()).to_sample_facts()),
+        encoding="utf-8",
+    )
+    cases = [
+        (
+            "cost_kind:\n  Empty: {}\nscope:\n  - function: T\n",
+            "cost_kind Empty predicate table cannot be empty.",
+        ),
+        (
+            "scope:\n  - function: T\n    count: 1\n",
+            "scope.count must be occurrence or once_per_sample.",
+        ),
+    ]
+    for index, (config_text, message) in enumerate(cases):
+        config_path = tmp_path / f"scopes-{index}.yml"
+        config_path.write_text(config_text, encoding="utf-8")
+        exit_code = clankerprof_main(
+            ["scopes", "--facts", str(facts_path), "--config", str(config_path)]
+        )
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == message
+
+
+def test_clankerprof_library_regex_group_fallback(tmp_path: Path) -> None:
+    from clankerprof.patterns import extract_library_path
+
+    pack_path = tmp_path / "pack.yml"
+    pack_path.write_text(
+        "schema_version: clankerprof.runtime_rules.v1\n"
+        "name: fallback\n"
+        "library_path_patterns:\n"
+        '  - "regex:/gems/(foo)?bar/"\n'
+        '  - "regex:/vendor/[^/]+/"\n',
+        encoding="utf-8",
+    )
+    rules = load_runtime_rules_file(pack_path)
+    participating = extract_library_path("/gems/foobar/file.rb", rules)
+    assert participating is not None
+    assert participating.name == "foo"
+    assert participating.relative_path == "foobar/file.rb"
+    # Group 1 declared but not participating: the whole match names the
+    # library, exactly as the Rust implementation computes it.
+    fallback = extract_library_path("/gems/bar/file.rb", rules)
+    assert fallback is not None
+    assert fallback.name == "gems/bar"
+    assert fallback.relative_path == "/gems/bar/file.rb"
+    # No groups declared: whole match, relative path to the end of the path.
+    zero_group = extract_library_path("/x/vendor/acme/lib.rb", rules)
+    assert zero_group is not None
+    assert zero_group.name == "vendor/acme"
+    assert zero_group.relative_path == "/vendor/acme/lib.rb"
+
+
+def test_clankerprof_compare_aggregates_duplicate_function_frames() -> None:
+    before = _compare_slice_report(
+        [
+            {
+                "name": "A",
+                "pct": 30.0,
+                "frames": [
+                    {"function": "f", "filename": "/one", "pct": 10.0},
+                    {"function": "f", "filename": "/two", "pct": 15.0},
+                    {"function": "g", "filename": "/g", "pct": 5.0},
+                ],
+            }
+        ]
+    )
+    after = _compare_slice_report(
+        [
+            {
+                "name": "A",
+                "pct": 30.0,
+                "frames": [
+                    {"function": "f", "filename": "/one", "pct": 15.0},
+                    {"function": "f", "filename": "/two", "pct": 15.0},
+                    {"function": "g", "filename": "/g", "pct": 0.0},
+                ],
+            }
+        ]
+    )
+    compared = compare_slice_json(before, after)
+    frame_deltas = cast(
+        list[dict[str, Any]],
+        cast(list[dict[str, Any]], compared["slices"])[0]["frame_deltas"],
+    )
+    f_row = next(row for row in frame_deltas if row["function"] == "f")
+    assert f_row["before_pct"] == 25.0
+    assert f_row["after_pct"] == 30.0
+    assert f_row["delta_abs"] == 5.0
+    regressions = cast(list[dict[str, Any]], compared["top_regressions"])
+    assert [(row["function"], row["delta_abs"]) for row in regressions] == [("f", 5.0)]
+
+
 def _runtime_args(**overrides: object) -> argparse.Namespace:
     args: dict[str, object] = {
         "runtime": "generic",
@@ -936,7 +1155,10 @@ def test_clankerprof_public_api_exports() -> None:
     assert "Target#render" in results
 
 
-def test_clankerprof_cli_rejects_malformed_flags(tmp_path: Path) -> None:
+def test_clankerprof_cli_rejects_malformed_flags(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     profile_path = tmp_path / "profile.pb"
     profile_path.write_bytes(_target_profile_bytes())
     cases: list[list[str]] = [
@@ -946,9 +1168,9 @@ def test_clankerprof_cli_rejects_malformed_flags(tmp_path: Path) -> None:
         ["unknown-subcommand"],
     ]
     for argv in cases:
-        with pytest.raises(SystemExit) as excinfo:
-            clankerprof_main(argv)
-        assert excinfo.value.code == 2, argv
+        assert clankerprof_main(argv) == 2, argv
+        envelope = _error_envelope(capsys)
+        assert envelope["error"], argv
 
 
 def test_clankerprof_decoder_rejects_truncated_and_overlong_fields() -> None:
@@ -1163,6 +1385,214 @@ def test_clankerprof_standalone_global_output_is_honored(tmp_path: Path) -> None
     assert exit_code == 0
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["tool"] == "clankerprof_targets"
+
+
+def test_clankerprof_output_writes_print_json_receipts(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    config_path = tmp_path / "config.json"
+    output_path = tmp_path / "targets.json"
+    profile_path.write_bytes(_target_profile_bytes())
+    config_path.write_text(
+        json.dumps({"Target#render": {"Application": "path:app/**"}}),
+        encoding="utf-8",
+    )
+
+    exit_code = clankerprof_main(
+        [
+            "targets",
+            "--profile",
+            str(profile_path),
+            "--config",
+            str(config_path),
+            "--format",
+            "json",
+            "--output",
+            str(output_path),
+        ]
+    )
+    assert exit_code == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt == {
+        "ok": True,
+        "output": str(output_path),
+        "tool": "clankerprof_targets",
+    }
+    artifact = json.loads(output_path.read_text(encoding="utf-8"))
+    assert artifact["tool"] == "clankerprof_targets"
+    assert "Target#render" in artifact["parents"]
+
+
+def test_clankerprof_compare_output_receipt_preserves_regression_exit(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    before_path = tmp_path / "before.json"
+    after_path = tmp_path / "after.json"
+    output_path = tmp_path / "compare.json"
+    global_output_path = tmp_path / "compare-global.json"
+    before_path.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "A", "pct": 10.0}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    after_path.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "A", "pct": 50.0}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = clankerprof_main(
+        [
+            "compare",
+            "--before",
+            str(before_path),
+            "--after",
+            str(after_path),
+            "--output",
+            str(output_path),
+        ]
+    )
+    assert exit_code == 2
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt == {
+        "has_regression": True,
+        "ok": True,
+        "output": str(output_path),
+        "tool": "clankerprof_compare",
+    }
+    artifact = json.loads(output_path.read_text(encoding="utf-8"))
+    assert artifact["tool"] == "clankerprof_compare"
+    assert artifact["has_regression"] is True
+
+    exit_code = clankerprof_main(
+        [
+            "--output",
+            str(global_output_path),
+            "compare",
+            "--before",
+            str(before_path),
+            "--after",
+            str(after_path),
+        ]
+    )
+    assert exit_code == 2
+    capsys.readouterr()
+    assert global_output_path.read_text(encoding="utf-8") == output_path.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_autoclanker_pprof_compare_output_receipt_both_placements(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    before_path = tmp_path / "before.json"
+    after_path = tmp_path / "after.json"
+    local_path = tmp_path / "compare-local.json"
+    global_path = tmp_path / "compare-global.json"
+    report = {
+        "tool": "clankerprof_slices",
+        "summary": {"total_time_ns": 100},
+        "slices": [{"name": "A", "pct": 10.0}],
+    }
+    before_path.write_text(json.dumps(report), encoding="utf-8")
+    after_path.write_text(json.dumps(report), encoding="utf-8")
+
+    exit_code = autoclanker_main(
+        [
+            "pprof",
+            "compare",
+            "--before",
+            str(before_path),
+            "--after",
+            str(after_path),
+            "--output",
+            str(local_path),
+        ]
+    )
+    assert exit_code == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt == {
+        "has_regression": False,
+        "ok": True,
+        "output": str(local_path),
+        "tool": "clankerprof_compare",
+    }
+
+    exit_code = autoclanker_main(
+        [
+            "--output",
+            str(global_path),
+            "pprof",
+            "compare",
+            "--before",
+            str(before_path),
+            "--after",
+            str(after_path),
+        ]
+    )
+    assert exit_code == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["output"] == str(global_path)
+    assert global_path.read_text(encoding="utf-8") == local_path.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_clankerprof_facts_stdout_matches_artifact_bytes(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    artifact_path = tmp_path / "facts.json"
+    profile_path.write_bytes(_target_profile_bytes())
+
+    assert clankerprof_main(["facts", "--profile", str(profile_path)]) == 0
+    compact_stdout = capsys.readouterr().out
+    assert (
+        clankerprof_main(
+            ["facts", "--profile", str(profile_path), "--output", str(artifact_path)]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    assert compact_stdout == artifact_path.read_text(encoding="utf-8")
+
+    assert clankerprof_main(["facts", "--profile", str(profile_path), "--pretty"]) == 0
+    pretty_stdout = capsys.readouterr().out
+    assert pretty_stdout != compact_stdout
+    assert json.loads(pretty_stdout) == json.loads(compact_stdout)
+
+
+def test_clankerprof_slice_config_rejects_non_finite_top(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(_slice_semantics_profile_bytes())
+    config_path = tmp_path / "slices-config.yml"
+    config_path.write_text(
+        f"profile: {profile_path}\ntop: .inf\n",
+        encoding="utf-8",
+    )
+
+    exit_code = clankerprof_main(["slices", "--config", str(config_path)])
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "top in slice config must be an integer."
 
 
 def test_clankerprof_filter_validation_applies_without_slices_config(
@@ -3449,6 +3879,23 @@ def test_clankerprof_slice_descendant_filters_use_or_semantics() -> None:
     )
     assert inverted_descendant_result.matching_time_ns == 60_000_000
 
+    # Negation binds to descendant EXISTENCE: a stack that contains the
+    # forbidden frame is excluded even though its other frames don't match
+    # (any(not m) would let it pass whenever any unrelated frame exists).
+    forbidden_present_result = analyze_slices(
+        profile,
+        SliceAnalysisOptions(filters=("<!name:RequestHandler#render_response",)),
+    )
+    request_stack_result = analyze_slices(
+        profile,
+        SliceAnalysisOptions(filters=("<name:RequestHandler#render_response",)),
+    )
+    assert request_stack_result.matching_time_ns > 0
+    assert (
+        forbidden_present_result.matching_time_ns
+        == request_stack_result.total_time_ns - request_stack_result.matching_time_ns
+    )
+
 
 @covers("M9-004")
 def test_clankerprof_slice_filter_prefixes_can_repeat_in_any_order() -> None:
@@ -4542,7 +4989,7 @@ _INVALID_V2_CASES: list[tuple[Callable[[dict[str, Any]], object], str]] = [
     ),
     (
         lambda p: p["frames"][0].__setitem__(0, "loc"),
-        "location_id must be an integer",
+        "location_id must be an unsigned 64-bit integer",
     ),
     (
         lambda p: p["frames"][0].__setitem__(4, True),
@@ -4589,6 +5036,18 @@ _INVALID_V2_CASES: list[tuple[Callable[[dict[str, Any]], object], str]] = [
         lambda p: p["samples"][0].__delitem__("sample_index"),
         "missing required key",
     ),
+    (
+        lambda p: p["samples"][0].__delitem__("values"),
+        "missing required key: 'values'",
+    ),
+    (
+        lambda p: p["samples"][0].__delitem__("location_ids"),
+        "missing required key: 'location_ids'",
+    ),
+    (
+        lambda p: p["samples"][0].__delitem__("stack"),
+        "missing required key: 'stack'",
+    ),
 ]
 
 
@@ -4601,6 +5060,144 @@ def test_clankerprof_facts_import_rejects_each_invalid_v2_shape(
     mutate(payload)
     with pytest.raises(ValueError, match=match):
         loads_sample_facts(json.dumps(payload))
+
+
+def test_clankerprof_facts_import_accepts_uint64_ids() -> None:
+    big_id = 2**63
+    payload = _valid_facts_export()
+    payload["frames"][0][0] = big_id
+    payload["frames"][0][1] = big_id
+    payload["samples"][0]["location_ids"] = [big_id]
+    facts = loads_sample_facts(json.dumps(payload))
+    assert facts.samples[0].stack[0].location_id == big_id
+    assert facts.samples[0].stack[0].function_id == big_id
+    assert facts.samples[0].sample.location_ids == (big_id,)
+
+
+def test_clankerprof_facts_import_rejects_non_integral_numeric_fields() -> None:
+    cases: list[tuple[Callable[[dict[str, Any]], object], str]] = [
+        (
+            lambda p: p["samples"][0].__setitem__("values", [7.9]),
+            "values entries must be signed 64-bit integers",
+        ),
+        (
+            lambda p: p["samples"][0].__setitem__("values", [2**63]),
+            "values entries must be signed 64-bit integers",
+        ),
+        (
+            lambda p: p["samples"][0].__setitem__("values", [True]),
+            "values entries must be signed 64-bit integers",
+        ),
+        (
+            lambda p: p["samples"][0].__setitem__("location_ids", [-1]),
+            "location_ids entries must be unsigned 64-bit integers",
+        ),
+        (
+            lambda p: p["samples"][0].__setitem__("location_ids", [2**64]),
+            "location_ids entries must be unsigned 64-bit integers",
+        ),
+        (
+            lambda p: p["samples"][0].__setitem__("sample_index", 1.5),
+            "sample_index must be a non-negative integer",
+        ),
+        (
+            lambda p: p["frames"][0].__setitem__(0, -1),
+            "location_id must be an unsigned 64-bit integer",
+        ),
+        (
+            lambda p: p["profile"].__setitem__("period", 1.25),
+            "profile period must be an integer",
+        ),
+        (
+            lambda p: p["summary"].__setitem__("total_primary_value", 30.0),
+            "summary total_primary_value must be an integer",
+        ),
+    ]
+    for mutate, match in cases:
+        payload = _valid_facts_export()
+        mutate(payload)
+        with pytest.raises(ValueError, match=match):
+            loads_sample_facts(json.dumps(payload))
+
+
+def test_clankerprof_facts_aggregate_bounds() -> None:
+    i64_max = 2**63 - 1
+
+    def artifact(sample_count: int) -> dict[str, Any]:
+        payload = _valid_facts_export()
+        template = cast(dict[str, Any], payload["samples"][0])
+        template["values"] = [i64_max]
+        payload["samples"] = [
+            dict(template, sample_index=index) for index in range(sample_count)
+        ]
+        payload.pop("summary", None)
+        return payload
+
+    # Two i64::MAX samples stay within the aggregate bound: the exact total
+    # (2**64 - 2) is representable in both languages.
+    facts = loads_sample_facts(json.dumps(artifact(2)))
+    assert facts.total_primary_value == 2**64 - 2
+
+    with pytest.raises(
+        ValueError,
+        match="Aggregate sample values exceed the supported integer range",
+    ):
+        loads_sample_facts(json.dumps(artifact(3)))
+
+
+def test_clankerprof_json_inputs_reject_non_finite_tokens(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(
+        '{"schema_version": "clankerprof.sample_facts.v2", "samples": [], '
+        '"strings": [], "frames": [], "profile": {"period": Infinity}}',
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"Target#render": {}}), encoding="utf-8")
+    exit_code = clankerprof_main(
+        ["targets", "--facts", str(facts_path), "--config", str(config_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert "non-finite token 'Infinity'" in cast(str, envelope["error"])
+
+    report_path = tmp_path / "report.json"
+    report_path.write_text(
+        '{"tool": "clankerprof_slices", "slices": [{"name": "A", "pct": NaN}]}',
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["compare", "--before", str(report_path), "--after", str(report_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert "non-finite token 'NaN'" in cast(str, envelope["error"])
+
+
+def test_clankerprof_json_out_of_range_integers_reject_in_integer_domains(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # serde_json parses integer literals beyond [i64::MIN, u64::MAX] as f64;
+    # Python keeps an unbounded int. Integer-domain fields must reject both
+    # representations (float-domain fields coerce to the identical f64 — the
+    # parity suite pins that side).
+    report_path = tmp_path / "report.json"
+    report_path.write_text(
+        '{"tool": "clankerprof_slices", '
+        '"summary": {"total_time_ns": 1000000000000000000000000000000}, '
+        '"slices": [{"name": "A", "pct": 1}]}',
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["compare", "--before", str(report_path), "--after", str(report_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert "total_time_ns" in cast(str, envelope["error"])
 
 
 def test_clankerprof_facts_import_rejects_invalid_v1_shapes() -> None:
@@ -4662,7 +5259,2682 @@ def test_clankerprof_facts_import_edge_branches() -> None:
     with pytest.raises(ValueError, match="frame must be an object"):
         loads_sample_facts(json.dumps(v1_bad_frame))
 
-    tolerated = _valid_facts_export()
-    tolerated["summary"] = "free-form"
-    imported = loads_sample_facts(json.dumps(tolerated))
+    # A present summary must be an object; only absent or null skip the
+    # redundancy cross-check.
+    wrong_type = _valid_facts_export()
+    wrong_type["summary"] = "free-form"
+    with pytest.raises(ValueError, match="summary must be an object"):
+        loads_sample_facts(json.dumps(wrong_type))
+    wrong_type["summary"] = []
+    with pytest.raises(ValueError, match="summary must be an object"):
+        loads_sample_facts(json.dumps(wrong_type))
+    null_summary = _valid_facts_export()
+    null_summary["summary"] = None
+    imported = loads_sample_facts(json.dumps(null_summary))
     assert imported.total_primary_value == 50_000_000
+
+
+def test_clankerprof_by_slice_values_validate_and_support_negative_limits(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("T#render", "/srv/app/t.rb"))
+    app_leaf = builder.location(builder.function("Leaf#call", "/srv/app/leaf.rb"))
+    gem_leaf = builder.location(
+        builder.function("Client#post", "/gems/http-5.1.0/lib/http.rb")
+    )
+    builder.sample((app_leaf, target), 7_000_000)
+    builder.sample((gem_leaf, target), 3_000_000)
+    profile_path = tmp_path / "by-slice.pb"
+    profile_path.write_bytes(builder.encode())
+    slices_path = tmp_path / "by-slice-slices.yml"
+    slices_path.write_text(
+        "slices:\n"
+        "  - name: app\n"
+        "    paths:\n"
+        "      - /srv/app\n"
+        "  - name: default\n"
+        "    default: true\n",
+        encoding="utf-8",
+    )
+    base = [
+        "slices",
+        "--profile",
+        str(profile_path),
+        "--slices",
+        str(slices_path),
+    ]
+
+    assert clankerprof_main(base) == 0
+    full_payload = json.loads(capsys.readouterr().out)
+    full_names = [item["name"] for item in full_payload["slices"]]
+    assert len(full_names) == 2
+
+    # Negative limits drop from the tail (Python list slicing), and stay
+    # supported so the Rust port must honor the same semantics.
+    assert clankerprof_main([*base, "--by-slice", "-1"]) == 0
+    negative_payload = json.loads(capsys.readouterr().out)
+    negative_names = [item["name"] for item in negative_payload["slices"]]
+    assert negative_names == full_names[:-1]
+
+    # Malformed values fail closed with the shared strict messages instead of
+    # leaking int()/float() exception text.
+    for value, message in (
+        ("garbage", "--by-slice values must be integers."),
+        ("1_0", "--by-slice values must be integers."),
+        # An empty PRESENT value is not an integer — truthiness must not
+        # silently disable filtering (Rust already rejects it).
+        ("", "--by-slice values must be integers."),
+        ("garbage%", "--by-slice percentage thresholds must be finite numbers."),
+        ("inf%", "--by-slice percentage thresholds must be finite numbers."),
+        ("nan%", "--by-slice percentage thresholds must be finite numbers."),
+        ("%", "--by-slice percentage thresholds must be finite numbers."),
+    ):
+        assert clankerprof_main([*base, "--by-slice", value]) == 2, value
+        assert json.loads(capsys.readouterr().err) == {
+            "ok": False,
+            "error": message,
+        }, value
+
+
+def test_clankerprof_slices_tail_limits_accept_i64_min(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("T#render", "/srv/app/t.py"))
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    builder.sample((leaf, target), 7_000_000)
+    profile_path = tmp_path / "i64-min.pb"
+    profile_path.write_bytes(builder.encode())
+    slices_path = tmp_path / "i64-min-slices.yml"
+    slices_path.write_text(
+        "slices:\n  - name: app\n    paths:\n      - /srv/app\n",
+        encoding="utf-8",
+    )
+    base = [
+        "slices",
+        "--profile",
+        str(profile_path),
+        "--slices",
+        str(slices_path),
+    ]
+
+    # i64::MIN is inside the documented signed-64-bit limit domain; the tail
+    # drop must empty the list without erroring (Python `list[:-n]`).
+    for flag in ("--by-slice", "--top"):
+        assert clankerprof_main([*base, flag, "-9223372036854775808"]) == 0, flag
+        payload = json.loads(capsys.readouterr().out)
+        if flag == "--by-slice":
+            assert payload["slices"] == []
+        else:
+            assert all(item["frames"] == [] for item in payload["slices"])
+
+
+def test_clankerprof_scope_occurrence_aggregates_fail_closed_beyond_bound(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("T", "/srv/app/t.py"))
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    # One valid sample (import bound holds: i64::MAX <= u64::MAX), but the
+    # scope frame appears three times, so occurrence attribution would reach
+    # 3 * i64::MAX > u64::MAX.
+    builder.sample((leaf, target, target, target), 2**63 - 1)
+    profile_path = tmp_path / "occurrence-overflow.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "occurrence-overflow.yml"
+    config_path.write_text(
+        'cost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - function: T\n',
+        encoding="utf-8",
+    )
+
+    argv = [
+        "scopes",
+        "--profile",
+        str(profile_path),
+        "--config",
+        str(config_path),
+    ]
+    assert clankerprof_main(argv) == 2
+    assert json.loads(capsys.readouterr().err) == {
+        "ok": False,
+        "error": "Aggregate sample values exceed the supported integer range.",
+    }
+
+    # once_per_sample mode keeps the aggregate a subset sum, which the import
+    # bound already covers: the identical profile stays valid.
+    once_config = tmp_path / "occurrence-once.yml"
+    once_config.write_text(
+        'cost_kind:\n  AppWork: "name:Leaf"\n'
+        "scope:\n  - function: T\n    count: once_per_sample\n",
+        encoding="utf-8",
+    )
+    assert (
+        clankerprof_main(
+            ["scopes", "--profile", str(profile_path), "--config", str(once_config)]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["boundaries"][0]["total_time_ns"] == 2**63 - 1
+
+
+def test_clankerprof_scope_rollups_render_negative_costs_additively(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("T", "/srv/app/t.py"))
+    pos = builder.location(builder.function("Pos", "/srv/app/pos.py"))
+    neg = builder.location(builder.function("Neg", "/srv/app/neg.py"))
+    builder.sample((pos, target), 10)
+    builder.sample((neg, target), -5)
+    profile_path = tmp_path / "mixed-sign.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "mixed-sign.yml"
+    config_path.write_text(
+        'cost_kind:\n  Pos: "name:Pos"\n  Neg: "name:Neg"\nscope:\n  - function: T\n',
+        encoding="utf-8",
+    )
+
+    argv = ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+    assert clankerprof_main(argv) == 0
+    boundary = json.loads(capsys.readouterr().out)["boundaries"][0]
+    assert boundary["total_time_ns"] == 5
+    bucket_total = sum(bucket["time_ns"] for bucket in boundary["buckets"])
+    assert bucket_total == boundary["total_time_ns"]
+    categories = {
+        category["name"]: category["time_ns"]
+        for bucket in boundary["buckets"]
+        for category in bucket["categories"]
+    }
+    # Negative aggregates must be rendered (dropping them breaks additivity);
+    # only zero-aggregate rows may be omitted.
+    assert categories == {"Pos": 10, "Neg": -5}
+
+
+def test_clankerprof_zero_sum_buckets_keep_nonzero_categories(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # A bucket whose signed categories cancel to zero is not an omittable
+    # zero row: its nonzero children must render.
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("S", "/srv/app/s.py"))
+    pos = builder.location(builder.function("Pos", "/srv/app/pos.py"))
+    neg = builder.location(builder.function("Neg", "/srv/app/neg.py"))
+    builder.sample((pos, target), 10)
+    builder.sample((neg, target), -10)
+    builder.sample((builder.location(builder.function("Unrelated", "/x/u.py")),), 5)
+    profile_path = tmp_path / "cancel-bucket.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "cancel-bucket.yml"
+    config_path.write_text(
+        'cost_kind:\n  Positive: "name:Pos"\n  Negative: "name:Neg"\n'
+        "scope:\n  - function: S\n"
+        '    rollup:\n      Work: ["Positive", "Negative"]\n',
+        encoding="utf-8",
+    )
+    argv = ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+    assert clankerprof_main(argv) == 0
+    boundary = json.loads(capsys.readouterr().out)["boundaries"][0]
+    assert boundary["total_time_ns"] == 0
+    assert [bucket["name"] for bucket in boundary["buckets"]] == ["Work"]
+    bucket = boundary["buckets"][0]
+    assert bucket["time_ns"] == 0
+    assert {
+        category["name"]: category["time_ns"] for category in bucket["categories"]
+    } == {"Positive": 10, "Negative": -10}
+
+
+def test_clankerprof_scope_rollup_name_other_is_reserved(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Rendering appends an implicit `Other` bucket for unbucketed cost kinds;
+    # a configured `Other` would emit duplicate bucket rows that the compare
+    # gate rejects.
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("T", "/srv/app/t.py"))
+    leaf = builder.location(builder.function("LeafA", "/srv/app/a.py"))
+    builder.sample((leaf, target), 10)
+    profile_path = tmp_path / "other.pb"
+    profile_path.write_bytes(builder.encode())
+    for rollup_key, expected_field in (
+        ("rollup", "scope.rollup"),
+        ("bucket", "scope.bucket"),
+    ):
+        config_path = tmp_path / "other.yml"
+        config_path.write_text(
+            'cost_kind:\n  A: "name:LeafA"\n'
+            "scope:\n  - function: T\n"
+            f'    {rollup_key}:\n      Other: ["A"]\n',
+            encoding="utf-8",
+        )
+        argv = ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+        assert clankerprof_main(argv) == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == (
+            f"{expected_field} name 'Other' is reserved for unbucketed cost kinds."
+        )
+
+
+def test_clankerprof_scope_attributables_scale_for_negative_totals(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("T", "/srv/app/t.py"))
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    builder.sample((leaf, target), -10)
+    profile_path = tmp_path / "negative-total.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "negative-total.yml"
+    config_path.write_text(
+        'cost_kind:\n  Work: "name:Leaf"\n'
+        "scope:\n  - function: T\n"
+        '    rollup:\n      All: ["Work"]\n'
+        "    attributables:\n      p90: 100.0\n",
+        encoding="utf-8",
+    )
+
+    argv = ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+    assert clankerprof_main(argv) == 0
+    boundary = json.loads(capsys.readouterr().out)["boundaries"][0]
+    assert boundary["total_time_ns"] == -10
+    # A -10/-10 row is 100% of its scope: estimates scale by signed share for
+    # any nonzero total instead of vanishing on negative totals.
+    assert boundary["attributable_estimates"] == {"p90": 100.0}
+    bucket = boundary["buckets"][0]
+    assert bucket["attributable_estimates"] == {"p90": 100.0}
+    assert bucket["categories"][0]["attributable_estimates"] == {"p90": 100.0}
+
+
+def test_clankerprof_slice_metadata_rejects_non_finite_numbers(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    builder.sample((leaf,), 7)
+    profile_path = tmp_path / "metadata.pb"
+    profile_path.write_bytes(builder.encode())
+    for label, yaml_text in (
+        ("nested-map", "slices:\n  - name: app\n    metadata: {score: .nan}\n"),
+        ("top-level", "slices:\n  - name: app\n    score: .inf\n"),
+        ("list-item", "slices:\n  - name: app\n    labels: [ok, .nan]\n"),
+    ):
+        slices_path = tmp_path / f"metadata-{label}.yml"
+        slices_path.write_text(yaml_text, encoding="utf-8")
+        exit_code = clankerprof_main(
+            ["slices", "--profile", str(profile_path), "--slices", str(slices_path)]
+        )
+        assert exit_code == 2, label
+        assert json.loads(capsys.readouterr().err) == {
+            "ok": False,
+            "error": "Slice metadata values must be finite JSON-compatible numbers.",
+        }, label
+
+
+def test_clankerprof_compare_summary_totals_span_u64_range() -> None:
+    def report(total: int) -> dict[str, Any]:
+        return {
+            "tool": "clankerprof_slices",
+            "summary": {"total_time_ns": total},
+            "slices": [{"name": "A", "pct": 50.0, "frames": []}],
+        }
+
+    valid_total = 18_446_744_073_709_551_614  # 2 * i64::MAX, the spec example
+    payload = compare_slice_json(report(valid_total), report(valid_total))
+    assert payload["before_total_ns"] == valid_total
+    assert payload["after_total_ns"] == valid_total
+
+    for total in (2**64, -(2**63) - 1):
+        with pytest.raises(
+            ValueError,
+            match="Report summary field 'total_time_ns' must be an integer.",
+        ):
+            compare_slice_json(report(total), report(total))
+
+
+def _scope_facts_fixture(tmp_path: Path) -> Path:
+    facts_path = tmp_path / "order-facts.json"
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    parent = builder.location(builder.function("T", "/srv/app/t.py"))
+    builder.sample((leaf, parent), 7)
+    facts_path.write_text(
+        dumps_sample_facts(decode_profile_bytes(builder.encode()).to_sample_facts()),
+        encoding="utf-8",
+    )
+    return facts_path
+
+
+def test_clankerprof_invalid_regex_patterns_fail_closed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path = _scope_facts_fixture(tmp_path)
+    config_path = tmp_path / "bad-regex-targets.json"
+    config_path.write_text(json.dumps({"T": {"Bad": "regex:["}}), encoding="utf-8")
+    exit_code = clankerprof_main(
+        ["targets", "--facts", str(facts_path), "--config", str(config_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert str(envelope["error"]).startswith("Invalid regex pattern '[':")
+
+    pack_path = tmp_path / "bad-pattern-pack.yml"
+    pack_path.write_text(
+        'semantic_rules:\n  - category: Broken\n    name_patterns: ["("]\n',
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        [
+            "targets",
+            "--facts",
+            str(facts_path),
+            "--target",
+            "T",
+            "--runtime-rules",
+            str(pack_path),
+        ]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Invalid runtime rule name pattern '('."
+
+
+def test_clankerprof_scope_tables_respect_declaration_order(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path = _scope_facts_fixture(tmp_path)
+    yaml_config = tmp_path / "order.yml"
+    yaml_config.write_text(
+        'cost_kind:\n  ZFirst: "path:/srv/app"\n  ASecond: "path:/srv/app"\n'
+        "scope:\n  - function: T\n",
+        encoding="utf-8",
+    )
+    toml_config = tmp_path / "order.toml"
+    toml_config.write_text(
+        '[cost_kind]\nZFirst = "path:/srv/app"\nASecond = "path:/srv/app"\n\n'
+        '[[scope]]\nfunction = "T"\n',
+        encoding="utf-8",
+    )
+    for config_path in (yaml_config, toml_config):
+        exit_code = clankerprof_main(
+            ["scopes", "--facts", str(facts_path), "--config", str(config_path)]
+        )
+        assert exit_code == 0
+        payload = json.loads(capsys.readouterr().out)
+        categories = {
+            category["name"]
+            for boundary in payload["boundaries"]
+            for bucket in boundary["buckets"]
+            for category in bucket["categories"]
+        }
+        # First matching definition in declaration order wins, even though
+        # ASecond sorts first alphabetically.
+        assert categories == {"ZFirst"}, config_path.suffix
+
+
+def test_clankerprof_scope_labels_must_be_strings(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path = _scope_facts_fixture(tmp_path)
+    cases = [
+        (
+            'cost_kind:\n  AppWork: "name:Leaf"\n'
+            "scope:\n  - function: T\n    label: true\n",
+            "scope.label must be a string.",
+        ),
+        (
+            'cost_kind:\n  AppWork: "name:Leaf"\n'
+            "scope:\n  - function: T\n    name: 7\n",
+            "scope.name must be a string.",
+        ),
+        (
+            'cost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - function: [true]\n',
+            "scope.function must be a string or array of strings.",
+        ),
+        (
+            'cost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - function: 3\n',
+            "scope.function must be a string or array of strings.",
+        ),
+    ]
+    for index, (config_text, message) in enumerate(cases):
+        config_path = tmp_path / f"labels-{index}.yml"
+        config_path.write_text(config_text, encoding="utf-8")
+        exit_code = clankerprof_main(
+            ["scopes", "--facts", str(facts_path), "--config", str(config_path)]
+        )
+        assert exit_code == 2, message
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == message
+
+
+def test_clankerprof_yaml_inputs_reject_duplicate_keys(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path = _scope_facts_fixture(tmp_path)
+    dup_config = tmp_path / "dup.yml"
+    dup_config.write_text(
+        'cost_kind:\n  AppWork: "name:Leaf"\ncost_kind:\n  Other2: "name:Nope"\n'
+        "scope:\n  - function: T\n",
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["scopes", "--facts", str(facts_path), "--config", str(dup_config)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == 'duplicate entry with key "cost_kind"'
+
+    dup_pack = tmp_path / "dup-pack.yml"
+    dup_pack.write_text(
+        "semantic_rules: []\nsemantic_rules: []\n",
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        [
+            "targets",
+            "--facts",
+            str(facts_path),
+            "--target",
+            "T",
+            "--runtime-rules",
+            str(dup_pack),
+        ]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == 'duplicate entry with key "semantic_rules"'
+
+
+def _grammar_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/app/leaf.rb"))
+    parent = builder.location(builder.function("T", "/app/t.rb"))
+    builder.sample((leaf, parent), 7)
+    facts_path = tmp_path / "grammar-facts.json"
+    facts_path.write_text(
+        dumps_sample_facts(decode_profile_bytes(builder.encode()).to_sample_facts()),
+        encoding="utf-8",
+    )
+    slices_path = tmp_path / "grammar-slices.yml"
+    slices_path.write_text(
+        "slices:\n  - name: app\n    paths:\n      - /app\n",
+        encoding="utf-8",
+    )
+    scopes_path = tmp_path / "grammar-scopes.yml"
+    scopes_path.write_text(
+        'cost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - function: T\n',
+        encoding="utf-8",
+    )
+    return facts_path, slices_path, scopes_path
+
+
+def test_clankerprof_cli_integer_flags_use_strict_int64_grammar(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path, slices_path, scopes_path = _grammar_fixture(tmp_path)
+    slice_base = ["slices", "--facts", str(facts_path), "--slices", str(slices_path)]
+    scope_base = ["scopes", "--facts", str(facts_path), "--config", str(scopes_path)]
+    cases = [
+        ([*slice_base, "--top", "1_0"], "--top values must be integers."),
+        ([*slice_base, "--top", " 10 "], "--top values must be integers."),
+        ([*slice_base, "--top", "١٢"], "--top values must be integers."),
+        (
+            [*slice_base, "--top", "99999999999999999999"],
+            "--top values must be integers.",
+        ),
+        (
+            [*slice_base, "--unattributed-libraries", "1_0"],
+            "--unattributed-libraries values must be integers.",
+        ),
+        ([*scope_base, "--top", "1_0"], "--top values must be integers."),
+    ]
+    for argv, message in cases:
+        assert clankerprof_main(argv) == 2, argv
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == message, argv
+    # int64 boundary values and the bare-flag const stay accepted.
+    for argv in (
+        [*slice_base, "--top", "-9223372036854775808"],
+        [*scope_base, "--top", "-1"],
+        [*slice_base, "--unattributed-libraries"],
+    ):
+        assert clankerprof_main(argv) == 0, argv
+        capsys.readouterr()
+
+
+def test_clankerprof_scopes_negative_top_drops_from_tail(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/app/leaf.rb"))
+    zeaf = builder.location(builder.function("Zeaf", "/lib/z.rb"))
+    parent = builder.location(builder.function("T", "/app/t.rb"))
+    builder.sample((leaf, parent), 7)
+    builder.sample((zeaf, parent), 3)
+    facts_path = tmp_path / "negative-top-facts.json"
+    facts_path.write_text(
+        dumps_sample_facts(decode_profile_bytes(builder.encode()).to_sample_facts()),
+        encoding="utf-8",
+    )
+    scopes_path = tmp_path / "negative-top-scopes.yml"
+    scopes_path.write_text(
+        'cost_kind:\n  AppWork: "name:Leaf"\n'
+        'domain:\n  DomA: "path:/app"\n  DomB: "path:/lib"\n'
+        "scope:\n  - function: T\n",
+        encoding="utf-8",
+    )
+    base = ["scopes", "--facts", str(facts_path), "--config", str(scopes_path)]
+    assert clankerprof_main(base) == 0
+    unlimited = json.loads(capsys.readouterr().out)
+    assert clankerprof_main([*base, "--top", "-1"]) == 0
+    tail_dropped = json.loads(capsys.readouterr().out)
+    domains = unlimited["boundaries"][0]["domains"]
+    dropped_domains = tail_dropped["boundaries"][0]["domains"]
+    # list[:-1] semantics: the ranked domain list loses its final row.
+    assert len(domains) == 2
+    assert len(dropped_domains) == 1
+    assert dropped_domains[0]["name"] == domains[0]["name"]
+
+
+def test_clankerprof_compare_focus_flags_take_one_comma_delimited_value(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    report_path = tmp_path / "focus-report.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "a", "pct": 10}, {"name": "b", "pct": 5}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    base = ["compare", "--before", str(report_path), "--after", str(report_path)]
+    # Space-separated multi-value lists are no longer part of the grammar.
+    assert clankerprof_main([*base, "--focus-slices", "a", "b"]) == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "unrecognized arguments: b"
+    # Focus gates regression detection; a repeated flag keeps the last
+    # occurrence (argparse store), so which rows can trip the gate follows
+    # the final value.
+    regressed = tmp_path / "focus-report-after.json"
+    regressed.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "a", "pct": 10}, {"name": "b", "pct": 20}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    gated = ["compare", "--before", str(report_path), "--after", str(regressed)]
+    assert clankerprof_main([*gated, "--focus-slices", "a"]) == 0
+    capsys.readouterr()
+    assert clankerprof_main([*gated, "--focus-slices", "b", "--focus-slices", "a"]) == 0
+    capsys.readouterr()
+    assert clankerprof_main([*gated, "--focus-slices", "a", "--focus-slices", "b"]) == 2
+    last_wins = json.loads(capsys.readouterr().out)
+    assert last_wins["has_regression"] is True
+
+
+def test_clankerprof_compare_unknown_focus_names_fail_closed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # A zero-match focus name would silently disable gating (a typo or stale
+    # CI focus list), exactly like a non-finite threshold: fail closed. The
+    # union of before/after row names keeps focusing added/removed rows legal.
+    before_path = tmp_path / "focus-before.json"
+    before_path.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "hot", "pct": 10}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    after_path = tmp_path / "focus-after.json"
+    after_path.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "hot", "pct": 50}, {"name": "added", "pct": 1}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    base = ["compare", "--before", str(before_path), "--after", str(after_path)]
+    assert clankerprof_main([*base, "--focus-slices", "typo"]) == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Focus slices not present in either report: 'typo'."
+    assert clankerprof_main([*base, "--focus-slices", "zz,typo"]) == 2
+    envelope = _error_envelope(capsys)
+    assert (
+        envelope["error"] == "Focus slices not present in either report: 'typo', 'zz'."
+    )
+    # A row present in only one report is a legal focus target.
+    assert clankerprof_main([*base, "--focus-slices", "added"]) == 0
+    capsys.readouterr()
+
+    boundary_path = tmp_path / "focus-boundary.json"
+    boundary_path.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_boundaries",
+                "summary": {"total_time_ns": 100},
+                "boundaries": [
+                    {
+                        "name": "B",
+                        "pct_of_profile": 40.0,
+                        "buckets": [{"name": "X", "pct": 10.0}],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert (
+        clankerprof_main(
+            [
+                "compare",
+                "--before",
+                str(boundary_path),
+                "--after",
+                str(boundary_path),
+                "--focus-boundaries",
+                "typo",
+            ]
+        )
+        == 2
+    )
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Focus boundaries not present in either report: 'typo'."
+
+
+def test_clankerprof_repeated_scalar_options_keep_last_occurrence(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Pins argparse's native last-wins semantics as the shared repeated-option
+    # contract (Rust needs explicit overrides_with annotations to match).
+    empty = tmp_path / "empty.pb"
+    empty.write_bytes(b"")
+    exit_code = clankerprof_main(
+        ["facts", "--profile", str(tmp_path / "missing.pb"), "--profile", str(empty)]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["summary"]["sample_count"] == 0
+
+    report_path = tmp_path / "report.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "hot", "pct": 10}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        [
+            "compare",
+            "--before",
+            str(report_path),
+            "--after",
+            str(report_path),
+            "--threshold-abs",
+            "1",
+            "--threshold-abs",
+            "2",
+        ]
+    )
+    assert exit_code == 0
+    capsys.readouterr()
+
+
+def test_clankerprof_yaml_inputs_reject_non_string_mapping_keys(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from clankerprof.jsonio import parse_strict_yaml
+
+    facts_path, _slices_path, _scopes_path = _grammar_fixture(tmp_path)
+    for key in ("1", "true", "1.5", "null", "[a, b]"):
+        with pytest.raises(ValueError, match="YAML mapping keys must be strings."):
+            parse_strict_yaml(f"{key}: x\n")
+    # The YAML 1.1 timestamp resolver is removed to match serde_yaml: date-like
+    # scalars stay plain strings in keys and values.
+    assert parse_strict_yaml("2026-01-01: 2026-01-02") == {"2026-01-01": "2026-01-02"}
+    scope_config = tmp_path / "badkey-scopes.yml"
+    scope_config.write_text(
+        'cost_kind:\n  true: "name:Leaf"\nscope:\n  - function: T\n',
+        encoding="utf-8",
+    )
+    assert (
+        clankerprof_main(
+            ["scopes", "--facts", str(facts_path), "--config", str(scope_config)]
+        )
+        == 2
+    )
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "YAML mapping keys must be strings."
+
+
+def test_clankerprof_scope_selector_arrays_require_string_entries(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path, _slices_path, _scopes_path = _grammar_fixture(tmp_path)
+    cases = [
+        (
+            'cost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - selector: [true]\n',
+            "scope selector values must be strings.",
+        ),
+        (
+            'cost_kind:\n  AppWork: ["name:Leaf", true]\nscope:\n  - function: T\n',
+            "cost_kind AppWork must be a string or array of strings.",
+        ),
+    ]
+    for index, (config_text, message) in enumerate(cases):
+        config_path = tmp_path / f"string-items-{index}.yml"
+        config_path.write_text(config_text, encoding="utf-8")
+        assert (
+            clankerprof_main(
+                ["scopes", "--facts", str(facts_path), "--config", str(config_path)]
+            )
+            == 2
+        )
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == message
+
+
+# One row per plain YAML scalar in value position: (scalar text, expected
+# typing). This table is byte-identical to SCALAR_TABLE in
+# crates/clankerprof-core/tests/yaml_scalar_semantics.rs, where the same
+# expectations are asserted against serde_yaml itself — together they pin
+# both engines to one scalar-resolution contract.
+_YAML_SCALAR_TABLE: list[tuple[str, str]] = [
+    ("12", "int:12"),
+    ("-7", "int:-7"),
+    ("+12", "int:12"),
+    ("0", "int:0"),
+    ("-0", "int:0"),
+    ("+0", "int:0"),
+    ("007", "str:007"),
+    ("017", "str:017"),
+    ("00", "str:00"),
+    ("-007", "str:-007"),
+    ("9223372036854775807", "int:9223372036854775807"),
+    ("-9223372036854775808", "int:-9223372036854775808"),
+    ("18446744073709551615", "int:18446744073709551615"),
+    ("18446744073709551616", "parse-error"),
+    ("-9223372036854775809", "parse-error"),
+    ("0x1F", "int:31"),
+    ("-0x1F", "int:-31"),
+    ("+0x1F", "int:31"),
+    ("0x1_F", "str:0x1_F"),
+    ("-0x8000000000000000", "int:-9223372036854775808"),
+    ("0x10000000000000000", "parse-error"),
+    ("0o17", "int:15"),
+    ("-0o17", "int:-15"),
+    ("0o8", "str:0o8"),
+    ("0o1_7", "str:0o1_7"),
+    ("0b101", "int:5"),
+    ("-0b101", "int:-5"),
+    ("0b2", "str:0b2"),
+    ("0b1_01", "str:0b1_01"),
+    ("1_0", "str:1_0"),
+    ("1__0", "str:1__0"),
+    ("1_0_0", "str:1_0_0"),
+    ("1:2:3", "str:1:2:3"),
+    ("60:1", "str:60:1"),
+    ("3.14", "float:3.14e0"),
+    ("-2.5", "float:-2.5e0"),
+    ("1.", "float:1e0"),
+    (".5", "float:5e-1"),
+    ("+.5", "float:5e-1"),
+    ("-.5", "float:-5e-1"),
+    ("+0.5", "float:5e-1"),
+    (".0", "float:0e0"),
+    ("0.", "float:0e0"),
+    ("00.5", "float:5e-1"),
+    ("007.5", "float:7.5e0"),
+    ("1e2", "float:1e2"),
+    ("1E2", "float:1e2"),
+    ("1e+2", "float:1e2"),
+    ("1e-2", "float:1e-2"),
+    ("+1e2", "float:1e2"),
+    ("-1e2", "float:-1e2"),
+    ("01e2", "float:1e2"),
+    ("12e03", "float:1.2e4"),
+    ("1.5e10", "float:1.5e10"),
+    ("1.5E+10", "float:1.5e10"),
+    ("5.e3", "float:5e3"),
+    (".5e3", "float:5e2"),
+    ("0e0", "float:0e0"),
+    ("0.0e0", "float:0e0"),
+    ("-0.0", "float:-0e0"),
+    ("1_0.5", "str:1_0.5"),
+    ("1.5_5", "str:1.5_5"),
+    ("1:2:3.5", "str:1:2:3.5"),
+    (".inf", "float:inf"),
+    (".Inf", "float:inf"),
+    (".INF", "float:inf"),
+    ("-.inf", "float:-inf"),
+    ("+.inf", "float:inf"),
+    (".nan", "float:nan"),
+    (".NaN", "float:nan"),
+    (".NAN", "float:nan"),
+    ("-.nan", "str:-.nan"),
+    ("+.nan", "str:+.nan"),
+    ("inf", "str:inf"),
+    ("nan", "str:nan"),
+    ("Infinity", "str:Infinity"),
+    ("1e309", "str:1e309"),
+    ("-1e309", "str:-1e309"),
+    ("1e400", "str:1e400"),
+    ("true", "bool:true"),
+    ("True", "bool:true"),
+    ("TRUE", "bool:true"),
+    ("false", "bool:false"),
+    ("False", "bool:false"),
+    ("FALSE", "bool:false"),
+    ("yes", "str:yes"),
+    ("Yes", "str:Yes"),
+    ("YES", "str:YES"),
+    ("no", "str:no"),
+    ("on", "str:on"),
+    ("off", "str:off"),
+    ("Off", "str:Off"),
+    ("y", "str:y"),
+    ("N", "str:N"),
+    ("~", "null"),
+    ("null", "null"),
+    ("Null", "null"),
+    ("NULL", "null"),
+    ("", "null"),
+    ("2026-01-01", "str:2026-01-01"),
+    ("=", "str:="),
+    (".", "str:."),
+    (".e5", "str:.e5"),
+]
+
+
+def test_clankerprof_strict_yaml_scalars_match_serde_yaml() -> None:
+    import math as _math
+
+    from clankerprof.jsonio import parse_strict_yaml
+
+    failures: list[str] = []
+    for scalar, expected in _YAML_SCALAR_TABLE:
+        if expected == "parse-error":
+            with pytest.raises(ValueError, match="expected any YAML value"):
+                parse_strict_yaml(f"v: {scalar}")
+            continue
+        value = parse_strict_yaml(f"v: {scalar}")["v"]
+        kind, _, payload = expected.partition(":")
+        if kind == "null":
+            ok = value is None
+        elif kind == "bool":
+            ok = isinstance(value, bool) and value is (payload == "true")
+        elif kind == "int":
+            ok = (
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and value == int(payload)
+            )
+        elif kind == "str":
+            ok = isinstance(value, str) and value == payload
+        else:  # float
+            if payload == "nan":
+                ok = isinstance(value, float) and _math.isnan(value)
+            else:
+                ok = isinstance(value, float) and value == float(payload)
+        if not ok:
+            failures.append(f"{scalar!r}: expected {expected}, got {value!r}")
+    assert not failures, "scalar typing drifted from serde_yaml:\n" + "\n".join(
+        failures
+    )
+
+
+def test_clankerprof_attributables_reject_non_numeric_values(
+    tmp_path: Path,
+) -> None:
+    from clankerprof.cli import (
+        _load_attributables,  # pyright: ignore[reportPrivateUsage]
+        _load_boundary_attributables,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    good_path = tmp_path / "attributables-good.json"
+    good_path.write_text('{"col": {"T": 2.5, "U": 3}}', encoding="utf-8")
+    loaded = _load_attributables(str(good_path))
+    assert loaded == {"col": {"T": 2.5, "U": 3.0}}
+
+    for bad_value in ("true", '"10"', "[1]"):
+        bad_path = tmp_path / "attributables-bad.json"
+        bad_path.write_text(f'{{"col": {{"T": {bad_value}}}}}', encoding="utf-8")
+        with pytest.raises(
+            ValueError, match="Attributable column col values must be numbers."
+        ):
+            _load_attributables(str(bad_path))
+
+    assert _load_boundary_attributables({"p90": 5}) == {"p90": 5.0}
+    for bad_metric in (True, "10", [1]):
+        with pytest.raises(
+            ValueError, match="Boundary attributable p90 must be a number."
+        ):
+            _load_boundary_attributables({"p90": bad_metric})
+
+
+def _round3_slice_report(slices: list[dict[str, object]]) -> dict[str, object]:
+    return {
+        "tool": "clankerprof_slices",
+        "summary": {"total_time_ns": 100},
+        "slices": slices,
+    }
+
+
+def test_clankerprof_compare_gates_signed_rows() -> None:
+    # -10% -> -5% is a +50% relative increase against |before| and must gate;
+    # the old positive-only branch silently disabled gating for signed rows.
+    before = _round3_slice_report([{"name": "negative", "pct": -10.0, "frames": []}])
+    after = _round3_slice_report([{"name": "negative", "pct": -5.0, "frames": []}])
+    compared = compare_slice_json(
+        before, after, CompareOptions(threshold_abs=2.0, threshold_rel=15.0)
+    )
+    row = cast(dict[str, object], cast(list[object], compared["slices"])[0])
+    assert row["delta_rel"] == 50.0
+    assert row["status"] == "regression"
+    assert compared["has_regression"] is True
+
+    # A zero baseline yields an unbounded delta in the direction of the
+    # absolute change: new negative rows are unbounded improvements (null
+    # delta_rel), symmetric with the documented new-row regression rule.
+    improved = compare_slice_json(
+        _round3_slice_report([]),
+        _round3_slice_report([{"name": "credit", "pct": -5.0, "frames": []}]),
+        CompareOptions(threshold_abs=2.0, threshold_rel=15.0),
+    )
+    row = cast(dict[str, object], cast(list[object], improved["slices"])[0])
+    assert row["delta_rel"] is None
+    assert row["status"] == "improvement"
+    assert improved["has_regression"] is False
+
+
+def test_clankerprof_compare_rejects_duplicate_rows() -> None:
+    duplicated = _round3_slice_report(
+        [
+            {"name": "hot", "pct": 10.0, "frames": []},
+            {"name": "hot", "pct": 30.0, "frames": []},
+        ]
+    )
+    clean = _round3_slice_report([{"name": "hot", "pct": 10.0, "frames": []}])
+    with pytest.raises(
+        ValueError, match="Duplicate Slice row 'hot' in comparison input."
+    ):
+        compare_slice_json(duplicated, clean)
+    boundary_report: dict[str, object] = {
+        "tool": "clankerprof_boundaries",
+        "summary": {"total_time_ns": 100},
+        "boundaries": [
+            {"name": "web", "pct_of_profile": 10.0},
+            {"name": "web", "pct_of_profile": 30.0},
+        ],
+    }
+    with pytest.raises(
+        ValueError, match="Duplicate Boundary row 'web' in comparison input."
+    ):
+        compare_json(boundary_report, dict(boundary_report))
+
+
+def test_clankerprof_attributable_overflow_fails_closed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    scope_fn = builder.function("ScopeFn", "/srv/app/scope.py")
+    pos_leaf = builder.function("PosLeaf", "/srv/app/pos.py")
+    neg_leaf = builder.function("NegLeaf", "/srv/app/neg.py")
+    scope_loc = builder.location(scope_fn)
+    builder.sample((builder.location(pos_leaf), scope_loc), 110)
+    builder.sample((builder.location(neg_leaf), scope_loc), -10)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "scopes.yml"
+    config_path.write_text(
+        'cost_kind:\n  Pos: "name_eq:PosLeaf"\n  Neg: "name_eq:NegLeaf"\n'
+        "scope:\n  - function: ScopeFn\n"
+        '    rollup:\n      Positive: ["Pos"]\n      Negative: ["Neg"]\n'
+        "    attributables:\n      huge: 1.7e308\n",
+        encoding="utf-8",
+    )
+    # 1.7e308 is a finite, valid input; scaling by the 110% positive bucket
+    # overflows to infinity and must fail closed, naming the metric.
+    exit_code = clankerprof_main(
+        ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Attributable estimate for 'huge' is not finite."
+
+
+def _signed_target_profile(tmp_path: Path) -> tuple[Path, Path]:
+    builder = PprofFixtureBuilder.create()
+    t_fn = builder.function("T", "/app/t.py")
+    pos_leaf = builder.function("PosLeaf", "/srv/app/pos.py")
+    neg_leaf = builder.function("NegLeaf", "/srv/app/neg.py")
+    t_loc = builder.location(t_fn)
+    builder.sample((builder.location(pos_leaf), t_loc), 110)
+    builder.sample((builder.location(neg_leaf), t_loc), -10)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "targets.json"
+    config_path.write_text(
+        json.dumps({"T": {"Positive": "pos.py", "Negative": "neg.py"}}),
+        encoding="utf-8",
+    )
+    return profile_path, config_path
+
+
+def test_clankerprof_target_attributable_overflow_fails_closed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Targets twin of the scope guard: a finite metric scaled by the 110%
+    # category share overflows and must fail closed in every CSV layout.
+    monkeypatch.chdir(tmp_path)
+    profile_path, config_path = _signed_target_profile(tmp_path)
+    attrs_path = tmp_path / "attrs.json"
+    attrs_path.write_text(json.dumps({"huge": {"T": 1.7e308}}), encoding="utf-8")
+    base = [
+        "targets",
+        "--profile",
+        str(profile_path),
+        "--config",
+        str(config_path),
+        "--cpu-attributables",
+        str(attrs_path),
+    ]
+    for extra in (
+        ["--format", "csv"],
+        ["--format", "simple-csv"],
+        ["--format", "csv", "--target-csv-layout", "compat", "--output", "x.csv"],
+    ):
+        exit_code = clankerprof_main([*base, *extra])
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == "Attributable estimate for 'huge' is not finite."
+
+    # Non-finite at load (1e309 parses to inf in Python): rejected before any
+    # scaling, matching Rust's parse-time rejection outcome (exit 2).
+    attrs_path.write_text('{"huge": {"T": 1e309}}', encoding="utf-8")
+    exit_code = clankerprof_main([*base, "--format", "csv"])
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Attributable estimate for 'huge' is not finite."
+
+
+def test_clankerprof_zero_total_targets_render_without_division_errors(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Valid signed samples cancelling to zero previously crashed the CSV
+    # renderers with ZeroDivisionError; every pct over a zero total is 0.
+    builder = PprofFixtureBuilder.create()
+    t_fn = builder.function("T", "/app/t.py")
+    pos_leaf = builder.function("PosLeaf", "/srv/app/pos.py")
+    neg_leaf = builder.function("NegLeaf", "/srv/app/neg.py")
+    t_loc = builder.location(t_fn)
+    builder.sample((builder.location(pos_leaf), t_loc), 10)
+    builder.sample((builder.location(neg_leaf), t_loc), -10)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "targets.json"
+    config_path.write_text(
+        json.dumps({"T": {"Pos": "pos.py", "Neg": "neg.py"}}),
+        encoding="utf-8",
+    )
+    base = ["targets", "--profile", str(profile_path), "--config", str(config_path)]
+    for fmt in ("csv", "simple-csv", "text"):
+        exit_code = clankerprof_main([*base, "--format", fmt])
+        assert exit_code == 0
+        output = capsys.readouterr().out
+        assert "inf" not in output and "NaN" not in output
+        if fmt == "text":
+            # The TOTAL row must not claim 100% of a zero total.
+            assert "0.00%" in output and "100.00%" not in output
+
+
+def test_clankerprof_simple_csv_renders_negative_categories(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The simplified noise gate is magnitude-aware: |pct| < 0.1 is omitted,
+    # so a material negative category must render (signed data rule).
+    monkeypatch.chdir(tmp_path)
+    profile_path, config_path = _signed_target_profile(tmp_path)
+    base = ["targets", "--profile", str(profile_path), "--config", str(config_path)]
+    exit_code = clankerprof_main([*base, "--format", "simple-csv"])
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "T,Negative,-10.0" in output
+
+    exit_code = clankerprof_main(
+        [*base, "--format", "csv", "--target-csv-layout", "compat", "--output", "x.csv"]
+    )
+    assert exit_code == 0
+    capsys.readouterr()
+    simplified_csv = (tmp_path / "output" / "x.csv").read_text(encoding="utf-8")
+    assert '"T","Negative",-10.0' in simplified_csv
+
+
+def test_clankerprof_caller_selection_scans_past_deep_native_runs(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The first eligible application caller wins at ANY depth (an arbitrary
+    # nine-frame window used to fall back to the first native frame); the
+    # immediate caller remains the fallback only when no frame is eligible.
+    def build(native_frames: int, with_app_caller: bool) -> Path:
+        builder = PprofFixtureBuilder.create()
+        stack = [builder.location(builder.function("Leaf", "<native>"))]
+        for index in range(native_frames):
+            stack.append(
+                builder.location(builder.function(f"Native{index + 1}", "<native>"))
+            )
+        if with_app_caller:
+            stack.append(
+                builder.location(builder.function("AppCaller", "/app/caller.py"))
+            )
+        # The parent target is native too, so the fallback case genuinely has
+        # no eligible application frame anywhere in the stack.
+        parent_filename = "/app/t.py" if with_app_caller else "<native>"
+        stack.append(builder.location(builder.function("T", parent_filename)))
+        builder.sample(tuple(stack), 100)
+        profile_path = tmp_path / f"profile_{native_frames}_{with_app_caller}.pb"
+        profile_path.write_bytes(builder.encode())
+        return profile_path
+
+    deep = build(9, with_app_caller=True)
+    exit_code = clankerprof_main(
+        ["targets", "--profile", str(deep), "--target", "T", "--format", "simple-csv"]
+    )
+    assert exit_code == 0
+    assert "AppCaller (100.0%)" in capsys.readouterr().out
+
+    no_app = build(2, with_app_caller=False)
+    exit_code = clankerprof_main(
+        ["targets", "--profile", str(no_app), "--target", "T", "--format", "simple-csv"]
+    )
+    assert exit_code == 0
+    assert "Native1 (100.0%)" in capsys.readouterr().out
+
+
+def test_clankerprof_pseudo_slices_render_negative_aggregates(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    marking = builder.function("(marking)", "")
+    builder.sample((builder.location(marking),), -10)
+    gc_path = tmp_path / "gc_neg.pb"
+    gc_path.write_bytes(builder.encode())
+    assert clankerprof_main(["slices", "--profile", str(gc_path)]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["gc"] == {"pct": 100.0, "time_ns": -10}
+
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.function("Leaf", "/srv/app/leaf.py")
+    builder.sample((builder.location(leaf),), -10)
+    collapse_path = tmp_path / "collapse_neg.pb"
+    collapse_path.write_bytes(builder.encode())
+    exit_code = clankerprof_main(
+        [
+            "slices",
+            "--profile",
+            str(collapse_path),
+            "--collapse",
+            "path:/srv/app/leaf.py",
+        ]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["uncollapsible"]["time_ns"] == -10
+
+
+def test_clankerprof_config_string_fields_fail_closed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.function("work", "/srv/123/file.py")
+    builder.sample((builder.location(leaf),), 7)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+
+    slices_path = tmp_path / "slices.yml"
+    slices_path.write_text(
+        "slices:\n  - name: numeric\n    paths: [123]\n"
+        "  - name: fallback\n    default: true\n",
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["slices", "--profile", str(profile_path), "--slices", str(slices_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Slice paths values must be strings."
+
+    # `default` must be a YAML boolean: truthiness (`1`, `"yes"`) diverged
+    # from Rust's as_bool, observably flipping which slice is the default.
+    for bad_default in ("1", '"yes"'):
+        default_path = tmp_path / "slices_default.yml"
+        default_path.write_text(
+            f"slices:\n  - name: catch\n    default: {bad_default}\n",
+            encoding="utf-8",
+        )
+        exit_code = clankerprof_main(
+            ["slices", "--profile", str(profile_path), "--slices", str(default_path)]
+        )
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == "Slice default must be a boolean."
+
+    numeric_config = tmp_path / "targets_numeric.json"
+    numeric_config.write_text('{"T": {"Numeric": 123}}', encoding="utf-8")
+    exit_code = clankerprof_main(
+        [
+            "targets",
+            "--profile",
+            str(profile_path),
+            "--config",
+            str(numeric_config),
+            "--format",
+            "json",
+        ]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Target config pattern for Numeric must be a string."
+
+    rules_path = tmp_path / "rules.yml"
+    rules_path.write_text(
+        "schema_version: clankerprof.runtime_rules.v1\nname: strictness\n"
+        "native_rules:\n  - category: Hit\n    name_contains:\n      - null\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "targets.json"
+    config_path.write_text('{"T": {"App": "path:/srv"}}', encoding="utf-8")
+    exit_code = clankerprof_main(
+        [
+            "targets",
+            "--profile",
+            str(profile_path),
+            "--config",
+            str(config_path),
+            "--runtime-rules",
+            str(rules_path),
+        ]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert (
+        envelope["error"] == "Runtime rule field name_contains entries must be strings."
+    )
+
+
+def test_clankerprof_compare_threshold_flags_use_strict_grammar(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    report_path = tmp_path / "report.json"
+    report_path.write_text(
+        json.dumps(_round3_slice_report([{"name": "hot", "pct": 10.0}])),
+        encoding="utf-8",
+    )
+    for spelling in ("1_0", " 2 ", "nan", "1e999"):
+        exit_code = clankerprof_main(
+            [
+                "compare",
+                "--before",
+                str(report_path),
+                "--after",
+                str(report_path),
+                "--threshold-abs",
+                spelling,
+            ]
+        )
+        assert exit_code == 2, spelling
+        envelope = _error_envelope(capsys)
+        assert (
+            envelope["error"]
+            == "Compare thresholds must be finite, non-negative numbers."
+        )
+    # Negative thresholds would gate identical reports as regressions (0 > -1).
+    exit_code = clankerprof_main(
+        [
+            "compare",
+            "--before",
+            str(report_path),
+            "--after",
+            str(report_path),
+            "--threshold-abs=-1",
+        ]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert (
+        envelope["error"] == "Compare thresholds must be finite, non-negative numbers."
+    )
+    exit_code = clankerprof_main(
+        [
+            "compare",
+            "--before",
+            str(report_path),
+            "--after",
+            str(report_path),
+            "--threshold-abs",
+            "2.5",
+        ]
+    )
+    assert exit_code == 0
+
+
+def test_clankerprof_compare_rejects_present_null_row_arrays() -> None:
+    # A present null must not read as an absent array: nulling out `frames`/
+    # `buckets` would turn a real regression into an apparent removal.
+    good = _round3_slice_report([{"name": "hot", "pct": 10.0, "frames": []}])
+    nulled = _round3_slice_report([{"name": "hot", "pct": 10.0, "frames": None}])
+    with pytest.raises(ValueError, match=r"Slice field 'frames' must be an array\."):
+        compare_slice_json(good, nulled)
+    boundary_nulled: dict[str, object] = {
+        "tool": "clankerprof_boundaries",
+        "summary": {"total_time_ns": 100},
+        "boundaries": [{"name": "B", "pct_of_profile": 40.0, "buckets": None}],
+    }
+    with pytest.raises(
+        ValueError, match=r"Boundary field 'buckets' must be an array\."
+    ):
+        compare_boundary_json(boundary_nulled, boundary_nulled)
+
+
+def test_clankerprof_json_inputs_reject_duplicate_member_names(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from clankerprof.jsonio import parse_strict_json
+
+    # Duplicate members are last-wins in stdlib parsers, so the same multiset
+    # of members flips the compare gate with ordering — the JSON-member-level
+    # twin of the duplicate-row and YAML duplicate-key rules.
+    with pytest.raises(ValueError, match='duplicate entry with key "a"'):
+        parse_strict_json('{"a": 1, "a": 2}')
+    with pytest.raises(ValueError, match='duplicate entry with key "pct"'):
+        parse_strict_json('{"rows": [{"pct": 30.0, "pct": 10.0}]}')
+
+    before_path = tmp_path / "before.json"
+    before_path.write_text(
+        json.dumps(_round3_slice_report([{"name": "A", "pct": 10.0}])),
+        encoding="utf-8",
+    )
+    for ordering in ('"pct": 30.0, "pct": 10.0', '"pct": 10.0, "pct": 30.0'):
+        after_path = tmp_path / "after.json"
+        after_path.write_text(
+            '{"tool": "clankerprof_slices", "summary": {"total_time_ns": 100}, '
+            '"slices": [{"name": "A", ' + ordering + "}]}",
+            encoding="utf-8",
+        )
+        exit_code = clankerprof_main(
+            ["compare", "--before", str(before_path), "--after", str(after_path)]
+        )
+        assert exit_code == 2, ordering
+        envelope = _error_envelope(capsys)
+        assert 'duplicate entry with key "pct"' in cast(str, envelope["error"])
+
+
+def test_clankerprof_compare_derived_values_fail_closed_on_overflow() -> None:
+    # Finite inputs whose sums or deltas overflow must fail closed with the
+    # shared typed message, never serialize an uncontracted null.
+    before = _round3_slice_report([{"name": "A", "pct": 10.0, "frames": []}])
+    after = _round3_slice_report(
+        [
+            {
+                "name": "A",
+                "pct": 10.0,
+                "frames": [
+                    {"function": "f", "pct": 1e308},
+                    {"function": "f", "pct": 1e308},
+                ],
+            }
+        ]
+    )
+    with pytest.raises(ValueError, match=r"Compare values for 'f' are not finite\."):
+        compare_slice_json(before, after)
+    low = _round3_slice_report([{"name": "A", "pct": -1e308}])
+    high = _round3_slice_report([{"name": "A", "pct": 1e308}])
+    with pytest.raises(ValueError, match=r"Compare values for 'A' are not finite\."):
+        compare_slice_json(low, high)
+
+
+def _minimal_v2_facts(**overrides: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "clankerprof.sample_facts.v2",
+        "tool": "clankerprof_facts",
+        "profile": {
+            "value_types": [],
+            "period_type": None,
+            "period": 0,
+            "default_sample_type": "",
+            "primary_value_index": 0,
+        },
+        "summary": {
+            "sample_count": 0,
+            "empty_sample_count": 0,
+            "non_empty_sample_count": 0,
+            "total_primary_value": 0,
+        },
+        "strings": [],
+        "frames": [],
+        "samples": [],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_clankerprof_recursion_limit_envelopes(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(json.dumps(_minimal_v2_facts()), encoding="utf-8")
+
+    # YAML alias cycle: PyYAML constructs a cyclic graph; the metadata walk
+    # enforces serde_yaml's 128-level limit (its parse-time position suffix
+    # is engine-specific detail).
+    cycle_path = tmp_path / "cycle.yml"
+    cycle_path.write_text(
+        "slices:\n  - name: app\n    metadata: &a\n      x: *a\n", encoding="utf-8"
+    )
+    exit_code = clankerprof_main(
+        ["slices", "--facts", str(facts_path), "--slices", str(cycle_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert cast(str, envelope["error"]).startswith("recursion limit exceeded")
+
+    # Deep JSON: serde_json's fixed limit is 128; the pre-scan mirrors its
+    # reported position exactly (pinned byte-for-byte by the parity suite).
+    deep_path = tmp_path / "deep.json"
+    deep_path.write_text("[" * 1100 + "]" * 1100, encoding="utf-8")
+    exit_code = clankerprof_main(
+        ["targets", "--facts", str(deep_path), "--target", "X"]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "recursion limit exceeded at line 1 column 128"
+
+    # 129..~1000 band: previously parsed in Python while Rust errored.
+    band_path = tmp_path / "band.json"
+    band_path.write_text("[" * 300 + "]" * 300, encoding="utf-8")
+    exit_code = clankerprof_main(
+        ["targets", "--facts", str(band_path), "--target", "X"]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "recursion limit exceeded at line 1 column 128"
+
+
+def test_clankerprof_duplicate_slice_names_rejected(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(json.dumps(_minimal_v2_facts()), encoding="utf-8")
+    slices_path = tmp_path / "slices.yml"
+    slices_path.write_text(
+        "slices:\n"
+        "  - name: App\n    paths: [/app]\n"
+        "  - name: App\n    paths: [/other]\n",
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["slices", "--facts", str(facts_path), "--slices", str(slices_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == (
+        "Slice config declares duplicate slice name: App. "
+        "Each slice name may be defined once."
+    )
+
+
+def test_clankerprof_reserved_pseudo_slice_names_rejected(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # A user slice under a pseudo name would be attributed and then stripped
+    # at render, reporting matched time with no owning row.
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(json.dumps(_minimal_v2_facts()), encoding="utf-8")
+    for reserved in ("(all)", "(gc)", "(uncollapsible)"):
+        slices_path = tmp_path / "slices.yml"
+        slices_path.write_text(
+            f'slices:\n  - name: "{reserved}"\n    paths: [/app]\n',
+            encoding="utf-8",
+        )
+        exit_code = clankerprof_main(
+            ["slices", "--facts", str(facts_path), "--slices", str(slices_path)]
+        )
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == (
+            f"Slice config declares reserved pseudo-slice name: {reserved}. "
+            "The names (all), (gc) and (uncollapsible) are reserved for "
+            "analyzer pseudo-outputs."
+        )
+
+
+def test_clankerprof_zero_sum_filtered_slices_use_zero_percentages(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Percentages are shares of matching time; when the filtered signed
+    # samples cancel to exactly zero the zero arm renders 0 — never a
+    # fallback to the unrelated whole-profile total.
+    builder = PprofFixtureBuilder.create()
+    builder.sample((builder.location(builder.function("match_a", "/a/one.rb")),), 10)
+    builder.sample((builder.location(builder.function("match_b", "/b/two.rb")),), -10)
+    builder.sample((builder.location(builder.function("other_c", "/c/three.rb")),), 5)
+    profile_path = tmp_path / "cancel.pb"
+    profile_path.write_bytes(builder.encode())
+    slices_path = tmp_path / "slices.yml"
+    slices_path.write_text(
+        "slices:\n"
+        "  - name: A\n    paths: [/a/**]\n"
+        "  - name: B\n    paths: [/b/**]\n"
+        "  - name: default\n    default: true\n",
+        encoding="utf-8",
+    )
+    argv = [
+        "slices",
+        "--profile",
+        str(profile_path),
+        "--slices",
+        str(slices_path),
+        "--filter",
+        "name:match",
+    ]
+    assert clankerprof_main(argv) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["summary"] == {
+        "matching_pct": 0.0,
+        "matching_time_ns": 0,
+        "total_time_ns": 5,
+    }
+    rows = {
+        item["name"]: (item["time_ns"], item["pct"], [f["pct"] for f in item["frames"]])
+        for item in payload["slices"]
+    }
+    # Signed time_ns is preserved; every dependent pct is integer 0.
+    assert rows == {"A": (10, 0, [0]), "B": (-10, 0, [0])}
+
+    # %-threshold selection compares against the rendered 0 percentages:
+    # thresholds <= 0 keep every row (0 >= 0 and 0 >= -1), never deleting
+    # signed rows through a nonzero-total short-circuit; positive thresholds
+    # still drop them all (0 >= 1 is false).
+    threshold_cases: list[tuple[str, set[str]]] = [
+        ("0%", {"A", "B"}),
+        ("-1%", {"A", "B"}),
+        ("1%", set()),
+    ]
+    for threshold, expected in threshold_cases:
+        assert clankerprof_main([*argv, f"--by-slice={threshold}"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert {item["name"] for item in payload["slices"]} == expected, threshold
+
+
+def test_clankerprof_zero_total_simple_csv_keeps_signed_rows(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Under a zero parent total every share renders as 0, so the simplified
+    # noise gate may omit only exactly-zero rows; signed rows keep rendering.
+    builder = PprofFixtureBuilder.create()
+    parent = builder.function("T", "/app/t.py")
+    builder.sample(
+        (
+            builder.location(builder.function("PosLeaf", "/app/pos.py")),
+            builder.location(parent),
+        ),
+        10,
+    )
+    builder.sample(
+        (
+            builder.location(builder.function("NegLeaf", "/app/neg.py")),
+            builder.location(parent),
+        ),
+        -10,
+    )
+    profile_path = tmp_path / "cancel.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "targets.json"
+    config_path.write_text(
+        json.dumps({"T": {"Pos": "pos.py", "Neg": "neg.py"}}), encoding="utf-8"
+    )
+    assert (
+        clankerprof_main(
+            [
+                "targets",
+                "--profile",
+                str(profile_path),
+                "--config",
+                str(config_path),
+                "--format",
+                "simple-csv",
+            ]
+        )
+        == 0
+    )
+    lines = capsys.readouterr().out.splitlines()
+    categories = {line.split(",")[1] for line in lines[1:]}
+    assert {"Pos", "Neg"} <= categories
+
+    # Negative rows also render at any magnitude under a nonzero total.
+    builder = PprofFixtureBuilder.create()
+    parent = builder.function("T", "/app/t.py")
+    builder.sample(
+        (
+            builder.location(builder.function("PosLeaf", "/app/pos.py")),
+            builder.location(parent),
+        ),
+        100000,
+    )
+    builder.sample(
+        (
+            builder.location(builder.function("NegLeaf", "/app/neg.py")),
+            builder.location(parent),
+        ),
+        -10,
+    )
+    tiny_path = tmp_path / "tiny.pb"
+    tiny_path.write_bytes(builder.encode())
+    assert (
+        clankerprof_main(
+            [
+                "targets",
+                "--profile",
+                str(tiny_path),
+                "--config",
+                str(config_path),
+                "--format",
+                "simple-csv",
+            ]
+        )
+        == 0
+    )
+    lines = capsys.readouterr().out.splitlines()
+    categories = {line.split(",")[1] for line in lines[1:]}
+    assert "Neg" in categories
+
+
+def test_clankerprof_attribute_targets_cannot_use_reserved_pseudo_slices(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    builder.sample((builder.location(builder.function("Leaf", "/app/leaf.py")),), 10)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    slices_path = tmp_path / "slices.yml"
+    slices_path.write_text(
+        "slices:\n  - name: App\n    paths: [/app/*]\n", encoding="utf-8"
+    )
+    base = ["slices", "--profile", str(profile_path), "--slices", str(slices_path)]
+
+    # The virtual-slice opt-in waives only the must-name-a-configured-slice
+    # rule; a pseudo-slice target would be attributed then stripped at render.
+    for name in ("(all)", "(gc)", "(uncollapsible)"):
+        exit_code = clankerprof_main(
+            [
+                *base,
+                "--attribute",
+                f"name:Leaf,to:{name}",
+                "--allow-virtual-attribute-slices",
+            ]
+        )
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == (
+            f"Attribute target names reserved pseudo-slice name: {name}. "
+            "The names (all), (gc) and (uncollapsible) are reserved for "
+            "analyzer pseudo-outputs."
+        )
+
+    # Empty predicate keys/values would substring-match every frame.
+    for raw in ("name:,to:App", ":x,to:App"):
+        exit_code = clankerprof_main([*base, "--attribute", raw])
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == (
+            f"Attribute rule filter must be '<key>:<value>': {raw}"
+        )
+
+
+def test_clankerprof_facts_rejects_out_of_range_primary_value_index(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create(
+        sample_types=(("samples", "count"), ("cpu", "nanoseconds")),
+        default_sample_type="cpu",
+    )
+    builder.sample(
+        (builder.location(builder.function("Leaf", "/app/leaf.py")),), (1, 100)
+    )
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    facts_path = tmp_path / "facts.json"
+    assert (
+        clankerprof_main(
+            ["facts", "--profile", str(profile_path), "--output", str(facts_path)]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    payload = json.loads(facts_path.read_text(encoding="utf-8"))
+    assert payload["profile"]["primary_value_index"] == 1
+
+    # No selection rule can produce an index outside the declared types; the
+    # per-sample values[0] fallback must not silently select the wrong metric.
+    payload["profile"]["primary_value_index"] = 99
+    del payload["summary"]
+    bad_path = tmp_path / "bad.json"
+    bad_path.write_text(json.dumps(payload), encoding="utf-8")
+    exit_code = clankerprof_main(
+        ["targets", "--facts", str(bad_path), "--target", "Leaf"]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == (
+        "Sample facts primary_value_index 99 is out of range for 2 declared "
+        "value types."
+    )
+
+
+def test_clankerprof_scope_entries_reject_unknown_keys(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    builder.sample(
+        (
+            builder.location(builder.function("Block", "/app/block.py")),
+            builder.location(builder.function("S", "/app/s.py")),
+        ),
+        10,
+    )
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "scopes.yml"
+    config_path.write_text(
+        'cost_kind:\n  AppWork: "path:app/**"\n'
+        "scope:\n"
+        "  - label: Audited\n"
+        "    function: S\n"
+        '    exclude_descendents: "name_eq:Block"\n',
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    # A typo must never silently disable its rule.
+    assert envelope["error"] == "Unknown scope field: exclude_descendents."
+
+
+def test_clankerprof_facts_profile_metadata_strictness(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cases: list[tuple[dict[str, Any], str]] = []
+    missing = _minimal_v2_facts()
+    del missing["profile"]["primary_value_index"]
+    cases.append(
+        (missing, "Sample facts payload missing required key: 'primary_value_index'.")
+    )
+    bool_type = _minimal_v2_facts()
+    bool_type["profile"]["value_types"] = [{"type": True, "unit": 7}]
+    cases.append((bool_type, "Sample facts value type type must be a string."))
+    bool_period = _minimal_v2_facts()
+    bool_period["profile"]["period_type"] = {"type": False, "unit": 8}
+    cases.append((bool_period, "Sample facts value type type must be a string."))
+    bool_default = _minimal_v2_facts()
+    bool_default["profile"]["default_sample_type"] = True
+    cases.append(
+        (bool_default, "Sample facts profile default_sample_type must be a string.")
+    )
+    for payload, message in cases:
+        facts_path = tmp_path / "facts.json"
+        facts_path.write_text(json.dumps(payload), encoding="utf-8")
+        exit_code = clankerprof_main(
+            ["targets", "--facts", str(facts_path), "--target", "X"]
+        )
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == message
+
+
+def test_clankerprof_aggregation_keys_use_tuple_identity(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # (A, B\0C) and (A\0B, C) collide under "name\0filename" string keys.
+    nul = "\x00"
+    facts = _minimal_v2_facts(
+        strings=["A", f"B{nul}C", f"A{nul}B", "C"],
+        frames=[[1, 1, 0, 1, 0, False], [2, 2, 2, 3, 0, False]],
+        samples=[
+            {"sample_index": 0, "values": [10], "location_ids": [1], "stack": [0]},
+            {"sample_index": 1, "values": [20], "location_ids": [2], "stack": [1]},
+        ],
+        summary={
+            "sample_count": 2,
+            "empty_sample_count": 0,
+            "non_empty_sample_count": 2,
+            "total_primary_value": 30,
+        },
+    )
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(json.dumps(facts), encoding="utf-8")
+    exit_code = clankerprof_main(["slices", "--facts", str(facts_path)])
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    frames = [
+        (frame["function"], frame["filename"], frame["time_ns"])
+        for item in payload["slices"]
+        for frame in item["frames"]
+    ]
+    assert sorted(frames) == [("A", f"B{nul}C", 10), (f"A{nul}B", "C", 20)]
+
+
+def test_clankerprof_decoder_rejects_field_zero_and_invalid_utf8(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    field_zero = tmp_path / "field0.pb"
+    field_zero.write_bytes(b"\x00\x00")
+    exit_code = clankerprof_main(["facts", "--profile", str(field_zero)])
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Illegal protobuf field number 0."
+
+    bad_utf8 = tmp_path / "badutf8.pb"
+    bad_utf8.write_bytes(b"\x32\x01\xff")
+    exit_code = clankerprof_main(["facts", "--profile", str(bad_utf8)])
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Invalid UTF-8 in pprof string table."
+
+
+def test_clankerprof_core_class_csv_bare_cr_is_a_record_break(
+    tmp_path: Path,
+) -> None:
+    # Verified non-divergence (R5-12): the file loader's newline="" open
+    # splits records on bare \r exactly like the Rust whole-payload scanner.
+    from clankerprof.categorize import load_ruby_core_classes
+
+    csv_path = tmp_path / "core.csv"
+    csv_path.write_bytes(b"Array\rExtra\nOther\n")
+    assert load_ruby_core_classes(csv_path) == frozenset({"Array", "Extra", "Other"})
+
+
+def test_clankerprof_yaml_explicit_tags_follow_serde_semantics() -> None:
+    import re
+
+    from clankerprof.jsonio import parse_strict_yaml
+
+    # Global tags are ignored in favor of the underlying node, exactly as
+    # serde_yaml parses them (pinned against the engine by the Rust
+    # yaml_scalar_semantics tests and the cross-language parity suite).
+    assert parse_strict_yaml("x: !!binary SGVsbG8=") == {"x": "SGVsbG8="}
+    assert parse_strict_yaml("x: !!set {a: null, b: null}") == {
+        "x": {"a": None, "b": None}
+    }
+    assert parse_strict_yaml("x: !!timestamp 2026-01-01") == {"x": "2026-01-01"}
+    assert parse_strict_yaml("x: !!omap [{a: 1}]") == {"x": [{"a": 1}]}
+    assert parse_strict_yaml("x: !!str [1, 2]") == {"x": [1, 2]}
+    assert parse_strict_yaml("x: !!python/name:os.system ''") == {"x": ""}
+    assert parse_strict_yaml("x: !<tag:example.com,2000:foo> bar") == {"x": "bar"}
+
+    # Typed core tags apply the strict scalar grammars (serde message core).
+    for doc, expected_error in (
+        ("x: !!int 1_0", 'invalid value: string "1_0", expected an integer'),
+        ("x: !!float inf", 'invalid value: string "inf", expected a float'),
+        ("x: !!bool yes", 'invalid value: string "yes", expected a boolean'),
+        ("x: !!null x", 'invalid value: string "x", expected null'),
+    ):
+        with pytest.raises(ValueError, match=re.escape(expected_error)):
+            parse_strict_yaml(doc)
+    assert parse_strict_yaml("x: !!float 5") == {"x": 5.0}
+    assert parse_strict_yaml("x: !!int 0x1F") == {"x": 31}
+
+    # Local tags are rejected with the message shared with Rust's walk;
+    # strict mapping rules still apply inside tag-ignored collections.
+    with pytest.raises(
+        ValueError, match="YAML local tags are not supported in clankerprof inputs."
+    ):
+        parse_strict_yaml("x: !foo bar")
+    with pytest.raises(ValueError, match='duplicate entry with key "a"'):
+        parse_strict_yaml("x: !!set {a: null, a: null}")
+
+
+def test_clankerprof_yaml_merge_keys_rejected(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import re
+
+    from clankerprof.jsonio import YAML_MERGE_KEY_MESSAGE, parse_strict_yaml
+
+    # PyYAML would expand `<<` while serde_yaml keeps it as an ordinary key,
+    # silently changing slice ownership; both engines now fail closed. The
+    # quoted spelling is indistinguishable from a merge key after serde's
+    # parse, so it is rejected too, as is the explicit !!merge tag.
+    for doc in (
+        'defaults: &defaults\n  paths: ["/a"]\nslices:\n  - name: A\n    <<: *defaults\n',
+        'a: 1\n"<<": 2\n',
+        'defaults: &defaults\n  paths: ["/a"]\nslices:\n  - name: A\n    !!merge x: *defaults\n',
+    ):
+        with pytest.raises(ValueError, match=re.escape(YAML_MERGE_KEY_MESSAGE)):
+            parse_strict_yaml(doc)
+
+    builder = PprofFixtureBuilder.create()
+    builder.sample((builder.location(builder.function("work", "/a/x.py")),), 7)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    slices_path = tmp_path / "slices.yml"
+    slices_path.write_text(
+        'defaults: &defaults\n  paths: ["/a"]\nslices:\n  - name: A\n    <<: *defaults\n',
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["slices", "--profile", str(profile_path), "--slices", str(slices_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == YAML_MERGE_KEY_MESSAGE
+
+
+def test_clankerprof_json_and_yaml_inputs_reject_lone_surrogates() -> None:
+    import re
+
+    from clankerprof.jsonio import parse_strict_json, parse_strict_yaml
+
+    # serde_json cannot represent unpaired UTF-16 surrogates; message cores
+    # mirror serde's two distinct errors (probed empirically).
+    for doc, core in (
+        ('{"a": "\\ud800"}', "unexpected end of hex escape"),
+        ('{"a": "\\ud800x"}', "unexpected end of hex escape"),
+        ('{"a": "\\ud800\\n"}', "unexpected end of hex escape"),
+        ('{"a": "\\ud800\\u0041"}', "lone leading surrogate in hex escape"),
+        ('{"a": "\\ud800\\ud800"}', "lone leading surrogate in hex escape"),
+        ('{"a": "\\udc00"}', "lone leading surrogate in hex escape"),
+    ):
+        with pytest.raises(ValueError, match=re.escape(core)):
+            parse_strict_json(doc)
+    # Valid astral pairs keep parsing in both engines.
+    assert parse_strict_json('{"a": "\\ud83d\\ude00"}') == {"a": "\U0001f600"}
+
+    # YAML never combines surrogate halves: PyYAML constructs two lone
+    # surrogates from a "pair" of \u escapes and serde_yaml rejects any
+    # \u escape in the surrogate range, so BOTH spellings fail in both
+    # engines; the 8-hex \U form is the supported astral spelling.
+    for doc in ('name: "s\\ud800"', 'name: "s\\ud83d\\ude00"'):
+        with pytest.raises(
+            ValueError, match="found invalid Unicode character escape code"
+        ):
+            parse_strict_yaml(doc)
+    assert parse_strict_yaml('name: "s\\U0001F600"') == {"name": "s\U0001f600"}
+
+
+def test_clankerprof_core_class_csv_accepts_large_fields(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The csv module's default 131072-byte field cap is a Python-side guard,
+    # not a dialect property; Rust's scanner is unbounded.
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("child", "<cfunc>"))
+    parent = builder.location(builder.function("parent", "/srv/app/p.rb"))
+    builder.sample((leaf, parent), 1)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    core_path = tmp_path / "big.csv"
+    core_path.write_text("A" * 131073 + "\n", encoding="utf-8")
+    exit_code = clankerprof_main(
+        [
+            "targets",
+            "--profile",
+            str(profile_path),
+            "--target",
+            "parent",
+            "--runtime",
+            "ruby",
+            "--core-classes",
+            str(core_path),
+        ]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["tool"] == "clankerprof_targets"
+
+
+def test_clankerprof_scope_config_slices_must_be_string(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    parent = builder.location(builder.function("T", "/srv/app/t.py"))
+    builder.sample((leaf, parent), 7)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    for bad_slices in ("slices: 123", "slices: [a]"):
+        config_path = tmp_path / "scopes.yml"
+        config_path.write_text(
+            f'{bad_slices}\ncost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - function: T\n',
+            encoding="utf-8",
+        )
+        exit_code = clankerprof_main(
+            ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+        )
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == "Boundary config slices must be a string path."
+
+
+def _cluster_w_zero_sum_profile() -> bytes:
+    builder = PprofFixtureBuilder.create()
+    scope = builder.location(builder.function("S", "/srv/app/s.py"))
+    pos = builder.location(builder.function("Pos", "/srv/app/pos.py"))
+    neg = builder.location(builder.function("Neg", "/srv/app/neg.py"))
+    other = builder.location(builder.function("Unrelated", "/srv/app/u.py"))
+    builder.sample((pos, scope), 10)
+    builder.sample((neg, scope), -10)
+    builder.sample((other,), 5)
+    return builder.encode()
+
+
+def test_clankerprof_scope_zero_sum_categories_render_with_signed_children(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(_cluster_w_zero_sum_profile())
+    config_path = tmp_path / "scopes.yml"
+    config_path.write_text(
+        'cost_kind:\n  Work: ["name:Pos", "name:Neg"]\n'
+        'scope:\n  - function: S\n    rollup:\n      All: ["Work"]\n',
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+    )
+    assert exit_code == 0
+    boundary = json.loads(capsys.readouterr().out)["boundaries"][0]
+    # The zero-sum Work category keeps its nonzero signed leaf subtree, so
+    # neither the category nor its bucket is erased.
+    assert [bucket["name"] for bucket in boundary["buckets"]] == ["All"]
+    categories = boundary["buckets"][0]["categories"]
+    assert [(row["name"], row["time_ns"]) for row in categories] == [("Work", 0)]
+    leaf_functions = categories[0]["leaf_functions"]
+    assert leaf_functions["Pos"]["cpu_time"] == 10
+    assert leaf_functions["Neg"]["cpu_time"] == -10
+
+
+def _cluster_w_leaf_profile() -> bytes:
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    parent = builder.location(builder.function("T", "/srv/app/t.py"))
+    builder.sample((leaf, parent), 7)
+    return builder.encode()
+
+
+def test_clankerprof_scope_slice_predicates_use_effective_ownership(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(_cluster_w_leaf_profile())
+    slices_path = tmp_path / "slices.yml"
+    slices_path.write_text(
+        "slices:\n  - name: A\n    paths: [/srv/app/**]\n"
+        "  - name: B\n    paths: [/srv/app/**]\n",
+        encoding="utf-8",
+    )
+    for owner, predicate, expected_domains in (
+        ("BOwner", "slice:B", ["Uncategorized"]),
+        ("AOwner", "slice:A", ["AOwner"]),
+    ):
+        config_path = tmp_path / f"scopes-{owner}.yml"
+        config_path.write_text(
+            f'slices: {slices_path}\nowner:\n  {owner}: "{predicate}"\n'
+            "scope:\n  - function: T\n",
+            encoding="utf-8",
+        )
+        exit_code = clankerprof_main(
+            ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+        )
+        assert exit_code == 0
+        boundary = json.loads(capsys.readouterr().out)["boundaries"][0]
+        # First-match ownership: definition A owns every /srv/app frame, so
+        # slice:B matches nothing and slice:A matches everything.
+        assert [domain["name"] for domain in boundary["domains"]] == expected_domains
+
+
+def test_clankerprof_facts_summary_requires_all_members(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(_cluster_w_leaf_profile())
+    facts_path = tmp_path / "facts.json"
+    assert (
+        clankerprof_main(
+            ["facts", "--profile", str(profile_path), "--output", str(facts_path)]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    payload = cast(dict[str, Any], json.loads(facts_path.read_text(encoding="utf-8")))
+    message = (
+        "Sample facts summary must contain sample_count, total_primary_value, "
+        "empty_sample_count, and non_empty_sample_count."
+    )
+    for label, summary in (("empty", {}), ("null-member", {"sample_count": None})):
+        mutated = dict(payload)
+        mutated["summary"] = summary
+        bad_path = tmp_path / f"facts-{label}.json"
+        bad_path.write_text(json.dumps(mutated), encoding="utf-8")
+        exit_code = clankerprof_main(["slices", "--facts", str(bad_path)])
+        assert exit_code == 2
+        assert _error_envelope(capsys)["error"] == message
+
+
+def test_clankerprof_scope_config_validates_loaded_slice_definitions(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(_cluster_w_leaf_profile())
+    cases = (
+        (
+            "slices:\n  - name: App\n    paths: [/srv/app/**]\n"
+            "  - name: App\n    paths: [/other/**]\n",
+            "Slice config declares duplicate slice name: App. "
+            "Each slice name may be defined once.",
+        ),
+        (
+            "slices:\n  - name: A\n    default: true\n  - name: B\n    default: true\n",
+            "Slice config declares multiple default slices: A, B. "
+            "Exactly one slice may set default.",
+        ),
+        (
+            'slices:\n  - name: "(gc)"\n    paths: [/srv/app/**]\n',
+            "Slice config declares reserved pseudo-slice name: (gc). "
+            "The names (all), (gc) and (uncollapsible) are reserved for "
+            "analyzer pseudo-outputs.",
+        ),
+    )
+    for index, (slices_text, message) in enumerate(cases):
+        slices_path = tmp_path / f"slices-{index}.yml"
+        slices_path.write_text(slices_text, encoding="utf-8")
+        config_path = tmp_path / f"scopes-{index}.yml"
+        config_path.write_text(
+            f'slices: {slices_path}\ncost_kind:\n  Work: "name:Leaf"\n'
+            "scope:\n  - function: T\n",
+            encoding="utf-8",
+        )
+        exit_code = clankerprof_main(
+            ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+        )
+        assert exit_code == 2
+        assert _error_envelope(capsys)["error"] == message
+
+
+def test_clankerprof_slice_filter_rescue_uses_winning_attribute_rule(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(_cluster_w_leaf_profile())
+    slices_path = tmp_path / "slices.yml"
+    slices_path.write_text(
+        "slices:\n  - name: A\n    paths: []\n  - name: B\n    paths: []\n",
+        encoding="utf-8",
+    )
+    base = ["slices", "--profile", str(profile_path), "--slices", str(slices_path)]
+    rules = ["--attribute", "<name:Leaf,to:A", "--attribute", "<name:T,to:B"]
+    # The first-match winner targets A: filtering for the losing rule's
+    # target must reject the sample in both polarities.
+    for filter_value, expected in (
+        ("slice:B", 0),
+        ("slice:A", 7),
+        ("!slice:B", 7),
+        ("!slice:A", 0),
+    ):
+        exit_code = clankerprof_main([*base, *rules, "--filter", filter_value])
+        assert exit_code == 0
+        summary = json.loads(capsys.readouterr().out)["summary"]
+        assert summary["matching_time_ns"] == expected, filter_value
+    # Swapping rule order flips the winner.
+    swapped = ["--attribute", "<name:T,to:B", "--attribute", "<name:Leaf,to:A"]
+    exit_code = clankerprof_main([*base, *swapped, "--filter", "slice:B"])
+    assert exit_code == 0
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert summary["matching_time_ns"] == 7
+
+
+def test_clankerprof_facts_primary_index_must_match_selection(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create(
+        sample_types=(("samples", "count"), ("cpu", "nanoseconds")),
+        default_sample_type="cpu",
+    )
+    builder.sample(
+        (builder.location(builder.function("Leaf", "/app/leaf.py")),), (1, 100)
+    )
+    profile_path = tmp_path / "typed.pb"
+    profile_path.write_bytes(builder.encode())
+    facts_path = tmp_path / "facts.json"
+    assert (
+        clankerprof_main(
+            ["facts", "--profile", str(profile_path), "--output", str(facts_path)]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    payload = cast(dict[str, Any], json.loads(facts_path.read_text(encoding="utf-8")))
+    cast(dict[str, Any], payload["profile"])["primary_value_index"] = 0
+    bad_path = tmp_path / "facts-contradictory.json"
+    bad_path.write_text(json.dumps(payload), encoding="utf-8")
+    exit_code = clankerprof_main(["slices", "--facts", str(bad_path)])
+    assert exit_code == 2
+    assert _error_envelope(capsys)["error"] == (
+        "Sample facts primary_value_index 0 contradicts the declared default "
+        "sample type selection (expected 1)."
+    )
+
+
+def test_clankerprof_decoder_skips_balanced_unknown_groups() -> None:
+    base = b"\x32\x00\x12\x02\x10\x07"
+    plain = decode_profile_bytes(base)
+    empty_group = decode_profile_bytes(b"\x7b\x7c" + base)
+    nested_group = decode_profile_bytes(b"\x7b\x8b\x01\x8c\x01\x7c" + base)
+    assert empty_group.samples == plain.samples
+    assert nested_group.samples == plain.samples
+
+    with pytest.raises(PprofDecodeError, match="Unexpected end of protobuf stream"):
+        decode_profile_bytes(b"\x7b")
+    with pytest.raises(PprofDecodeError, match="Unmatched protobuf group end"):
+        decode_profile_bytes(b"\x7c")
+    with pytest.raises(PprofDecodeError, match="Mismatched protobuf group end"):
+        decode_profile_bytes(b"\x7b\x84\x01")
+    with pytest.raises(
+        PprofDecodeError, match="group nesting exceeds the supported depth"
+    ):
+        decode_profile_bytes(b"\x7b" * 200 + b"\x7c")
+
+
+def test_clankerprof_decoder_merges_repeated_period_type_fields() -> None:
+    # period_type split across two field-11 occurrences: {type: 1}, {unit: 2}.
+    profile = decode_profile_bytes(
+        b"\x32\x00\x32\x03cpu\x32\x0bnanoseconds\x5a\x02\x08\x01\x5a\x02\x10\x02"
+    )
+    assert profile.period_type is not None
+    assert profile.period_type.type_name == "cpu"
+    assert profile.period_type.unit == "nanoseconds"
+
+
+def test_clankerprof_slices_file_requires_top_level_slices_key(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.function("work", "/srv/app/leaf.py")
+    builder.sample((builder.location(leaf),), 7)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+
+    for content in (
+        "slice:\n  - name: app\n    paths: [/srv/app/**]\n",
+        "slices: null\n",
+    ):
+        slices_path = tmp_path / "slices.yml"
+        slices_path.write_text(content, encoding="utf-8")
+        exit_code = clankerprof_main(
+            ["slices", "--profile", str(profile_path), "--slices", str(slices_path)]
+        )
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == "Slices file must contain a slices array."
+
+
+def test_clankerprof_empty_path_option_values_are_rejected(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Rust's clap PathBuf parser rejects explicitly-empty values; truthiness
+    # guards previously treated them as absent in Python.
+    exit_code = clankerprof_main(["slices", "--facts", "x.json", "--output", ""])
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "--output requires a non-empty path."
+
+    exit_code = clankerprof_main(["targets", "--profile", "", "--target", "T"])
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "--profile requires a non-empty path."
+
+
+def test_clankerprof_scope_config_rejects_unknown_top_level_keys(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.function("Leaf", "/srv/app/leaf.py")
+    parent = builder.function("T", "/srv/parent.py")
+    builder.sample((builder.location(leaf), builder.location(parent)), 7)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "scopes.yml"
+    config_path.write_text(
+        'owenr:\n  Intended: "name:Leaf"\nscope:\n  - function: T\n',
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Unknown scope config field: owenr."
+
+
+def test_clankerprof_zero_sum_rollups_keep_caller_pair_evidence(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Caller-to-leaf pairs are rendered subtree rows: a category (or domain)
+    # whose aggregate and leaf functions cancel must still render when its
+    # signed caller pairs are nonzero.
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/x/leaf.rb"))
+    caller_a = builder.location(builder.function("CallerA", "/x/ca.rb"))
+    caller_b = builder.location(builder.function("CallerB", "/x/cb.rb"))
+    boundary = builder.location(builder.function("Boundary", "/x/b.rb"))
+    builder.sample((leaf, caller_a, boundary), 10)
+    builder.sample((leaf, caller_b, boundary), -10)
+    profile_path = tmp_path / "pairs.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "pairs.yml"
+    config_path.write_text(
+        'cost_kind:\n  Work: "name:Leaf"\nscope:\n  - function: Boundary\n',
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    buckets = payload["boundaries"][0]["buckets"]
+    assert len(buckets) == 1
+    categories = buckets[0]["categories"]
+    assert [(c["name"], c["time_ns"]) for c in categories] == [("Work", 0)]
+    pairs = {row["pair"]: row["time_ns"] for row in categories[0]["caller_leaf_pairs"]}
+    assert pairs == {"CallerA -> Leaf": 10, "CallerB -> Leaf": -10}
+
+    # Domain flavor: per-file caller pairs keep a zero-sum domain rendered.
+    builder = PprofFixtureBuilder.create()
+    owner = builder.function("Owner", "/own/o.rb")
+    leaf_a = builder.location(builder.function("LeafA", "/x/a.rb"))
+    leaf_b = builder.location(builder.function("LeafB", "/x/b.rb"))
+    owner_loc = builder.location(owner)
+    boundary = builder.location(builder.function("Boundary", "/x/bd.rb"))
+    builder.sample((leaf_a, owner_loc, boundary), 10)
+    builder.sample((leaf_b, owner_loc, boundary), -10)
+    profile_path = tmp_path / "domains.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "domains.yml"
+    config_path.write_text(
+        'cost_kind:\n  Work: "path:/x/**"\nowner:\n  D: "path:/own/**"\n'
+        "scope:\n  - function: Boundary\n",
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    domains = payload["boundaries"][0]["domains"]
+    assert [(d["name"], d["time_ns"]) for d in domains] == [("D", 0)]
+
+
+def test_clankerprof_core_class_native_routing_is_exclusion_aware(
+    tmp_path: Path,
+) -> None:
+    from clankerprof.categorize import categorize_runtime_frame
+    from clankerprof.model import Frame
+
+    def frame(path: str) -> Frame:
+        return Frame(
+            location_id=1,
+            function_id=1,
+            name="Object#new",
+            filename=path,
+            line=1,
+            location_is_folded=False,
+        )
+
+    pack_path = tmp_path / "pack.yml"
+    pack_path.write_text(
+        "schema_version: clankerprof.runtime_rules.v1\n"
+        "core_native_default_category: Native Core\n"
+        "native_path_markers:\n  - /native/\n"
+        "native_path_exclude_markers:\n  - /native/app/\n",
+        encoding="utf-8",
+    )
+    rules = runtime_rules_from_file(pack_path, core_classes=["Object"])
+    # Markers route core classes natively...
+    assert categorize_runtime_frame(frame("/native/object.rb"), rules) == "Native Core"
+    # ...but exclusions veto them (previously markers ignored exclude keys).
+    assert categorize_runtime_frame(frame("/native/app/object.rb"), rules) is None
+
+    # native_path_patterns deliberately do NOT core-route (they feed the
+    # pack's general native detection); packs wanting pattern-style core
+    # routing declare the substring as a marker.
+    pattern_pack = tmp_path / "pattern-pack.yml"
+    pattern_pack.write_text(
+        "schema_version: clankerprof.runtime_rules.v1\n"
+        "core_native_default_category: Native Core\n"
+        "native_path_patterns:\n  - regex:/native/\n",
+        encoding="utf-8",
+    )
+    pattern_rules = runtime_rules_from_file(pattern_pack, core_classes=["Object"])
+    assert categorize_runtime_frame(frame("/native/ext.so"), pattern_rules) is None
+
+
+def test_clankerprof_facts_v2_sample_index_must_match_position(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from clankerprof.facts import dumps_sample_facts
+    from clankerprof.proto import decode_profile_bytes
+
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("T", "/x/t.rb"))
+    builder.sample((leaf,), 1)
+    builder.sample((leaf,), 1)
+    exported = json.loads(
+        dumps_sample_facts(decode_profile_bytes(builder.encode()).to_sample_facts())
+    )
+    for label, indexes in (("duplicate", [7, 7]), ("one-based", [1, 2])):
+        payload = json.loads(json.dumps(exported))
+        for entry, index in zip(payload["samples"], indexes, strict=True):
+            entry["sample_index"] = index
+        facts_path = tmp_path / f"{label}.json"
+        facts_path.write_text(json.dumps(payload), encoding="utf-8")
+        exit_code = clankerprof_main(
+            ["targets", "--facts", str(facts_path), "--target", "T"]
+        )
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        expected_index = indexes[0]
+        position = 0 if label == "duplicate" else 0
+        assert envelope["error"] == (
+            f"Sample fact sample_index {expected_index} does not match "
+            f"its profile-order position {position}."
+        )
+
+
+def test_clankerprof_comma_names_rejected_and_focus_fails_closed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from clankerprof.facts import dumps_sample_facts
+
+    builder = PprofFixtureBuilder.create()
+    builder.sample((builder.location(builder.function("Leaf", "/srv/l.py")),), 7)
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(
+        dumps_sample_facts(decode_profile_bytes(builder.encode()).to_sample_facts()),
+        encoding="utf-8",
+    )
+
+    # Producers reject comma-bearing names: the focus grammar splits on ','.
+    comma_slices = tmp_path / "slices.yml"
+    comma_slices.write_text(
+        'slices:\n  - name: "A,B"\n    paths: [/srv/**]\n', encoding="utf-8"
+    )
+    exit_code = clankerprof_main(
+        ["slices", "--facts", str(facts_path), "--slices", str(comma_slices)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == (
+        "Slice config declares comma-bearing slice name: A,B. "
+        "Slice names must not contain ','."
+    )
+    comma_scope = tmp_path / "scope.yml"
+    comma_scope.write_text(
+        'cost_kind:\n  Work: "name:Leaf"\nscope:\n  - function: Leaf\n'
+        '    label: "S,T"\n',
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["scopes", "--facts", str(facts_path), "--config", str(comma_scope)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "scope label must not contain ','."
+
+    # Backstop: focus against a pre-existing comma-named report fails closed
+    # instead of silently gating the split parts.
+    report = {
+        "tool": "clankerprof_slices",
+        "summary": {"total_time_ns": 100},
+        "slices": [
+            {"name": "A", "pct": 1.0},
+            {"name": "B", "pct": 1.0},
+            {"name": "A,B", "pct": 10.0},
+        ],
+    }
+    before_path = tmp_path / "before.json"
+    before_path.write_text(json.dumps(report), encoding="utf-8")
+    after = json.loads(json.dumps(report))
+    after["slices"][2]["pct"] = 20.0
+    after_path = tmp_path / "after.json"
+    after_path.write_text(json.dumps(after), encoding="utf-8")
+    exit_code = clankerprof_main(
+        [
+            "compare",
+            "--before",
+            str(before_path),
+            "--after",
+            str(after_path),
+            "--focus-slices",
+            "A,B",
+        ]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == (
+        "Focus filtering rejects comma-bearing row name: 'A,B'."
+    )
+    # Unfocused, the comma-named row still gates normally.
+    exit_code = clankerprof_main(
+        ["compare", "--before", str(before_path), "--after", str(after_path)]
+    )
+    assert exit_code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["has_regression"] is True
+
+
+def test_clankerprof_slice_config_rejects_unknown_keys(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from clankerprof.facts import dumps_sample_facts
+
+    builder = PprofFixtureBuilder.create()
+    builder.sample((builder.location(builder.function("Leaf", "/srv/l.py")),), 7)
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(
+        dumps_sample_facts(decode_profile_bytes(builder.encode()).to_sample_facts()),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.yml"
+    config_path.write_text("filterz:\n  - name:Never\n", encoding="utf-8")
+    exit_code = clankerprof_main(
+        ["slices", "--facts", str(facts_path), "--config", str(config_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Unknown slice config key: filterz."
+
+
+def test_clankerprof_decoder_rejects_over_maximum_field_numbers() -> None:
+    # Field number 2^29 is one above protobuf's tag maximum: a decode error,
+    # never a silent skip. The maximum legal field number still skips.
+    with pytest.raises(
+        PprofDecodeError, match=r"Illegal protobuf field number 536870912\."
+    ):
+        decode_profile_bytes(b"\x80\x80\x80\x80\x10\x00")
+    profile = decode_profile_bytes(b"\xf8\xff\xff\xff\x0f\x00")
+    assert profile.to_sample_facts().samples == ()

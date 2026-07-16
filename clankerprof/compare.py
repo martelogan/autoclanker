@@ -5,6 +5,8 @@ import math
 from dataclasses import dataclass
 from typing import Any, cast
 
+from clankerprof.model import AGGREGATE_MAX, AGGREGATE_MIN
+
 
 @dataclass(frozen=True, slots=True)
 class CompareOptions:
@@ -19,36 +21,139 @@ def _finite_or_none(value: float) -> float | None:
     return value if math.isfinite(value) else None
 
 
+def _validated_options(options: CompareOptions | None) -> CompareOptions:
+    resolved = options or CompareOptions()
+    if (
+        not (
+            math.isfinite(resolved.threshold_abs)
+            and math.isfinite(resolved.threshold_rel)
+        )
+        or resolved.threshold_abs < 0
+        or resolved.threshold_rel < 0
+    ):
+        # A non-finite threshold would silently disable gating; a negative one
+        # would gate identical reports as regressions (0 > -1).
+        raise ValueError("Compare thresholds must be finite, non-negative numbers.")
+    return resolved
+
+
+def _finite_value(value: float, name: str) -> float:
+    """Derived compare values (frame-percentage sums and absolute deltas) must
+    stay finite; overflow fails closed rather than serializing an uncontracted
+    null. Only ``delta_rel`` has a documented null path."""
+    if not math.isfinite(value):
+        raise ValueError(f"Compare values for '{name}' are not finite.")
+    return value
+
+
+def _require_number(payload: dict[str, Any], key: str, context: str) -> float:
+    """Rows present in a report must carry their numeric fields; absent or
+    non-numeric is malformed input. Row-level absence (a name missing from one
+    report entirely) is handled by the callers, never by defaulting here."""
+    value: object = payload.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{context} field {key!r} must be a number.")
+    return float(value)
+
+
+def _require_name(payload: dict[str, Any], key: str, context: str) -> str:
+    value: object = payload.get(key)
+    if not isinstance(value, str):
+        raise ValueError(f"{context} rows must carry a string {key!r}.")
+    return value
+
+
+def _optional_rows(
+    payload: dict[str, Any], key: str, context: str
+) -> list[dict[str, Any]]:
+    """Structural row arrays may be absent, but a present key must be an array
+    of objects — wrong shapes (including a present null) are malformed input,
+    never silently empty. Conflating null with absence would let a nulled-out
+    array turn a real regression into an apparent removal."""
+    if key not in payload:
+        return []
+    raw: object = payload[key]
+    if not isinstance(raw, list):
+        raise ValueError(f"{context} field {key!r} must be an array.")
+    rows: list[dict[str, Any]] = []
+    for item in cast(list[object], raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"{_ROW_CONTEXTS[key]} rows must be objects.")
+        rows.append(cast(dict[str, Any], item))
+    return rows
+
+
+_ROW_CONTEXTS = {
+    "slices": "Slice",
+    "frames": "Frame",
+    "boundaries": "Boundary",
+    "buckets": "Bucket",
+    "categories": "Category",
+    "domains": "Domain",
+}
+
+
+def _summary_total(payload: dict[str, Any]) -> int:
+    raw_summary: object = payload.get("summary")
+    if not isinstance(raw_summary, dict):
+        raise ValueError("Report summary must be an object.")
+    value: object = cast(dict[str, Any], raw_summary).get("total_time_ns")
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not AGGREGATE_MIN <= value <= AGGREGATE_MAX
+    ):
+        # Absent and out-of-range values share the message because Rust's JSON
+        # parser cannot distinguish out-of-range integers from non-integers.
+        raise ValueError("Report summary field 'total_time_ns' must be an integer.")
+    return value
+
+
 def _slice_map(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    raw_slices = payload.get("slices", [])
+    raw_slices: object = payload.get("slices")
     if not isinstance(raw_slices, list):
         raise ValueError("Profile comparison input must contain a slices array.")
     result: dict[str, dict[str, Any]] = {}
     for item in cast(list[object], raw_slices):
-        if isinstance(item, dict):
-            raw_item = cast(dict[str, Any], item)
-            result[str(raw_item.get("name", ""))] = raw_item
+        if not isinstance(item, dict):
+            raise ValueError("Slice rows must be objects.")
+        raw_item = cast(dict[str, Any], item)
+        name = _require_name(raw_item, "name", "Slice")
+        if name in result:
+            # Projections never emit duplicate top-level names; a duplicate is
+            # malformed input and last-wins would make the gate order-dependent.
+            raise ValueError(f"Duplicate Slice row '{name}' in comparison input.")
+        result[name] = raw_item
     return result
 
 
 def _frames_by_function(slice_payload: dict[str, Any]) -> dict[str, float]:
-    raw_frames = slice_payload.get("frames", [])
-    if not isinstance(raw_frames, list):
-        return {}
     frames: dict[str, float] = {}
-    for item in cast(list[object], raw_frames):
-        if isinstance(item, dict):
-            raw_item = cast(dict[str, Any], item)
-            frames[str(raw_item.get("function", ""))] = float(raw_item.get("pct", 0))
+    for raw_item in _optional_rows(slice_payload, "frames", "Slice"):
+        function = _require_name(raw_item, "function", "Frame")
+        frames[function] = frames.get(function, 0.0) + _require_number(
+            raw_item, "pct", "Frame"
+        )
     return frames
 
 
 def _delta_rel(before_pct: float, after_pct: float) -> float:
+    """Relative delta against the magnitude of the baseline.
+
+    Sample values are signed, so rows can carry negative percentages; dividing
+    by ``abs(before_pct)`` keeps the sign of the change meaningful (-10% ->
+    -5% is a +50% increase and must be gateable). A zero baseline yields an
+    unbounded delta in the direction of the absolute change, serialized as
+    null by the finite-JSON path. Positive baselines are bit-identical to the
+    plain ``delta/before`` form.
+    """
     delta_abs = after_pct - before_pct
-    if before_pct > 0:
-        return (delta_abs / before_pct) * 100
-    if after_pct > 0:
+    if before_pct != 0:
+        return (delta_abs / abs(before_pct)) * 100
+    if delta_abs > 0:
         return float("inf")
+    if delta_abs < 0:
+        return float("-inf")
     return 0.0
 
 
@@ -75,20 +180,48 @@ def compare_slice_json(
     after: dict[str, Any],
     options: CompareOptions | None = None,
 ) -> dict[str, Any]:
-    resolved = options or CompareOptions()
+    resolved = _validated_options(options)
     before_slices = _slice_map(before)
     after_slices = _slice_map(after)
     names = sorted(set(before_slices) | set(after_slices))
+    # A focus name matching zero rows would silently disable gating for it,
+    # exactly like a non-finite threshold; the union keeps focusing a row
+    # that was added or removed between reports legal.
+    # Focus values are comma-split, so a comma-bearing row name can never be
+    # focused directly; pre-existing reports with such names fail closed
+    # instead of silently gating the split parts (producers now reject them).
+    if resolved.focus_slices:
+        comma_named = sorted(name for name in names if "," in name)
+        if comma_named:
+            raise ValueError(
+                "Focus filtering rejects comma-bearing row name: "
+                f"'{comma_named[0]}'."
+            )
+    unknown_focus = sorted(resolved.focus_slices - set(names))
+    if unknown_focus:
+        raise ValueError(
+            "Focus slices not present in either report: "
+            + ", ".join(f"'{name}'" for name in unknown_focus)
+            + "."
+        )
     slice_deltas: list[dict[str, Any]] = []
     frame_deltas_all: list[dict[str, Any]] = []
     has_regression = False
 
     for name in names:
-        before_payload = before_slices.get(name, {})
-        after_payload = after_slices.get(name, {})
-        before_pct = float(before_payload.get("pct", 0))
-        after_pct = float(after_payload.get("pct", 0))
-        delta_abs = after_pct - before_pct
+        before_payload = before_slices.get(name)
+        after_payload = after_slices.get(name)
+        before_pct = (
+            0.0
+            if before_payload is None
+            else _require_number(before_payload, "pct", "Slice")
+        )
+        after_pct = (
+            0.0
+            if after_payload is None
+            else _require_number(after_payload, "pct", "Slice")
+        )
+        delta_abs = _finite_value(after_pct - before_pct, name)
         delta_rel = _delta_rel(before_pct, after_pct)
 
         in_focus = not resolved.focus_slices or name in resolved.focus_slices
@@ -102,19 +235,29 @@ def compare_slice_json(
         if is_regression:
             has_regression = True
 
-        before_frames = _frames_by_function(before_payload)
-        after_frames = _frames_by_function(after_payload)
-        frame_deltas = [
-            {
-                "function": function,
-                "slice": name,
-                "before_pct": before_frames.get(function, 0.0),
-                "after_pct": after_frames.get(function, 0.0),
-                "delta_abs": after_frames.get(function, 0.0)
-                - before_frames.get(function, 0.0),
-            }
-            for function in sorted(set(before_frames) | set(after_frames))
-        ]
+        before_frames = (
+            {} if before_payload is None else _frames_by_function(before_payload)
+        )
+        after_frames = (
+            {} if after_payload is None else _frames_by_function(after_payload)
+        )
+        # Finiteness is checked while walking the sorted union so both
+        # languages report the same first offender when several overflow.
+        frame_deltas: list[dict[str, Any]] = []
+        for function in sorted(set(before_frames) | set(after_frames)):
+            before_frame_pct = _finite_value(before_frames.get(function, 0.0), function)
+            after_frame_pct = _finite_value(after_frames.get(function, 0.0), function)
+            frame_deltas.append(
+                {
+                    "function": function,
+                    "slice": name,
+                    "before_pct": before_frame_pct,
+                    "after_pct": after_frame_pct,
+                    "delta_abs": _finite_value(
+                        after_frame_pct - before_frame_pct, function
+                    ),
+                }
+            )
         frame_deltas.sort(
             key=lambda item: abs(cast(float, item["delta_abs"])), reverse=True
         )
@@ -146,12 +289,8 @@ def compare_slice_json(
 
     return {
         "tool": "clankerprof_compare",
-        "before_total_ns": int(
-            cast(dict[str, Any], before.get("summary", {})).get("total_time_ns", 0)
-        ),
-        "after_total_ns": int(
-            cast(dict[str, Any], after.get("summary", {})).get("total_time_ns", 0)
-        ),
+        "before_total_ns": _summary_total(before),
+        "after_total_ns": _summary_total(after),
         "slices": slice_deltas,
         "top_regressions": top_regressions,
         "top_improvements": top_improvements,
@@ -159,49 +298,59 @@ def compare_slice_json(
     }
 
 
+def _insert_row(
+    rows: dict[tuple[str, str, str], float],
+    key: tuple[str, str, str],
+    value: float,
+    context: str,
+) -> None:
+    if key in rows:
+        # Projections never emit duplicate row names; a duplicate is malformed
+        # input and last-wins would make the gate order-dependent.
+        raise ValueError(f"Duplicate {context} row '{key[2]}' in comparison input.")
+    rows[key] = value
+
+
 def _boundary_rows(payload: dict[str, Any]) -> dict[tuple[str, str, str], float]:
-    raw_boundaries = payload.get("boundaries", [])
+    raw_boundaries: object = payload.get("boundaries")
     if not isinstance(raw_boundaries, list):
         raise ValueError("Boundary comparison input must contain a boundaries array.")
     rows: dict[tuple[str, str, str], float] = {}
     for item in cast(list[object], raw_boundaries):
         if not isinstance(item, dict):
-            continue
+            raise ValueError("Boundary rows must be objects.")
         boundary = cast(dict[str, Any], item)
-        boundary_name = str(boundary.get("name", ""))
-        rows[("boundary", boundary_name, boundary_name)] = float(
-            boundary.get("pct_of_profile", 0)
+        boundary_name = _require_name(boundary, "name", "Boundary")
+        _insert_row(
+            rows,
+            ("boundary", boundary_name, boundary_name),
+            _require_number(boundary, "pct_of_profile", "Boundary"),
+            "Boundary",
         )
-        raw_buckets = boundary.get("buckets", [])
-        if isinstance(raw_buckets, list):
-            for bucket_item in cast(list[object], raw_buckets):
-                if not isinstance(bucket_item, dict):
-                    continue
-                bucket = cast(dict[str, Any], bucket_item)
-                bucket_name = str(bucket.get("name", ""))
-                rows[("bucket", boundary_name, bucket_name)] = float(
-                    bucket.get("pct", 0)
+        for bucket in _optional_rows(boundary, "buckets", "Boundary"):
+            bucket_name = _require_name(bucket, "name", "Bucket")
+            _insert_row(
+                rows,
+                ("bucket", boundary_name, bucket_name),
+                _require_number(bucket, "pct", "Bucket"),
+                "Bucket",
+            )
+            for category in _optional_rows(bucket, "categories", "Bucket"):
+                category_name = _require_name(category, "name", "Category")
+                _insert_row(
+                    rows,
+                    ("category", boundary_name, category_name),
+                    _require_number(category, "pct", "Category"),
+                    "Category",
                 )
-                raw_categories = bucket.get("categories", [])
-                if isinstance(raw_categories, list):
-                    for category_item in cast(list[object], raw_categories):
-                        if not isinstance(category_item, dict):
-                            continue
-                        category = cast(dict[str, Any], category_item)
-                        category_name = str(category.get("name", ""))
-                        rows[("category", boundary_name, category_name)] = float(
-                            category.get("pct", 0)
-                        )
-        raw_domains = boundary.get("domains", [])
-        if isinstance(raw_domains, list):
-            for domain_item in cast(list[object], raw_domains):
-                if not isinstance(domain_item, dict):
-                    continue
-                domain = cast(dict[str, Any], domain_item)
-                domain_name = str(domain.get("name", ""))
-                rows[("domain", boundary_name, domain_name)] = float(
-                    domain.get("pct", 0)
-                )
+        for domain in _optional_rows(boundary, "domains", "Boundary"):
+            domain_name = _require_name(domain, "name", "Domain")
+            _insert_row(
+                rows,
+                ("domain", boundary_name, domain_name),
+                _require_number(domain, "pct", "Domain"),
+                "Domain",
+            )
     return rows
 
 
@@ -210,16 +359,34 @@ def compare_boundary_json(
     after: dict[str, Any],
     options: CompareOptions | None = None,
 ) -> dict[str, Any]:
-    resolved = options or CompareOptions()
+    resolved = _validated_options(options)
     before_rows = _boundary_rows(before)
     after_rows = _boundary_rows(after)
+    row_keys = set(before_rows) | set(after_rows)
+    boundary_names = {boundary for (_, boundary, _) in row_keys}
+    # Same comma backstop as the slice path: focus values are comma-split,
+    # so comma-bearing boundary names fail closed instead of gating parts.
+    if resolved.focus_boundaries:
+        comma_named = sorted(name for name in boundary_names if "," in name)
+        if comma_named:
+            raise ValueError(
+                "Focus filtering rejects comma-bearing row name: "
+                f"'{comma_named[0]}'."
+            )
+    unknown_focus = sorted(resolved.focus_boundaries - boundary_names)
+    if unknown_focus:
+        raise ValueError(
+            "Focus boundaries not present in either report: "
+            + ", ".join(f"'{name}'" for name in unknown_focus)
+            + "."
+        )
     row_deltas: list[dict[str, Any]] = []
     has_regression = False
 
-    for kind, boundary, name in sorted(set(before_rows) | set(after_rows)):
+    for kind, boundary, name in sorted(row_keys):
         before_pct = before_rows.get((kind, boundary, name), 0.0)
         after_pct = after_rows.get((kind, boundary, name), 0.0)
-        delta_abs = after_pct - before_pct
+        delta_abs = _finite_value(after_pct - before_pct, name)
         delta_rel = _delta_rel(before_pct, after_pct)
         in_focus = (
             not resolved.focus_boundaries or boundary in resolved.focus_boundaries
@@ -250,12 +417,8 @@ def compare_boundary_json(
     return {
         "tool": "clankerprof_compare",
         "projection": "boundaries",
-        "before_total_ns": int(
-            cast(dict[str, Any], before.get("summary", {})).get("total_time_ns", 0)
-        ),
-        "after_total_ns": int(
-            cast(dict[str, Any], after.get("summary", {})).get("total_time_ns", 0)
-        ),
+        "before_total_ns": _summary_total(before),
+        "after_total_ns": _summary_total(after),
         "rows": row_deltas,
         "top_regressions": [
             item for item in row_deltas if cast(float, item["delta_abs"]) > 0.1

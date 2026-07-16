@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
+import math
+import re
 import sys
 import tomllib
 import zlib
 
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 import yaml
 
@@ -16,6 +19,8 @@ from clankerprof import __version__
 from clankerprof.analysis import (
     DEFAULT_LIBRARY_SELECTORS,
     DEFAULT_RUNTIME_RULES,
+    RESERVED_SLICE_NAMES,
+    RESERVED_SLICE_NAMES_MESSAGE,
     AttributionRule,
     BoundaryAnalysisOptions,
     BoundaryCategoryDefinition,
@@ -40,14 +45,17 @@ from clankerprof.analysis import (
     parse_frame_predicates,
     ruby_rules,
     runtime_rules_from_file,
+    validate_slice_definitions,
 )
 from clankerprof.compare import CompareOptions, compare_json
 from clankerprof.facts import (
     SampleFactsInput,
+    dumps_sample_facts,
     read_sample_facts,
     sample_facts_to_jsonable,
     write_sample_facts,
 )
+from clankerprof.jsonio import parse_strict_json, parse_strict_yaml
 from clankerprof.proto import load_profile
 from clankerprof.render import (
     render_boundary_json,
@@ -57,8 +65,23 @@ from clankerprof.render import (
     render_target_csv,
     render_target_json,
     render_target_text,
+    strict_float,
+    strict_int64,
 )
 from clankerprof.stats import CategoryStats
+
+
+class _JsonArgumentParser(argparse.ArgumentParser):
+    """Route argparse usage errors through the JSON error envelope.
+
+    argparse would otherwise print prose usage text and SystemExit before the
+    ValueError-to-envelope boundary in main(); subparsers inherit this class
+    via add_subparsers' parser_class default. --help/--version use
+    parser.exit(), not error(), so they stay human-readable with exit 0.
+    """
+
+    def error(self, message: str) -> NoReturn:
+        raise ValueError(message)
 
 
 def _contracted(
@@ -66,9 +89,9 @@ def _contracted(
 ) -> Callable[[argparse.Namespace], dict[str, Any]]:
     """Map environment failures onto the exit-2 validation contract.
 
-    Missing/corrupt inputs (files, gzip streams, YAML configs) must surface as
-    the JSON error envelope through both the standalone and umbrella CLIs,
-    never as tracebacks.
+    Missing/corrupt inputs (files, gzip streams, YAML configs) and numeric
+    conversion failures must surface as the JSON error envelope through both
+    the standalone and umbrella CLIs, never as tracebacks.
     """
 
     def wrapped(args: argparse.Namespace) -> dict[str, Any]:
@@ -76,7 +99,20 @@ def _contracted(
             return handler(args)
         except ValueError:
             raise
-        except (OSError, EOFError, zlib.error, yaml.YAMLError) as exc:
+        except RecursionError as exc:
+            # PyYAML's composer recurses on deep nesting; by the time this
+            # handler runs the recursive frames have unwound. Message core
+            # matches serde's parse-time limit (location suffix is
+            # engine-specific detail).
+            raise ValueError("recursion limit exceeded") from exc
+        except (
+            OSError,
+            EOFError,
+            zlib.error,
+            yaml.YAMLError,
+            OverflowError,
+            csv.Error,
+        ) as exc:
             raise ValueError(str(exc) or exc.__class__.__name__) from exc
 
     return wrapped
@@ -85,7 +121,7 @@ def _contracted(
 def _load_attributables(path: str | None) -> dict[str, dict[str, float]] | None:
     if path is None:
         return None
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    payload = parse_strict_json(Path(path).read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("Attributables must be a JSON object.")
     result: dict[str, dict[str, float]] = {}
@@ -93,9 +129,20 @@ def _load_attributables(path: str | None) -> dict[str, dict[str, float]] | None:
         if not isinstance(values, dict):
             raise ValueError(f"Attributable column {name} must be an object.")
         raw_values = cast(dict[object, object], values)
-        result[str(name)] = {
-            str(key): float(cast(Any, value)) for key, value in raw_values.items()
-        }
+        column: dict[str, float] = {}
+        for key, value in raw_values.items():
+            # Rust reads these through as_f64, which rejects JSON booleans
+            # and strings that Python's float() would silently coerce.
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"Attributable column {name} values must be numbers.")
+            metric = float(value)
+            # Rust never sees a non-finite here (serde_json rejects 1e309 at
+            # parse); Python's unbounded parse must fail closed at load so
+            # both exit 2 before any estimate is scaled.
+            if not math.isfinite(metric):
+                raise ValueError(f"Attributable estimate for '{name}' is not finite.")
+            column[str(key)] = metric
+        result[str(name)] = column
     return result
 
 
@@ -112,6 +159,28 @@ def _load_projection_input(
     return load_profile(profile_path).to_sample_facts()
 
 
+# Exactly the keys run_slices consumes (mirrored in the Rust loader): the
+# config is fixed-shape, so a typo (filterz) must never silently disable
+# the option it meant to set — the scope-config unknown-key principle.
+_SLICES_CONFIG_KEYS = frozenset(
+    {
+        "profile",
+        "facts",
+        "slices",
+        "top",
+        "by_slice",
+        "show_paths",
+        "no_collapse_native",
+        "unattributed_gems",
+        "unattributed_libraries",
+        "filters",
+        "filter",
+        "collapse",
+        "attribute",
+    }
+)
+
+
 def _load_slices_config(path: str | None) -> dict[str, object]:
     if path is None:
         return {}
@@ -119,10 +188,14 @@ def _load_slices_config(path: str | None) -> dict[str, object]:
     if config_path.suffix == ".toml":
         payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
     else:
-        payload = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        payload = parse_strict_yaml(config_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("Slice config file must be a YAML object.")
-    return cast(dict[str, object], payload)
+    config = cast(dict[str, object], payload)
+    unknown = sorted(set(config) - _SLICES_CONFIG_KEYS)
+    if unknown:
+        raise ValueError(f"Unknown slice config key: {unknown[0]}.")
+    return config
 
 
 def _string_array(payload: dict[str, object], key: str) -> tuple[str, ...]:
@@ -143,13 +216,34 @@ def _optional_bool(payload: dict[str, object], key: str) -> bool | None:
     return value
 
 
+def _config_int_from_str(raw: str, message: str) -> int:
+    # Mirrors Rust's `raw.trim().parse::<i64>()`: ASCII signed decimal only
+    # (Python's bare int() would admit underscores and unicode digits) and
+    # the i64 domain.
+    text = raw.strip()
+    if re.fullmatch(r"[-+]?[0-9]+", text, re.ASCII) is None:
+        raise ValueError(message)
+    value = int(text)
+    if not -(2**63) <= value <= 2**63 - 1:
+        raise ValueError(message)
+    return value
+
+
 def _optional_int(payload: dict[str, object], key: str) -> int | None:
     value = payload.get(key)
     if value is None:
         return None
+    message = f"{key} in slice config must be an integer."
     if isinstance(value, bool):
-        raise ValueError(f"{key} in slice config must be an integer.")
-    return int(cast(Any, value))
+        raise ValueError(message)
+    if isinstance(value, str):
+        return _config_int_from_str(value, message)
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError(message)
+    try:
+        return int(cast(Any, value))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(message) from exc
 
 
 def _optional_by_slice(payload: dict[str, object]) -> str | None:
@@ -177,17 +271,46 @@ def _optional_unattributed_libraries(payload: dict[str, object]) -> int | None:
         raise ValueError(
             "unattributed_gems and unattributed_libraries are aliases; use only one."
         )
-    value = next(iter(values.values()))
+    key = next(iter(values))
+    value = values[key]
     if isinstance(value, bool):
         return 2**63 - 1 if value else None
-    return int(cast(Any, value))
+    message = f"{key} in slice config must be an integer."
+    if isinstance(value, str):
+        return _config_int_from_str(value, message)
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError(message)
+    try:
+        return int(cast(Any, value))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(message) from exc
 
 
-def _focus_slices(values: Sequence[str]) -> frozenset[str]:
-    result: set[str] = set()
-    for value in values:
-        result.update(part for part in value.split(",") if part)
-    return frozenset(result)
+def _focus_slices(value: str | None) -> frozenset[str]:
+    # The documented grammar is one comma-delimited value; a repeated flag
+    # keeps the last occurrence (argparse store), mirrored by clap's
+    # overrides_with in the Rust CLI.
+    if not value:
+        return frozenset()
+    return frozenset(part for part in value.split(",") if part)
+
+
+_TOP_INT_MESSAGE = "--top values must be integers."
+_UNATTRIBUTED_LIBRARIES_INT_MESSAGE = (
+    "--unattributed-libraries values must be integers."
+)
+
+
+def _int64_flag(raw: object, *, message: str) -> int | None:
+    """Strict CLI integer grammar shared with the Rust core (i64::from_str);
+    argparse type=int would also accept underscores, whitespace, non-ASCII
+    digits, and unbounded magnitude. Non-string values (an argparse const)
+    pass through unchanged."""
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        return cast(int, raw)
+    return strict_int64(raw, message=message)
 
 
 def _merge_single_value(
@@ -265,6 +388,15 @@ def _validate_slice_options(options: SliceAnalysisOptions) -> None:
         key = (attribute.key, attribute.value)
         if attribute.key not in valid_attribute_keys:
             raise ValueError(f"Unsupported attribute filter key: {attribute.key}")
+        if attribute.target_slice in RESERVED_SLICE_NAMES:
+            # The virtual-slice opt-in waives only the must-name-a-configured-
+            # slice rule; a (gc)/(uncollapsible) target would be attributed
+            # and then stripped at render, and an (all) target would merge
+            # with the implicit fallback row.
+            raise ValueError(
+                f"Attribute target names reserved pseudo-slice name: "
+                f"{attribute.target_slice}. " + RESERVED_SLICE_NAMES_MESSAGE
+            )
         if (
             attribute.target_slice not in names
             and not options.allow_virtual_attribute_slices
@@ -379,7 +511,9 @@ def _parse_attribute(raw: str) -> AttributionRule:
     if body.startswith("!"):
         raise ValueError(f"Attribute rules do not support '!': {raw}")
     key, separator, value = body.partition(":")
-    if not separator:
+    if not separator or not key or not value:
+        # An empty value would substring-match every frame and silently
+        # reassign all ownership; filters already reject the same shape.
         raise ValueError(f"Attribute rule filter must be '<key>:<value>': {raw}")
     if key == "slice":
         raise ValueError(f"Attribute rules do not support slice: filters: {raw}")
@@ -394,11 +528,15 @@ def _parse_attribute(raw: str) -> AttributionRule:
 def _load_slices(path: str | None) -> tuple[SliceDefinition, ...]:
     if path is None:
         return ()
-    payload = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    payload = parse_strict_yaml(Path(path).read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("Slices file must be a YAML object.")
     raw_payload = cast(dict[object, object], payload)
-    raw_slices = raw_payload.get("slices", [])
+    if "slices" not in raw_payload:
+        # Rust requires the key; defaulting it to [] let a `slice:` typo
+        # silently discard the entire supplied ownership configuration.
+        raise ValueError("Slices file must contain a slices array.")
+    raw_slices = raw_payload["slices"]
     if not isinstance(raw_slices, list):
         raise ValueError("Slices file must contain a slices array.")
     slices: list[SliceDefinition] = []
@@ -413,12 +551,26 @@ def _load_slices(path: str | None) -> tuple[SliceDefinition, ...]:
             raise ValueError("Slice paths must be an array.")
         if "name" not in raw_item:
             raise ValueError("Each slice entry must include a name.")
+        slice_name = raw_item["name"]
+        if not isinstance(slice_name, str):
+            raise ValueError("Slice name must be a string.")
+        for path_pattern in cast(list[object], paths):
+            if not isinstance(path_pattern, str):
+                raise ValueError("Slice paths values must be strings.")
+        raw_default = raw_item.get("default", False)
+        if raw_default is None:
+            raw_default = False
+        if not isinstance(raw_default, bool):
+            # Truthiness would diverge from Rust's as_bool (`1` was default
+            # in Python, silently non-default in Rust); only YAML booleans
+            # are accepted in either language.
+            raise ValueError("Slice default must be a boolean.")
         metadata = _slice_metadata(raw_item)
         slices.append(
             SliceDefinition(
-                name=str(raw_item["name"]),
-                path_patterns=tuple(str(path) for path in cast(list[object], paths)),
-                is_default=bool(raw_item.get("default", False)),
+                name=slice_name,
+                path_patterns=tuple(cast(list[str], paths)),
+                is_default=raw_default,
                 metadata=metadata,
             )
         )
@@ -430,7 +582,7 @@ def _load_config_payload(path: str | Path, *, description: str) -> dict[str, obj
     if config_path.suffix == ".toml":
         payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
     else:
-        payload = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        payload = parse_strict_yaml(config_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"{description} config file must be an object.")
     return cast(dict[str, object], payload)
@@ -467,11 +619,17 @@ def _aliased_mapping_value(
 
 
 def _string_values(value: object, *, field_name: str) -> tuple[str, ...]:
+    message = f"{field_name} must be a string or array of strings."
     if isinstance(value, str):
         return (value,)
     if isinstance(value, list):
-        return tuple(str(item) for item in cast(list[object], value))
-    raise ValueError(f"{field_name} must be a string or array of strings.")
+        items = cast(list[object], value)
+        # Python str() and Rust's Display disagree on bool/number spellings,
+        # so non-string items fail closed in both implementations.
+        if not all(isinstance(item, str) for item in items):
+            raise ValueError(message)
+        return tuple(cast(list[str], items))
+    raise ValueError(message)
 
 
 def _predicate_expr_children(
@@ -703,6 +861,13 @@ def _load_boundary_bucket(
     category_to_bucket: dict[str, str] = {}
     for raw_name, raw_categories in cast(dict[object, object], raw_value).items():
         name = str(raw_name)
+        # Rendering appends an implicit `Other` bucket for unbucketed cost
+        # kinds; a configured `Other` would emit duplicate bucket rows that
+        # the compare gate rejects.
+        if name == "Other":
+            raise ValueError(
+                f"{field_name} name 'Other' is reserved for unbucketed cost kinds."
+            )
         categories = _string_values(
             raw_categories,
             field_name=f"{field_name} {name}",
@@ -729,14 +894,22 @@ def _load_boundary_attributables(
         raise ValueError(f"{field_name} must be an object.")
     result: dict[str, float] = {}
     for raw_name, raw_metric in cast(dict[object, object], raw_value).items():
-        metric = float(cast(Any, raw_metric))
+        # Rust reads these through as_f64, which rejects the booleans and
+        # numeric strings float() would coerce; message text matches Rust.
+        if isinstance(raw_metric, bool) or not isinstance(raw_metric, (int, float)):
+            raise ValueError(f"Boundary attributable {raw_name} must be a number.")
+        metric = float(raw_metric)
         if metric < 0:
             raise ValueError(f"Boundary attributable {raw_name} cannot be negative.")
         result[str(raw_name)] = metric
     return result
 
 
-def _boundary_predicate_value(raw_boundary: dict[object, object]) -> object:
+def _boundary_predicate_value(
+    raw_boundary: dict[object, object],
+    *,
+    section_name: str = "boundary",
+) -> object:
     if "selector" in raw_boundary:
         return raw_boundary["selector"]
     if "matcher" in raw_boundary:
@@ -744,20 +917,41 @@ def _boundary_predicate_value(raw_boundary: dict[object, object]) -> object:
     if "match" in raw_boundary:
         return raw_boundary["match"]
     if "function" in raw_boundary:
+        # Non-string function values fail closed: Python str() and Rust
+        # Display disagree on bool/number spellings, so neither is trusted.
+        message = f"{section_name}.function must be a string or array of strings."
         raw_function = raw_boundary["function"]
         if isinstance(raw_function, list):
-            return [f"name_eq:{item}" for item in cast(list[object], raw_function)]
+            items = cast(list[object], raw_function)
+            if not all(isinstance(item, str) for item in items):
+                raise ValueError(message)
+            return [f"name_eq:{item}" for item in items]
+        if not isinstance(raw_function, str):
+            raise ValueError(message)
         return f"name_eq:{raw_function}"
     raise ValueError("Each scope must define selector, matcher, match, or function.")
+
+
+def _require_string_selector_entries(
+    raw_predicates: object, *, section_name: str
+) -> None:
+    # Validated before the label fallback, which derives the label from the
+    # first entry: Python str() and Rust's Display disagree on non-string
+    # spellings, so both implementations reject them here.
+    if not isinstance(raw_predicates, list):
+        return
+    if not all(isinstance(entry, str) for entry in cast(list[object], raw_predicates)):
+        raise ValueError(f"{section_name} selector values must be strings.")
 
 
 def _boundary_label_fallback(raw_predicates: object) -> str:
     if isinstance(raw_predicates, str):
         return raw_predicates
     if isinstance(raw_predicates, list):
+        # Entries are validated as strings before this fallback runs.
         raw_values = cast(list[object], raw_predicates)
-        if raw_values:
-            return str(raw_values[0])
+        if raw_values and isinstance(raw_values[0], str):
+            return raw_values[0]
     return "boundary"
 
 
@@ -770,17 +964,50 @@ def _load_boundaries(
         raise ValueError(f"Scope config must contain a {section_name} array.")
     boundaries: list[BoundaryDefinition] = []
     seen_names: set[str] = set()
+    known_entry_keys = {
+        "selector",
+        "matcher",
+        "match",
+        "function",
+        "label",
+        "name",
+        "count",
+        "rollup",
+        "bucket",
+        "attributables",
+        "exclude_descendants",
+    }
     for item in cast(list[object], raw_value):
         if not isinstance(item, dict):
             raise ValueError("Each boundary entry must be an object.")
         raw_boundary = cast(dict[object, object], item)
-        raw_predicates = _boundary_predicate_value(raw_boundary)
+        # Entries are fixed-shape: a typoed key (exclude_descendents) must
+        # never silently disable its rule, mirroring the rule-pack principle.
+        unknown_keys = sorted(
+            str(key) for key in raw_boundary if str(key) not in known_entry_keys
+        )
+        if unknown_keys:
+            raise ValueError(f"Unknown {section_name} field: {unknown_keys[0]}.")
+        raw_predicates = _boundary_predicate_value(
+            raw_boundary, section_name=section_name
+        )
+        _require_string_selector_entries(raw_predicates, section_name=section_name)
+        for key in ("label", "name"):
+            value = raw_boundary.get(key)
+            if value is not None and not isinstance(value, str):
+                # str(True) and Rust's Display disagree ("True" vs "true");
+                # non-string labels fail closed in both implementations.
+                raise ValueError(f"{section_name}.{key} must be a string.")
         label = str(
             raw_boundary.get("label")
             or raw_boundary.get("name")
             or raw_boundary.get("function")
             or _boundary_label_fallback(raw_predicates)
         )
+        # The compare focus grammar splits values on ','; a comma-bearing
+        # row name would make focusing it silently gate the split parts.
+        if "," in label:
+            raise ValueError(f"{section_name} label must not contain ','.")
         if label in seen_names:
             raise ValueError(f"Duplicate boundary label: {label}")
         seen_names.add(label)
@@ -849,13 +1076,34 @@ def _load_boundary_options(
     runtime_rules: RuntimeRuleSet,
 ) -> BoundaryAnalysisOptions:
     payload = _load_config_payload(path, description="Boundary")
+    # Top-level scope configs are fixed-shape like their entries: a typo such
+    # as `owenr:` must never silently drop a whole section.
+    allowed_top_level = {
+        "boundary",
+        "category",
+        "cost_kind",
+        "domain",
+        "owner",
+        "scope",
+        "slices",
+    }
+    for key in sorted(payload):
+        if key not in allowed_top_level:
+            raise ValueError(f"Unknown scope config field: {key}.")
     slices_path = payload.get("slices")
     slices: tuple[SliceDefinition, ...] = ()
     if slices_path is not None:
-        raw_slices_path = Path(str(slices_path))
+        if not isinstance(slices_path, str):
+            # Rust's as_str would silently treat non-strings as absent and
+            # Python's str() would leak an OS error for the spelled value.
+            raise ValueError("Boundary config slices must be a string path.")
+        raw_slices_path = Path(slices_path)
         if not raw_slices_path.is_absolute():
             raw_slices_path = Path(path).parent / raw_slices_path
         slices = _load_slices(str(raw_slices_path))
+        # Scope configs never run slice analysis, so duplicate/multi-default/
+        # reserved-name validation must happen at this loading surface too.
+        validate_slice_definitions(slices)
     category_name, raw_categories = _aliased_config_value(
         payload,
         "cost_kind",
@@ -889,14 +1137,26 @@ def _load_boundary_options(
     return options
 
 
-def _json_compatible(value: object) -> JsonValue:
+def _json_compatible(value: object, depth: int = 0) -> JsonValue:
+    if depth >= 128:
+        # serde_yaml detects alias cycles and deep nesting at parse time
+        # with its 128-level limit; PyYAML builds the (possibly cyclic)
+        # object graph first, so the walk enforces the same cap — a cyclic
+        # alias necessarily exceeds any finite limit.
+        raise ValueError("recursion limit exceeded")
+    if isinstance(value, float) and not math.isfinite(value):
+        # serde_json would silently null a non-finite number; neither
+        # implementation can "preserve" it, so both fail closed.
+        raise ValueError(
+            "Slice metadata values must be finite JSON-compatible numbers."
+        )
     if value is None or isinstance(value, str | int | float | bool):
         return value
     if isinstance(value, list):
-        return [_json_compatible(item) for item in cast(list[object], value)]
+        return [_json_compatible(item, depth + 1) for item in cast(list[object], value)]
     if isinstance(value, dict):
         return {
-            str(key): _json_compatible(item)
+            str(key): _json_compatible(item, depth + 1)
             for key, item in cast(dict[object, object], value).items()
         }
     return str(value)
@@ -959,7 +1219,13 @@ def run_targets(args: argparse.Namespace) -> dict[str, Any]:
             encoding="utf-8",
         )
     if args.format == "json":
-        return cast(dict[str, Any], render_target_json(results))
+        payload = cast(dict[str, Any], render_target_json(results))
+        if args.output:
+            Path(args.output).write_text(
+                render_json_payload(payload) + "\n", encoding="utf-8"
+            )
+            return {"tool": "clankerprof_targets", "ok": True, "output": args.output}
+        return payload
     if compat_target_csv_layout:
         return _write_legacy_target_csv_artifacts(
             args.output,
@@ -993,10 +1259,11 @@ def run_slices(args: argparse.Namespace) -> dict[str, Any]:
     raw_facts = _merge_single_value(args.facts, config.get("facts"), name="facts")
     sample_facts = _load_projection_input(raw_profile, raw_facts)
     raw_slices = _merge_single_value(args.slices, config.get("slices"), name="slices")
+    cli_top = _int64_flag(args.top, message=_TOP_INT_MESSAGE)
     raw_top = _optional_int(config, "top")
-    if args.top is not None and raw_top is not None:
+    if cli_top is not None and raw_top is not None:
         raise ValueError("top specified both on command line and in config file.")
-    top = args.top if args.top is not None else raw_top
+    top = cli_top if cli_top is not None else raw_top
     raw_by_slice = _optional_by_slice(config)
     if args.by_slice is not None and raw_by_slice is not None:
         raise ValueError("by_slice specified both on command line and in config file.")
@@ -1017,9 +1284,12 @@ def run_slices(args: argparse.Namespace) -> dict[str, Any]:
         if args.no_collapse_native
         else bool(raw_no_collapse_native)
     )
+    cli_unattributed_libraries = _int64_flag(
+        args.unattributed_libraries, message=_UNATTRIBUTED_LIBRARIES_INT_MESSAGE
+    )
     raw_unattributed_libraries = _optional_unattributed_libraries(config)
     if (
-        args.unattributed_libraries is not None
+        cli_unattributed_libraries is not None
         and raw_unattributed_libraries is not None
     ):
         raise ValueError(
@@ -1027,8 +1297,8 @@ def run_slices(args: argparse.Namespace) -> dict[str, Any]:
             "(--unattributed-gems is a compatibility alias)."
         )
     unattributed_libraries = (
-        args.unattributed_libraries
-        if args.unattributed_libraries is not None
+        cli_unattributed_libraries
+        if cli_unattributed_libraries is not None
         else raw_unattributed_libraries
     )
     raw_filters = (
@@ -1098,7 +1368,7 @@ def run_boundaries(args: argparse.Namespace) -> dict[str, Any]:
         dict[str, Any],
         render_boundary_json(
             analyze_boundary_facts(sample_facts, options),
-            top=args.top,
+            top=_int64_flag(args.top, message=_TOP_INT_MESSAGE),
         ),
     )
     if args.output:
@@ -1110,28 +1380,54 @@ def run_boundaries(args: argparse.Namespace) -> dict[str, Any]:
     return payload
 
 
+_COMPARE_THRESHOLD_MESSAGE = "Compare thresholds must be finite, non-negative numbers."
+
+
+def _compare_threshold(raw: object) -> float:
+    if isinstance(raw, str):
+        value = strict_float(raw, message=_COMPARE_THRESHOLD_MESSAGE)
+    else:
+        value = float(cast(float, raw))
+    if value < 0:
+        raise ValueError(_COMPARE_THRESHOLD_MESSAGE)
+    return value
+
+
 def run_compare(args: argparse.Namespace) -> dict[str, Any]:
-    before = json.loads(Path(args.before).read_text(encoding="utf-8"))
-    after = json.loads(Path(args.after).read_text(encoding="utf-8"))
+    before = parse_strict_json(Path(args.before).read_text(encoding="utf-8"))
+    after = parse_strict_json(Path(args.after).read_text(encoding="utf-8"))
     if not isinstance(before, dict) or not isinstance(after, dict):
         raise ValueError("Compare inputs must be JSON objects.")
-    return compare_json(
+    payload = compare_json(
         cast(dict[str, Any], before),
         cast(dict[str, Any], after),
         CompareOptions(
-            threshold_abs=float(args.threshold_abs),
-            threshold_rel=float(args.threshold_rel),
+            threshold_abs=_compare_threshold(args.threshold_abs),
+            threshold_rel=_compare_threshold(args.threshold_rel),
             focus_slices=_focus_slices(args.focus_slices),
             focus_boundaries=_focus_slices(args.focus_boundaries),
         ),
     )
+    if args.output:
+        Path(args.output).write_text(
+            render_json_payload(payload) + "\n", encoding="utf-8"
+        )
+        # The receipt keeps the regression gate intact: main() reads the tool
+        # and has_regression keys to decide the exit code.
+        return {
+            "tool": "clankerprof_compare",
+            "ok": True,
+            "output": args.output,
+            "has_regression": payload["has_regression"],
+        }
+    return payload
 
 
 def run_facts(args: argparse.Namespace) -> dict[str, Any]:
     profile = load_profile(args.profile)
     facts = profile.to_sample_facts()
-    payload = sample_facts_to_jsonable(facts)
     if args.output:
+        payload = sample_facts_to_jsonable(facts)
         write_sample_facts(args.output, facts, pretty=bool(args.pretty))
         return {
             "tool": "clankerprof_facts",
@@ -1140,7 +1436,13 @@ def run_facts(args: argparse.Namespace) -> dict[str, Any]:
             "schema_version": payload["schema_version"],
             "summary": payload["summary"],
         }
-    return cast(dict[str, Any], payload)
+    # stdout carries exactly the artifact bytes: compact by default,
+    # --pretty opt-in, matching clankerprof-rs.
+    return {
+        "tool": "clankerprof_facts",
+        "ok": True,
+        "raw_output": dumps_sample_facts(facts, pretty=bool(args.pretty)),
+    }
 
 
 def register_pprof_commands(subparsers: Any) -> None:
@@ -1259,7 +1561,7 @@ def register_commands(subparsers: Any) -> None:
             ),
         )
         parser.add_argument("--output")
-        parser.add_argument("--top", type=int)
+        parser.add_argument("--top")
         parser.add_argument("--runtime", choices=("generic", "ruby"), default="generic")
         parser.add_argument(
             "--runtime-rules",
@@ -1310,7 +1612,7 @@ def register_commands(subparsers: Any) -> None:
     slices.add_argument("--filter", dest="filters", action="append", default=[])
     slices.add_argument("--collapse", action="append", default=[])
     slices.add_argument("--attribute", action="append", default=[])
-    slices.add_argument("--top", type=int)
+    slices.add_argument("--top")
     slices.add_argument("--by-slice", nargs="?", const="0.1%")
     slices.add_argument("--show-paths", action="store_true")
     slices.add_argument("--no-collapse-native", action="store_true")
@@ -1320,7 +1622,6 @@ def register_commands(subparsers: Any) -> None:
         dest="unattributed_libraries",
         nargs="?",
         const=2**63 - 1,
-        type=int,
     )
     slices.add_argument("--runtime", choices=("generic", "ruby"), default="generic")
     slices.add_argument(
@@ -1349,16 +1650,17 @@ def register_commands(subparsers: Any) -> None:
     )
     compare.add_argument("--before", required=True)
     compare.add_argument("--after", required=True)
-    compare.add_argument("--threshold-abs", type=float, default=2.0)
-    compare.add_argument("--threshold-rel", type=float, default=15.0)
-    compare.add_argument("--focus-slices", nargs="*", default=[])
+    # Strings, not type=float: the strict shared grammar (Rust f64::from_str)
+    # rejects spellings like '1_0' and ' 2 ' that bare float() accepts.
+    compare.add_argument("--threshold-abs", default=2.0)
+    compare.add_argument("--threshold-rel", default=15.0)
+    compare.add_argument("--focus-slices")
     compare.add_argument(
         "--focus-boundaries",
         "--focus-scopes",
         dest="focus_boundaries",
-        nargs="*",
-        default=[],
     )
+    compare.add_argument("--output")
     compare.set_defaults(handler=_contracted(run_compare))
 
     facts = subparsers.add_parser(
@@ -1376,7 +1678,7 @@ def register_commands(subparsers: Any) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _JsonArgumentParser(
         prog="clankerprof",
         description="Language-agnostic pprof analyzer with runtime-specific rule packs.",
     )
@@ -1388,15 +1690,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _emit_json(payload: dict[str, Any], output_path: str | None) -> None:
+def _emit_json(payload: dict[str, Any]) -> None:
     raw_output = payload.pop("raw_output", None)
     if raw_output is not None:
         print(raw_output)
         return
-    rendered = render_json_payload(payload)
-    if output_path:
-        Path(output_path).write_text(rendered + "\n", encoding="utf-8")
-    print(rendered)
+    print(render_json_payload(payload))
 
 
 def _hoist_global_output(argv: Sequence[str]) -> list[str]:
@@ -1423,7 +1722,39 @@ def _hoist_global_output(argv: Sequence[str]) -> list[str]:
             del tokens[index]
             continue
         index += 1
-    return tokens + moved
+    # Insert right after the subcommand token (not at the end) so a local
+    # --output typed later still wins per the last-wins option rule.
+    insert_at = index + 1 if index < len(tokens) else len(tokens)
+    return tokens[:insert_at] + moved + tokens[insert_at:]
+
+
+# Options whose values are filesystem paths. Rust's clap PathBuf parser
+# rejects an explicitly-supplied empty value; Python's argparse accepts it and
+# truthiness guards then treated it as absent — validate centrally instead
+# (message text is engine-specific per the documented usage-error precedent).
+_PATH_OPTION_DESTS = frozenset(
+    {
+        "after",
+        "before",
+        "config",
+        "cpu_attributables",
+        "facts",
+        "output",
+        "profile",
+        "ruby_core_classes",
+        "runtime_rules",
+        "semantic_callers_csv",
+        "slices",
+    }
+)
+
+
+def _reject_empty_path_options(args: argparse.Namespace) -> None:
+    for dest in sorted(_PATH_OPTION_DESTS):
+        value = getattr(args, dest, None)
+        if isinstance(value, str) and not value:
+            flag = "--" + dest.replace("_", "-")
+            raise ValueError(f"{flag} requires a non-empty path.")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1431,8 +1762,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         resolved_argv = list(sys.argv[1:]) if argv is None else list(argv)
         args = parser.parse_args(_hoist_global_output(resolved_argv))
+        _reject_empty_path_options(args)
         payload = cast(dict[str, Any], args.handler(args))
-        _emit_json(payload, None if payload.get("output") else args.output)
+        _emit_json(payload)
         if payload.get("tool") == "clankerprof_compare" and payload.get(
             "has_regression"
         ):
