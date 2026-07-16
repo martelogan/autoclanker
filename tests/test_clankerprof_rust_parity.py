@@ -3905,3 +3905,144 @@ def test_clankerprof_rust_r4_slices_scopes_facts_validation_matches_python(
     null_path = tmp_path / "summary-null.json"
     null_path.write_text(json.dumps(null_summary, sort_keys=True), encoding="utf-8")
     _assert_identical_success(["slices", "--facts", str(null_path)], "summary-null")
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_round5_cluster_p_matches_python(tmp_path: Path) -> None:
+    # R5-01: bottom slice: filters honor the descendant-attribute rescue in
+    # both polarities (a rescued sample matches slice:<name> and is excluded
+    # by !slice:<name>) in both languages.
+    builder = PprofFixtureBuilder.create()
+    request = builder.location(
+        builder.function("RequestHandler#render_response", "/app/http/request.rb")
+    )
+    component = builder.location(
+        builder.function("ComponentRenderer#render", "/app/components/card.rb")
+    )
+    wrapper = builder.location(
+        builder.function("TelemetryWrapper#call", "/app/lib/telemetry.rb")
+    )
+    cache = builder.location(
+        builder.function("CacheClient#get", "/vendor/cache-client-1.2.3/lib/client.rb")
+    )
+    builder.sample((cache, wrapper, component, request), 70)
+    rescue_profile = tmp_path / "rescue.pb"
+    rescue_profile.write_bytes(builder.encode())
+    rescue_slices = tmp_path / "rescue-slices.yml"
+    rescue_slices.write_text(
+        "slices:\n"
+        "  - name: components\n"
+        '    paths: ["app/components/**"]\n'
+        "  - name: instrumentation\n",
+        encoding="utf-8",
+    )
+    rescue_base = [
+        "slices",
+        "--profile",
+        str(rescue_profile),
+        "--slices",
+        str(rescue_slices),
+        "--attribute",
+        "<name:TelemetryWrapper#call,to:instrumentation",
+    ]
+    included = _assert_identical_success(
+        [*rescue_base, "--filter", "slice:instrumentation"], "rescue-include"
+    )
+    assert '"matching_time_ns": 70' in included
+    excluded = _assert_identical_success(
+        [*rescue_base, "--filter", "!slice:instrumentation"], "rescue-exclude"
+    )
+    assert '"matching_time_ns": 0' in excluded
+
+    # R5-04: equal-cost owner functions keep first-seen encounter order under
+    # scopes --top truncation (ZOwner is met before AOwner and must be the
+    # one that survives --top 1 in both languages).
+    builder = PprofFixtureBuilder.create()
+    scope_fn = builder.function(
+        "RequestHandler#render_response", "/app/http/request.rb"
+    )
+    z_owner = builder.location(builder.function("ZOwner", "app/rendering/owner.rb"))
+    a_owner = builder.location(builder.function("AOwner", "app/rendering/owner.rb"))
+    builder.sample((z_owner, builder.location(scope_fn)), 10)
+    builder.sample((a_owner, builder.location(scope_fn)), 10)
+    tie_profile = tmp_path / "tie.pb"
+    tie_profile.write_bytes(builder.encode())
+    tie_config = tmp_path / "tie-scopes.toml"
+    tie_config.write_text(
+        '[cost_kind]\n"App" = "path:app/**"\n\n'
+        '[owner]\n"Rendering" = "path:app/rendering/**"\n\n'
+        "[[scope]]\n"
+        'label = "Request render"\n'
+        'match = "name_eq:RequestHandler#render_response"\n',
+        encoding="utf-8",
+    )
+    tie_stdout = _assert_identical_success(
+        [
+            "scopes",
+            "--profile",
+            str(tie_profile),
+            "--config",
+            str(tie_config),
+            "--top",
+            "1",
+        ],
+        "scope-top-tie-order",
+    )
+    tie_functions = json.loads(tie_stdout)["boundaries"][0]["domains"][0]["files"][0][
+        "functions"
+    ]
+    assert list(tie_functions) == ["ZOwner"]
+
+    # R5-05: integral config by_slice floats beyond i64 fail closed with the
+    # shared strict-grammar envelope instead of Rust clamping and proceeding.
+    overflow_slices = tmp_path / "overflow-slices.yml"
+    overflow_slices.write_text(
+        "slices:\n  - name: app\n    paths:\n      - /srv/app\n", encoding="utf-8"
+    )
+    for label, literal in (("positive", "1.0e20"), ("negative", "-1.0e20")):
+        overflow_config = tmp_path / f"by-slice-{label}.yml"
+        overflow_config.write_text(f"by_slice: {literal}\n", encoding="utf-8")
+        envelope = _assert_identical_envelope(
+            [
+                "slices",
+                "--profile",
+                str(rescue_profile),
+                "--slices",
+                str(overflow_slices),
+                "--config",
+                str(overflow_config),
+            ],
+            f"by-slice-overflow-{label}",
+        )
+        assert json.loads(envelope) == {
+            "ok": False,
+            "error": "--by-slice values must be integers.",
+        }
+
+    # R5-09: quoted core-class CSV fields spanning newlines parse with
+    # csv.reader semantics in both languages.
+    builder = PprofFixtureBuilder.create()
+    weird_leaf = builder.location(builder.function("Weird\nClass#run", "<cfunc>"))
+    parent = builder.location(builder.function("Parent", "/srv/app/parent.rb"))
+    builder.sample((weird_leaf, parent), 10)
+    weird_profile = tmp_path / "weird.pb"
+    weird_profile.write_bytes(builder.encode())
+    weird_csv = tmp_path / "weird-core.csv"
+    weird_csv.write_bytes(b'"Weird\nClass"\n')
+    weird_stdout = _assert_identical_success(
+        [
+            "targets",
+            "--profile",
+            str(weird_profile),
+            "--target",
+            "Parent",
+            "--runtime",
+            "ruby",
+            "--core-classes",
+            str(weird_csv),
+            "--format",
+            "json",
+        ],
+        "multiline-core-class-csv",
+    )
+    assert "Ruby Core (Native)" in weird_stdout

@@ -492,40 +492,106 @@ pub fn ruby_rules(core_classes: BTreeSet<String>, verbose: bool) -> Result<Runti
     load_runtime_rules_str(RUBY_PACK_YAML, "ruby", core_classes, verbose)
 }
 
-/// First CSV field with Python `csv.reader` default-dialect semantics:
-/// a leading `"` opens a quoted field (doubled `""` escapes a quote, the
-/// closing quote ends the field); otherwise the field runs to the first
-/// comma. Raw line splitting kept the quotes and broke categorization.
-fn first_csv_field(line: &str) -> String {
-    match line.strip_prefix('"') {
-        None => line.split(',').next().unwrap_or("").to_string(),
-        Some(rest) => {
-            let mut field = String::new();
-            let mut chars = rest.chars().peekable();
-            while let Some(ch) = chars.next() {
-                if ch == '"' {
-                    if chars.peek() == Some(&'"') {
-                        field.push('"');
-                        chars.next();
-                    } else {
-                        break;
+/// First CSV field of each record with Python `csv.reader` default-dialect
+/// semantics, scanning the whole payload so quoted fields may span record
+/// separators (line splitting tore multiline quoted fields apart). Pinned
+/// empirically against csv.reader: a quote is special only at the exact
+/// start of a field; `""` inside a quoted field unescapes; after a closing
+/// quote another `"` re-enters the quoted field as a literal quote while
+/// any other character appends and continues unquoted (non-strict); an
+/// unterminated quote runs to end of input; the `#` comment check applies
+/// after unquoting and trimming.
+fn core_classes_from_csv(payload: &str) -> BTreeSet<String> {
+    enum State {
+        StartField,
+        InField,
+        InQuoted,
+        QuoteInQuoted,
+    }
+    let mut values = BTreeSet::new();
+    let mut chars = payload.chars().peekable();
+    while chars.peek().is_some() {
+        let mut first_field = String::new();
+        let mut in_first_field = true;
+        let mut state = State::StartField;
+        while let Some(ch) = chars.next() {
+            let record_break = match state {
+                State::StartField => match ch {
+                    '"' => {
+                        state = State::InQuoted;
+                        false
                     }
-                } else {
-                    field.push(ch);
+                    ',' => {
+                        in_first_field = false;
+                        false
+                    }
+                    '\n' | '\r' => true,
+                    other => {
+                        if in_first_field {
+                            first_field.push(other);
+                        }
+                        state = State::InField;
+                        false
+                    }
+                },
+                State::InField => match ch {
+                    ',' => {
+                        in_first_field = false;
+                        state = State::StartField;
+                        false
+                    }
+                    '\n' | '\r' => true,
+                    other => {
+                        if in_first_field {
+                            first_field.push(other);
+                        }
+                        false
+                    }
+                },
+                State::InQuoted => {
+                    if ch == '"' {
+                        state = State::QuoteInQuoted;
+                    } else if in_first_field {
+                        first_field.push(ch);
+                    }
+                    false
                 }
+                State::QuoteInQuoted => match ch {
+                    '"' => {
+                        if in_first_field {
+                            first_field.push('"');
+                        }
+                        state = State::InQuoted;
+                        false
+                    }
+                    ',' => {
+                        in_first_field = false;
+                        state = State::StartField;
+                        false
+                    }
+                    '\n' | '\r' => true,
+                    other => {
+                        if in_first_field {
+                            first_field.push(other);
+                        }
+                        state = State::InField;
+                        false
+                    }
+                },
+            };
+            if record_break {
+                if ch == '\r' && chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                break;
             }
-            field
+        }
+        let value = first_field.trim().to_string();
+        if !value.is_empty() && !value.starts_with('#') {
+            values.insert(value);
         }
     }
-}
-
-fn core_classes_from_csv(payload: &str) -> BTreeSet<String> {
-    payload
-        .lines()
-        .map(first_csv_field)
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty() && !value.starts_with('#'))
-        .collect()
+    values
 }
 
 pub fn load_default_ruby_core_classes() -> BTreeSet<String> {
@@ -554,6 +620,29 @@ mod tests {
             .map(ToString::to_string)
             .collect();
         assert_eq!(parsed, expected);
+    }
+
+    #[test]
+    fn core_classes_csv_record_scanning_matches_python_csv_reader() {
+        // Every expectation below is pinned against CPython csv.reader
+        // (default dialect, file opened newline=""), the documented contract.
+        // Quoted fields span newlines; quotes are special only at exact
+        // field start; after a closing quote a bare char continues the
+        // field unquoted while another quote re-enters the quoted state.
+        let cases: [(&str, &[&str]); 7] = [
+            ("\"Weird\nClass\"\n", &["Weird\nClass"]),
+            ("\"A\r\nB\"\r\nPlain\r\n", &["A\r\nB", "Plain"]),
+            ("\"a\"b,c\n", &["ab"]),
+            ("a\"b\"c,d\n", &["a\"b\"c"]),
+            ("\"a\"\",c\n", &["a\",c"]),
+            ("\"unterminated", &["unterminated"]),
+            ("x,\"quoted\nsecond\"\ny\n", &["x", "y"]),
+        ];
+        for (payload, expected) in cases {
+            let parsed = core_classes_from_csv(payload);
+            let expected: BTreeSet<String> = expected.iter().map(ToString::to_string).collect();
+            assert_eq!(parsed, expected, "payload {payload:?}");
+        }
     }
 
     #[test]

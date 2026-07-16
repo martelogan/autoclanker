@@ -220,7 +220,10 @@ pub struct DomainFileStats {
     pub filename: String,
     pub cpu_time: TimeNs,
     pub sample_count: usize,
-    pub functions: BTreeMap<String, FunctionMetrics>,
+    // Ranked truncation under scopes --top; ties break first-seen like
+    // Python dicts (a BTreeMap here alphabetized equal-cost functions
+    // before truncation — invisible in full output, wrong under --top).
+    pub functions: IndexMap<String, FunctionMetrics>,
     // Ranked arrays in scope output; ties break first-seen.
     pub cost_kinds: IndexMap<String, CallerMetrics>,
     pub caller_leaf_pairs: IndexMap<(String, String), CallerMetrics>,

@@ -328,8 +328,10 @@ Rendering rules shared by both implementations:
   eligible frame exists in the whole stack.
 - Core-class CSV files (packaged or `--core-classes` overrides) parse their
   first field with CSV semantics (Python `csv.reader` default dialect):
-  quoted fields unwrap, doubled quotes unescape, and quoted commas stay in
-  the field — identical class sets in both implementations.
+  quoted fields unwrap, doubled quotes unescape, quoted commas stay in the
+  field, and quoted fields may span newlines (records are scanned across the
+  whole payload, never split at line boundaries first) — identical class
+  sets in both implementations.
 
 Parents emit in first-seen encounter order (the order the analysis first
 attributed a sample to them) in every row-oriented format — `csv`,

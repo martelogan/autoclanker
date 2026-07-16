@@ -1040,9 +1040,15 @@ fn optional_config_by_slice(
                 Ok(Some(unsigned.to_string()))
             } else if let Some(float) = number.as_f64() {
                 if float.fract() == 0.0 && float.is_finite() {
-                    Ok(Some(
-                        (float.clamp(i64::MIN as f64, i64::MAX as f64) as i64).to_string(),
-                    ))
+                    // Match Python's str(int(value)): the exact integer
+                    // spelling, so values outside i64 fail the strict
+                    // --by-slice parse closed instead of clamping to an
+                    // i64 endpoint and silently proceeding.
+                    if float == 0.0 {
+                        Ok(Some("0".to_string()))
+                    } else {
+                        Ok(Some(format!("{float:.0}")))
+                    }
                 } else {
                     Ok(Some(format!("{float}%")))
                 }
@@ -1301,6 +1307,21 @@ mod tests {
         }));
         assert_eq!(optional_config_int(&map, "top"), Ok(Some(3)));
         assert_eq!(optional_config_by_slice(&map), Ok(Some("0.5%".to_string())));
+        // Integral floats keep Python's str(int(value)) exact spelling, so
+        // out-of-i64-range values fail the strict --by-slice parse closed
+        // downstream instead of clamping to an i64 endpoint (R5-05).
+        for (raw, spelled) in [
+            (serde_json::json!(1.0e20), "100000000000000000000"),
+            (serde_json::json!(-1.0e20), "-100000000000000000000"),
+            (serde_json::json!(5.0), "5"),
+            (serde_json::json!(-0.0), "0"),
+        ] {
+            let big = config(serde_json::json!({ "by_slice": raw }));
+            assert_eq!(
+                optional_config_by_slice(&big),
+                Ok(Some(spelled.to_string()))
+            );
+        }
         assert_eq!(optional_config_unattributed(&map), Ok(Some(i64::MAX)));
         let bad = config(serde_json::json!({"top": true}));
         assert_eq!(

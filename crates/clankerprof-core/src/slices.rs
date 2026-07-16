@@ -581,6 +581,27 @@ fn filters_match_sample(
                 .any(|raw_filter| filter_matches_stack(raw_filter, stack, options, bottom)))
 }
 
+// Mirror of Python's `_sample_has_descendant_attribute_for_slice`: a sample
+// is rescued into a slice when any descendant attribute rule targeting that
+// slice matches any frame in the stack.
+fn sample_has_descendant_attribute_for_slice(
+    stack: &[Frame],
+    slice_name: &str,
+    options: &SliceAnalysisOptions,
+) -> bool {
+    options.attributes.iter().any(|rule| {
+        rule.descendant
+            && rule.target_slice == slice_name
+            && stack.iter().any(|frame| {
+                matches_frame_filter(
+                    frame,
+                    &format!("{}:{}", rule.key, rule.value),
+                    &options.runtime_rules,
+                )
+            })
+    })
+}
+
 fn filter_matches_stack(
     raw_filter: &str,
     stack: &[Frame],
@@ -589,6 +610,18 @@ fn filter_matches_stack(
 ) -> bool {
     let (inverted, descendant, body) = parse_filter_prefixes(raw_filter);
     let (key, value) = body.split_once(':').unwrap_or(("", ""));
+    if key == "slice" && !descendant {
+        // Bottom slice: filters evaluate the sample's EFFECTIVE attribution
+        // in both polarities: a sample rescued into a slice by a descendant
+        // attribute rule matches slice:<name> and is excluded by
+        // !slice:<name>. (Collapse slice: rules deliberately skip the
+        // rescue — the documented carve-out.)
+        let mut matched = slice_for_frame(bottom, stack, options, false) == value;
+        if !matched {
+            matched = sample_has_descendant_attribute_for_slice(stack, value, options);
+        }
+        return if inverted { !matched } else { matched };
+    }
     let frames: Vec<&Frame> = if descendant {
         stack.iter().collect()
     } else {
@@ -707,7 +740,81 @@ fn is_gc_function(name: &str) -> bool {
 
 #[cfg(test)]
 mod limit_tests {
-    use super::{apply_python_limit, metadata_value, parse_by_slice_threshold};
+    use super::{
+        apply_python_limit, filter_matches_stack, metadata_value, parse_by_slice_threshold,
+        AttributionRule, Frame, SliceAnalysisOptions, SliceDefinition,
+    };
+    use std::collections::BTreeMap;
+
+    fn test_frame(name: &str, filename: &str) -> Frame {
+        Frame {
+            location_id: 0,
+            function_id: 0,
+            name: name.to_string(),
+            filename: filename.to_string(),
+            line: 0,
+            location_is_folded: false,
+        }
+    }
+
+    #[test]
+    fn bottom_slice_filters_honor_descendant_attribute_rescue() {
+        // Mirrors the Python reference (R5-01): a sample rescued into a
+        // slice by a descendant attribute rule matches slice:<name> and is
+        // excluded by !slice:<name>, in both polarities.
+        let stack = vec![
+            test_frame(
+                "CacheClient#get",
+                "/vendor/cache-client-1.2.3/lib/client.rb",
+            ),
+            test_frame("TelemetryWrapper#call", "/app/lib/telemetry.rb"),
+            test_frame("ComponentRenderer#render", "/app/components/card.rb"),
+            test_frame("RequestHandler#render_response", "/app/http/request.rb"),
+        ];
+        let options = SliceAnalysisOptions {
+            slices: vec![SliceDefinition {
+                name: "instrumentation".to_string(),
+                path_patterns: Vec::new(),
+                is_default: false,
+                metadata: BTreeMap::new(),
+            }],
+            attributes: vec![AttributionRule {
+                key: "name".to_string(),
+                value: "TelemetryWrapper#call".to_string(),
+                target_slice: "instrumentation".to_string(),
+                descendant: true,
+            }],
+            ..SliceAnalysisOptions::default()
+        };
+        let bottom = &stack[0];
+        assert!(filter_matches_stack(
+            "slice:instrumentation",
+            &stack,
+            &options,
+            bottom
+        ));
+        assert!(!filter_matches_stack(
+            "!slice:instrumentation",
+            &stack,
+            &options,
+            bottom
+        ));
+        // Without the rescue rule both polarities flip back.
+        let mut no_rescue = options.clone();
+        no_rescue.attributes.clear();
+        assert!(!filter_matches_stack(
+            "slice:instrumentation",
+            &stack,
+            &no_rescue,
+            bottom
+        ));
+        assert!(filter_matches_stack(
+            "!slice:instrumentation",
+            &stack,
+            &no_rescue,
+            bottom
+        ));
+    }
 
     #[test]
     fn python_limit_keeps_head_for_non_negative_and_drops_tail_for_negative() {
