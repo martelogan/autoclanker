@@ -237,6 +237,14 @@ pub fn validate_slice_definitions(slices: &[SliceDefinition]) -> Result<(), Stri
                 definition.name, RESERVED_SLICE_NAMES_MESSAGE
             ));
         }
+        // The compare focus grammar splits values on ','; a comma-bearing
+        // row name would make focusing it silently gate the split parts.
+        if definition.name.contains(',') {
+            return Err(format!(
+                "Slice config declares comma-bearing slice name: {}. Slice names must not contain ','.",
+                definition.name
+            ));
+        }
     }
     Ok(())
 }
@@ -784,8 +792,8 @@ fn is_gc_function(name: &str) -> bool {
 mod limit_tests {
     use super::{
         analyze_slice_facts, apply_python_limit, filter_matches_stack, metadata_value,
-        parse_by_slice_threshold, AttributionRule, Frame, ProfileFacts, SliceAnalysisOptions,
-        SliceDefinition, RESERVED_SLICE_NAMES,
+        parse_by_slice_threshold, validate_slice_definitions, AttributionRule, Frame, ProfileFacts,
+        SliceAnalysisOptions, SliceDefinition, RESERVED_SLICE_NAMES,
     };
     use std::collections::BTreeMap;
 
@@ -985,5 +993,21 @@ mod limit_tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn validate_rejects_comma_bearing_slice_names() {
+        // The compare focus grammar splits values on ','.
+        let definitions = vec![SliceDefinition {
+            name: "A,B".to_string(),
+            path_patterns: vec!["/srv".to_string()],
+            is_default: false,
+            metadata: BTreeMap::new(),
+        }];
+        assert_eq!(
+            validate_slice_definitions(&definitions).unwrap_err(),
+            "Slice config declares comma-bearing slice name: A,B. \
+             Slice names must not contain ','."
+        );
     }
 }

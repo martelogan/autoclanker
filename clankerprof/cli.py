@@ -159,6 +159,28 @@ def _load_projection_input(
     return load_profile(profile_path).to_sample_facts()
 
 
+# Exactly the keys run_slices consumes (mirrored in the Rust loader): the
+# config is fixed-shape, so a typo (filterz) must never silently disable
+# the option it meant to set — the scope-config unknown-key principle.
+_SLICES_CONFIG_KEYS = frozenset(
+    {
+        "profile",
+        "facts",
+        "slices",
+        "top",
+        "by_slice",
+        "show_paths",
+        "no_collapse_native",
+        "unattributed_gems",
+        "unattributed_libraries",
+        "filters",
+        "filter",
+        "collapse",
+        "attribute",
+    }
+)
+
+
 def _load_slices_config(path: str | None) -> dict[str, object]:
     if path is None:
         return {}
@@ -169,7 +191,11 @@ def _load_slices_config(path: str | None) -> dict[str, object]:
         payload = parse_strict_yaml(config_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("Slice config file must be a YAML object.")
-    return cast(dict[str, object], payload)
+    config = cast(dict[str, object], payload)
+    unknown = sorted(set(config) - _SLICES_CONFIG_KEYS)
+    if unknown:
+        raise ValueError(f"Unknown slice config key: {unknown[0]}.")
+    return config
 
 
 def _string_array(payload: dict[str, object], key: str) -> tuple[str, ...]:
@@ -978,6 +1004,10 @@ def _load_boundaries(
             or raw_boundary.get("function")
             or _boundary_label_fallback(raw_predicates)
         )
+        # The compare focus grammar splits values on ','; a comma-bearing
+        # row name would make focusing it silently gate the split parts.
+        if "," in label:
+            raise ValueError(f"{section_name} label must not contain ','.")
         if label in seen_names:
             raise ValueError(f"Duplicate boundary label: {label}")
         seen_names.add(label)

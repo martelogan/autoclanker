@@ -5418,3 +5418,178 @@ def test_clankerprof_rust_round9_cluster_y_matches_python(tmp_path: Path) -> Non
                 "its profile-order position 0."
             ),
         }
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_round10_cluster_z_matches_python(tmp_path: Path) -> None:
+    from clankerprof.facts import dumps_sample_facts
+
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    builder.sample((leaf,), 7)
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(
+        dumps_sample_facts(decode_profile_bytes(builder.encode()).to_sample_facts()),
+        encoding="utf-8",
+    )
+
+    # R10-01: the comma is reserved by the focus grammar — producers reject
+    # comma-bearing slice names and scope labels at validation.
+    comma_slices = tmp_path / "comma-slices.yml"
+    comma_slices.write_text(
+        'slices:\n  - name: "A,B"\n    paths: [/srv/**]\n', encoding="utf-8"
+    )
+    envelope = _assert_identical_envelope(
+        ["slices", "--facts", str(facts_path), "--slices", str(comma_slices)],
+        "comma-slice-name",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": (
+            "Slice config declares comma-bearing slice name: A,B. "
+            "Slice names must not contain ','."
+        ),
+    }
+    comma_scope = tmp_path / "comma-scope.yml"
+    comma_scope.write_text(
+        'cost_kind:\n  Work: "name:Leaf"\nscope:\n  - function: Leaf\n'
+        '    label: "S,T"\n',
+        encoding="utf-8",
+    )
+    envelope = _assert_identical_envelope(
+        ["scopes", "--facts", str(facts_path), "--config", str(comma_scope)],
+        "comma-scope-label",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "scope label must not contain ','.",
+    }
+
+    # R10-01 backstop: focus against a pre-existing comma-named report fails
+    # closed instead of silently gating the split parts.
+    before_report = tmp_path / "comma-before.json"
+    after_report = tmp_path / "comma-after.json"
+    before_report.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [
+                    {"name": "A", "pct": 1.0},
+                    {"name": "B", "pct": 1.0},
+                    {"name": "A,B", "pct": 10.0},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    after_report.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [
+                    {"name": "A", "pct": 1.0},
+                    {"name": "B", "pct": 1.0},
+                    {"name": "A,B", "pct": 20.0},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    envelope = _assert_identical_envelope(
+        [
+            "compare",
+            "--before",
+            str(before_report),
+            "--after",
+            str(after_report),
+            "--focus-slices",
+            "A,B",
+        ],
+        "comma-focus-backstop",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Focus filtering rejects comma-bearing row name: 'A,B'.",
+    }
+    # Unfocused, the comma-named row still gates normally in both languages.
+    unfocused_argv = [
+        "compare",
+        "--before",
+        str(before_report),
+        "--after",
+        str(after_report),
+    ]
+    python_run = _run_python_cli_raw(unfocused_argv)
+    rust_run = _run_rust_cli_raw(unfocused_argv)
+    assert python_run.returncode == 2, python_run.stderr
+    assert rust_run.returncode == 2, rust_run.stderr
+    assert python_run.stdout == rust_run.stdout
+    assert json.loads(python_run.stdout)["has_regression"] is True
+
+    # R10-02: the slice-options config is fixed-shape.
+    typo_config = tmp_path / "typo-config.yml"
+    typo_config.write_text("filterz:\n  - name:Never\n", encoding="utf-8")
+    envelope = _assert_identical_envelope(
+        ["slices", "--facts", str(facts_path), "--config", str(typo_config)],
+        "slice-config-typo",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Unknown slice config key: filterz.",
+    }
+
+    # R10-03/R10-04 (Rust-only report surface): report applies the standalone
+    # sections' validation — empty config errors exactly like targets, and
+    # --top is validated even without a scopes section.
+    empty_config = tmp_path / "empty-config.json"
+    empty_config.write_text("{}", encoding="utf-8")
+    rust_report = _run_rust_cli_raw(
+        ["report", "--facts", str(facts_path), "--config", str(empty_config)]
+    )
+    rust_targets = _run_rust_cli_raw(
+        ["targets", "--facts", str(facts_path), "--config", str(empty_config)]
+    )
+    assert rust_report.returncode == 2, rust_report.stderr
+    assert rust_targets.returncode == 2, rust_targets.stderr
+    assert rust_report.stderr == rust_targets.stderr
+    assert json.loads(rust_report.stderr) == {
+        "ok": False,
+        "error": "--config or --target is required.",
+    }
+    target_config = tmp_path / "target-config.json"
+    target_config.write_text(json.dumps({"Leaf": {}}), encoding="utf-8")
+    rust_bad_top = _run_rust_cli_raw(
+        [
+            "report",
+            "--facts",
+            str(facts_path),
+            "--config",
+            str(target_config),
+            "--top",
+            "junk",
+        ]
+    )
+    assert rust_bad_top.returncode == 2, rust_bad_top.stderr
+    assert json.loads(rust_bad_top.stderr) == {
+        "ok": False,
+        "error": "--top values must be integers.",
+    }
+
+    # R10-05: field numbers above 2^29 - 1 are decode errors; the maximum
+    # legal field number still skips as an unknown field.
+    over_max = tmp_path / "over-max-field.pb"
+    over_max.write_bytes(b"\x80\x80\x80\x80\x10\x00")
+    envelope = _assert_identical_envelope(
+        ["facts", "--profile", str(over_max)], "over-max-field"
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Illegal protobuf field number 536870912.",
+    }
+    max_legal = tmp_path / "max-legal-field.pb"
+    max_legal.write_bytes(b"\xf8\xff\xff\xff\x0f\x00")
+    _assert_identical_success(
+        ["facts", "--profile", str(max_legal)], "max-legal-field"
+    )

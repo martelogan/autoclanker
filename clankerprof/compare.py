@@ -187,6 +187,16 @@ def compare_slice_json(
     # A focus name matching zero rows would silently disable gating for it,
     # exactly like a non-finite threshold; the union keeps focusing a row
     # that was added or removed between reports legal.
+    # Focus values are comma-split, so a comma-bearing row name can never be
+    # focused directly; pre-existing reports with such names fail closed
+    # instead of silently gating the split parts (producers now reject them).
+    if resolved.focus_slices:
+        comma_named = sorted(name for name in names if "," in name)
+        if comma_named:
+            raise ValueError(
+                "Focus filtering rejects comma-bearing row name: "
+                f"'{comma_named[0]}'."
+            )
     unknown_focus = sorted(resolved.focus_slices - set(names))
     if unknown_focus:
         raise ValueError(
@@ -354,6 +364,15 @@ def compare_boundary_json(
     after_rows = _boundary_rows(after)
     row_keys = set(before_rows) | set(after_rows)
     boundary_names = {boundary for (_, boundary, _) in row_keys}
+    # Same comma backstop as the slice path: focus values are comma-split,
+    # so comma-bearing boundary names fail closed instead of gating parts.
+    if resolved.focus_boundaries:
+        comma_named = sorted(name for name in boundary_names if "," in name)
+        if comma_named:
+            raise ValueError(
+                "Focus filtering rejects comma-bearing row name: "
+                f"'{comma_named[0]}'."
+            )
     unknown_focus = sorted(resolved.focus_boundaries - boundary_names)
     if unknown_focus:
         raise ValueError(

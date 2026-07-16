@@ -88,6 +88,13 @@ impl<'a> Reader<'a> {
                 "Illegal protobuf field number 0.".to_string(),
             ));
         }
+        // Tags must fit uint32, capping field numbers at 2^29 - 1; conformant
+        // serializers cannot emit anything above it, so it is malformed input.
+        if field > 0x1FFF_FFFF {
+            return Err(PprofDecodeError::InvalidProtobuf(format!(
+                "Illegal protobuf field number {field}."
+            )));
+        }
         Ok((field, (key & 0x07) as u8))
     }
 
@@ -553,6 +560,18 @@ mod group_skip_tests {
         nested.extend(base_profile());
         let profile = decode_profile_bytes(&nested).expect("nested group skips");
         assert_eq!(profile.samples.len(), 1);
+    }
+
+    #[test]
+    fn over_maximum_field_numbers_are_decode_errors() {
+        // Field number 2^29 is one above protobuf's tag maximum.
+        let over = decode_profile_bytes(&[0x80, 0x80, 0x80, 0x80, 0x10, 0x00])
+            .expect_err("field 2^29 is illegal");
+        assert_eq!(over.to_string(), "Illegal protobuf field number 536870912.");
+        // The maximum legal field number (2^29 - 1) still skips as unknown.
+        let profile = decode_profile_bytes(&[0xf8, 0xff, 0xff, 0xff, 0x0f, 0x00])
+            .expect("max legal field skips");
+        assert_eq!(profile.samples.len(), 0);
     }
 
     #[test]

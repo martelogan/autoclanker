@@ -7821,3 +7821,120 @@ def test_clankerprof_facts_v2_sample_index_must_match_position(
             f"Sample fact sample_index {expected_index} does not match "
             f"its profile-order position {position}."
         )
+
+
+def test_clankerprof_comma_names_rejected_and_focus_fails_closed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from clankerprof.facts import dumps_sample_facts
+
+    builder = PprofFixtureBuilder.create()
+    builder.sample((builder.location(builder.function("Leaf", "/srv/l.py")),), 7)
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(
+        dumps_sample_facts(decode_profile_bytes(builder.encode()).to_sample_facts()),
+        encoding="utf-8",
+    )
+
+    # Producers reject comma-bearing names: the focus grammar splits on ','.
+    comma_slices = tmp_path / "slices.yml"
+    comma_slices.write_text(
+        'slices:\n  - name: "A,B"\n    paths: [/srv/**]\n', encoding="utf-8"
+    )
+    exit_code = clankerprof_main(
+        ["slices", "--facts", str(facts_path), "--slices", str(comma_slices)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == (
+        "Slice config declares comma-bearing slice name: A,B. "
+        "Slice names must not contain ','."
+    )
+    comma_scope = tmp_path / "scope.yml"
+    comma_scope.write_text(
+        'cost_kind:\n  Work: "name:Leaf"\nscope:\n  - function: Leaf\n'
+        '    label: "S,T"\n',
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["scopes", "--facts", str(facts_path), "--config", str(comma_scope)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "scope label must not contain ','."
+
+    # Backstop: focus against a pre-existing comma-named report fails closed
+    # instead of silently gating the split parts.
+    report = {
+        "tool": "clankerprof_slices",
+        "summary": {"total_time_ns": 100},
+        "slices": [
+            {"name": "A", "pct": 1.0},
+            {"name": "B", "pct": 1.0},
+            {"name": "A,B", "pct": 10.0},
+        ],
+    }
+    before_path = tmp_path / "before.json"
+    before_path.write_text(json.dumps(report), encoding="utf-8")
+    after = json.loads(json.dumps(report))
+    after["slices"][2]["pct"] = 20.0
+    after_path = tmp_path / "after.json"
+    after_path.write_text(json.dumps(after), encoding="utf-8")
+    exit_code = clankerprof_main(
+        [
+            "compare",
+            "--before",
+            str(before_path),
+            "--after",
+            str(after_path),
+            "--focus-slices",
+            "A,B",
+        ]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == (
+        "Focus filtering rejects comma-bearing row name: 'A,B'."
+    )
+    # Unfocused, the comma-named row still gates normally.
+    exit_code = clankerprof_main(
+        ["compare", "--before", str(before_path), "--after", str(after_path)]
+    )
+    assert exit_code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["has_regression"] is True
+
+
+def test_clankerprof_slice_config_rejects_unknown_keys(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from clankerprof.facts import dumps_sample_facts
+
+    builder = PprofFixtureBuilder.create()
+    builder.sample((builder.location(builder.function("Leaf", "/srv/l.py")),), 7)
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(
+        dumps_sample_facts(decode_profile_bytes(builder.encode()).to_sample_facts()),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.yml"
+    config_path.write_text("filterz:\n  - name:Never\n", encoding="utf-8")
+    exit_code = clankerprof_main(
+        ["slices", "--facts", str(facts_path), "--config", str(config_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Unknown slice config key: filterz."
+
+
+def test_clankerprof_decoder_rejects_over_maximum_field_numbers() -> None:
+    # Field number 2^29 is one above protobuf's tag maximum: a decode error,
+    # never a silent skip. The maximum legal field number still skips.
+    with pytest.raises(
+        PprofDecodeError, match=r"Illegal protobuf field number 536870912\."
+    ):
+        decode_profile_bytes(b"\x80\x80\x80\x80\x10\x00")
+    profile = decode_profile_bytes(b"\xf8\xff\xff\xff\x0f\x00")
+    assert profile.to_sample_facts().samples == ()

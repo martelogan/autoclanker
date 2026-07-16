@@ -99,6 +99,16 @@ pub fn compare_slice_json(
         .chain(after_slices.keys())
         .cloned()
         .collect();
+    // Focus values are comma-split, so a comma-bearing row name can never be
+    // focused directly; pre-existing reports with such names fail closed
+    // instead of silently gating the split parts (producers now reject them).
+    if !options.focus_slices.is_empty() {
+        if let Some(comma_named) = names.iter().find(|name| name.contains(',')) {
+            return Err(format!(
+                "Focus filtering rejects comma-bearing row name: '{comma_named}'."
+            ));
+        }
+    }
     // A focus name matching zero rows would silently disable gating for it,
     // exactly like a non-finite threshold; the union keeps focusing a row
     // that was added or removed between reports legal. BTreeSet iteration is
@@ -430,6 +440,15 @@ pub fn compare_boundary_json(
     let after_rows = boundary_rows(after)?;
     let keys: BTreeSet<_> = before_rows.keys().chain(after_rows.keys()).collect();
     let boundary_names: BTreeSet<&String> = keys.iter().map(|(_, boundary, _)| boundary).collect();
+    // Same comma backstop as the slice path: focus values are comma-split,
+    // so comma-bearing boundary names fail closed instead of gating parts.
+    if !options.focus_boundaries.is_empty() {
+        if let Some(comma_named) = boundary_names.iter().find(|name| name.contains(',')) {
+            return Err(format!(
+                "Focus filtering rejects comma-bearing row name: '{comma_named}'."
+            ));
+        }
+    }
     let unknown_focus: Vec<String> = options
         .focus_boundaries
         .iter()

@@ -363,6 +363,13 @@ def validate_slice_definitions(slices: Sequence[SliceDefinition]) -> None:
                 f"Slice config declares reserved pseudo-slice name: {item.name}. "
                 + RESERVED_SLICE_NAMES_MESSAGE
             )
+        # The compare focus grammar splits values on ','; a comma-bearing
+        # row name would make focusing it silently gate the split parts.
+        if "," in item.name:
+            raise ValueError(
+                f"Slice config declares comma-bearing slice name: {item.name}. "
+                "Slice names must not contain ','."
+            )
 
 
 def analyze_slice_facts(

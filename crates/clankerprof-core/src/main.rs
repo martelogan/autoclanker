@@ -417,6 +417,9 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
             "report requires at least one of --config, --slices, or --scopes-config.".to_string(),
         );
     }
+    // Integer-grammar validation is unconditional: a malformed --top must
+    // error even when no scopes section consumes it (SPEC integer-flag rule).
+    let top = int64_flag(args.top.as_deref(), TOP_INT_MESSAGE)?;
     let runtime_rules = resolve_runtime_rules(
         &args.runtime,
         args.runtime_rules.as_ref(),
@@ -440,6 +443,11 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
         let config_payload =
             std::fs::read_to_string(config_path).map_err(|error| error.to_string())?;
         let config = parse_target_config_json(&config_payload)?;
+        // Same nonempty-config rule as the targets subcommand; the report
+        // sections must not be more lenient than their standalone twins.
+        if config.is_empty() {
+            return Err("--config or --target is required.".to_string());
+        }
         let options = TargetAnalysisOptions {
             runtime_rules: runtime_rules.clone(),
             ..TargetAnalysisOptions::default()
@@ -466,10 +474,7 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
         let options = load_boundary_options(scopes_config_path, runtime_rules)?;
         payload.insert(
             "scopes".to_string(),
-            render_boundary_json(
-                &analyze_boundary_facts(&facts, &options)?,
-                int64_flag(args.top.as_deref(), TOP_INT_MESSAGE)?,
-            ),
+            render_boundary_json(&analyze_boundary_facts(&facts, &options)?, top),
         );
     }
     clankerprof_core::targets::take_pattern_error()?;
@@ -903,6 +908,25 @@ fn path_string(path: &PathBuf) -> String {
     path.to_string_lossy().into_owned()
 }
 
+/// Exactly the keys run_slices consumes (mirrored in the Python loader): the
+/// config is fixed-shape, so a typo (filterz) must never silently disable
+/// the option it meant to set — the scope-config unknown-key principle.
+const SLICES_CONFIG_KEYS: [&str; 13] = [
+    "profile",
+    "facts",
+    "slices",
+    "top",
+    "by_slice",
+    "show_paths",
+    "no_collapse_native",
+    "unattributed_gems",
+    "unattributed_libraries",
+    "filters",
+    "filter",
+    "collapse",
+    "attribute",
+];
+
 /// Mirror of Python `_load_slices_config`: TOML by suffix, YAML otherwise,
 /// root must be a mapping. Non-string YAML keys are dropped, matching how the
 /// Python dict is only ever read through string keys.
@@ -924,7 +948,18 @@ fn load_slices_config(
         yaml_to_json(parsed)
     };
     match value {
-        serde_json::Value::Object(map) => Ok(map),
+        serde_json::Value::Object(map) => {
+            let mut unknown: Vec<&str> = map
+                .keys()
+                .map(String::as_str)
+                .filter(|key| !SLICES_CONFIG_KEYS.contains(key))
+                .collect();
+            unknown.sort_unstable();
+            if let Some(first) = unknown.first() {
+                return Err(format!("Unknown slice config key: {first}."));
+            }
+            Ok(map)
+        }
         _ => Err(MESSAGE.to_string()),
     }
 }
@@ -1507,5 +1542,60 @@ mod tests {
     fn hoist_rejects_global_output_without_a_path() {
         let error = hoist_global_output(args(&["bin", "--output"])).expect_err("must fail");
         assert_eq!(error, "--output requires a path argument.");
+    }
+}
+
+#[cfg(test)]
+mod report_validation_tests {
+    use super::{run_report, ReportArgs};
+    use std::path::PathBuf;
+
+    fn report_args() -> ReportArgs {
+        ReportArgs {
+            profile: None,
+            facts: None,
+            config: None,
+            slices: None,
+            scopes_config: None,
+            include_facts: false,
+            top: None,
+            runtime: "generic".to_string(),
+            runtime_rules: None,
+            core_classes: None,
+            output: None,
+        }
+    }
+
+    #[test]
+    fn report_validates_top_before_any_section() {
+        // The hoisted integer-grammar check fires before file IO, so no
+        // fixture files are needed even with a config path supplied.
+        let mut args = report_args();
+        args.config = Some(PathBuf::from("/nonexistent-config.json"));
+        args.top = Some("junk".to_string());
+        assert_eq!(
+            run_report(args).unwrap_err(),
+            "--top values must be integers."
+        );
+    }
+
+    #[test]
+    fn report_rejects_an_empty_target_config_like_targets() {
+        let dir = std::env::temp_dir().join(format!(
+            "clankerprof-report-validation-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let profile = dir.join("profile.pb");
+        // string table [""], one sample value 7 — a minimal valid profile.
+        std::fs::write(&profile, [0x32, 0x00, 0x12, 0x02, 0x10, 0x07]).expect("write profile");
+        let config = dir.join("empty.json");
+        std::fs::write(&config, "{}").expect("write config");
+        let mut args = report_args();
+        args.profile = Some(profile);
+        args.config = Some(config);
+        let error = run_report(args).unwrap_err();
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(error, "--config or --target is required.");
     }
 }

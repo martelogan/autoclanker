@@ -42,9 +42,11 @@ Signed pprof `int64` fields (sample values, line numbers, start lines,
 The decoder is strict about malformed input: varints longer than 10 bytes,
 length-delimited fields extending past the stream, truncated fixed32/64
 fields (even in skipped unknown fields), illegal field number zero in any
-message, and invalid UTF-8 in the string table are decode errors, never
-silently accepted (shared errors: "Illegal protobuf field number 0.",
-"Invalid UTF-8 in pprof string table."). Varint bits past 63 drop, per
+message, field numbers above protobuf's maximum of `2^29 - 1` (tags must fit
+uint32; no conformant serializer can emit them), and invalid UTF-8 in the
+string table are decode errors, never silently accepted (shared errors:
+"Illegal protobuf field number 0.", "Illegal protobuf field number
+<number>.", "Invalid UTF-8 in pprof string table."). Varint bits past 63 drop, per
 protobuf 64-bit semantics. Deprecated group fields (wire types 3/4) in
 unknown fields are legal protobuf: both decoders skip a balanced group,
 nested fields included, while a mismatched or unmatched group end, a
@@ -705,7 +707,10 @@ silently merge with the implicit unmatched-sample fallback row, absorbing
 samples its paths never matched under the configured metadata. The reservation applies equally to `--attribute` targets,
 including virtual targets under `--allow-virtual-attribute-slices` — the
 opt-in waives only the must-name-a-configured-slice rule, never the
-reservation. Attribute rule predicates require both a key and a non-empty
+reservation. Slice names and scope/boundary labels must not contain `,`
+(the focus grammar's separator — see the compare contract); both
+implementations reject comma-bearing names at validation. Attribute rule
+predicates require both a key and a non-empty
 value (`<key>:<value>`); an empty value would substring-match every frame
 and silently reassign all ownership. The `default` value must be a YAML boolean — absent and `null` read
 as false, and any other type is a validation error in both languages
@@ -796,6 +801,15 @@ focusing a row that was added or removed between reports legal); an unmatched
 name is a validation error in both implementations — a zero-match focus set
 would silently disable gating, exactly like a non-finite threshold.
 
+The comma is reserved by the focus grammar: slice names and scope/boundary
+labels must not contain `,` (producers reject them at validation), because a
+comma-bearing row name could never be focused — the split parts would gate
+other rows while the named row slipped through. As a backstop for artifacts
+that predate the reservation, supplying a focus set against a report whose
+row-name union contains a comma-bearing name is a validation error in both
+implementations (`Focus filtering rejects comma-bearing row name: '<name>'.`),
+never a silently narrowed gate.
+
 ## CLI stream and error contract
 
 Successful JSON commands print exactly one JSON document to stdout (the
@@ -865,7 +879,15 @@ everywhere they rank rows, including `scopes --top`.
 `slices --config` (TOML or YAML) is part of the shared CLI surface: config
 and command line merge with identical duplicate-scalar rejection, value
 coercion, and error ordering in both languages, and `compare` accepts
-`--focus-scopes` as an alias of `--focus-boundaries` in both.
+`--focus-scopes` as an alias of `--focus-boundaries` in both. The config is
+fixed-shape: only the documented option keys are accepted, and an unknown
+top-level key is a validation error (`Unknown slice config key: <key>.`) in
+both implementations — a typo such as `filterz` must never silently disable
+the filtering it meant to configure, mirroring the scope-config and
+rule-pack unknown-key principle. The Rust-only `report` subcommand applies
+the same validation as the standalone sections it composes: an empty target
+config errors exactly like `targets`, and `--top` is validated against the
+shared integer grammar even when no scopes section consumes it.
 `--focus-slices` and `--focus-boundaries` each take a single comma-delimited
 value. Repeating any non-accumulating option — scalar or boolean, focus flags
 included — keeps the last occurrence in both implementations (argparse's

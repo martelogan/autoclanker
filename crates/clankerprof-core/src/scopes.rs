@@ -1363,6 +1363,11 @@ fn load_boundaries(
             }
         }
         let label = boundary_label(raw_boundary, &raw_predicates, section_name)?;
+        // The compare focus grammar splits values on ','; a comma-bearing
+        // row name would make focusing it silently gate the split parts.
+        if label.contains(',') {
+            return Err(format!("{section_name} label must not contain ','."));
+        }
         if !seen.insert(label.clone()) {
             return Err(format!("Duplicate boundary label: {label}"));
         }

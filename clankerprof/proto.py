@@ -64,6 +64,10 @@ class _Reader:
         # Field number 0 is illegal protobuf; shared by every message parser.
         if field == 0:
             raise PprofDecodeError("Illegal protobuf field number 0.")
+        # Tags must fit uint32, capping field numbers at 2^29 - 1; conformant
+        # serializers cannot emit anything above it, so it is malformed input.
+        if field > 0x1FFFFFFF:
+            raise PprofDecodeError(f"Illegal protobuf field number {field}.")
         return field, key & 0x07
 
     def read_length_delimited(self) -> bytes:

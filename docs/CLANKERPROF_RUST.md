@@ -45,6 +45,11 @@ cargo run -p clankerprof-core --bin clankerprof-rs -- \
   --slices slices.yml --scopes-config scopes.toml --include-facts
 ```
 
+Each report section applies the same validation as the standalone
+subcommand it composes: an empty target config errors exactly like
+`targets` (`--config or --target is required.`), and option grammars
+(`--top`) are validated unconditionally, before any section renders.
+
 Slice comparison:
 
 ```bash
