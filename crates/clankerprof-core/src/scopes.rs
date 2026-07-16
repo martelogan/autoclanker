@@ -775,14 +775,14 @@ fn render_metrics_object<'a>(
 
 fn render_category(boundary: &BoundaryStats, category: &str, stats: &CategoryStats) -> Value {
     let total = boundary.total_time;
-    let mut pairs_sorted: Vec<(&String, &crate::model::CallerMetrics)> =
+    let mut pairs_sorted: Vec<(&(String, String), &crate::model::CallerMetrics)> =
         stats.caller_leaf_pairs.iter().collect();
     pairs_sorted.sort_by(|left, right| right.1.cpu_time.cmp(&left.1.cpu_time));
     json!({
         "attributable_estimates": scale_attributables(&boundary.attributables, total, stats.cpu_time),
-        "caller_leaf_pairs": pairs_sorted.into_iter().map(|(pair, metrics)| json!({
+        "caller_leaf_pairs": pairs_sorted.into_iter().map(|((caller, leaf), metrics)| json!({
             "attributable_estimates": scale_attributables(&boundary.attributables, total, metrics.cpu_time),
-            "pair": pair,
+            "pair": format!("{caller} -> {leaf}"),
             "pct": pct(metrics.cpu_time, total),
             "samples": metrics.count,
             "time_ns": metrics.cpu_time,

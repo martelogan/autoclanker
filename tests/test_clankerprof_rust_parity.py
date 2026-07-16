@@ -4046,3 +4046,176 @@ def test_clankerprof_rust_round5_cluster_p_matches_python(tmp_path: Path) -> Non
         "multiline-core-class-csv",
     )
     assert "Ruby Core (Native)" in weird_stdout
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_round5_cluster_q_matches_python(tmp_path: Path) -> None:
+    minimal: dict[str, object] = {
+        "schema_version": "clankerprof.sample_facts.v2",
+        "tool": "clankerprof_facts",
+        "profile": {
+            "value_types": [],
+            "period_type": None,
+            "period": 0,
+            "default_sample_type": "",
+            "primary_value_index": 0,
+        },
+        "summary": {
+            "sample_count": 0,
+            "empty_sample_count": 0,
+            "non_empty_sample_count": 0,
+            "total_primary_value": 0,
+        },
+        "strings": [],
+        "frames": [],
+        "samples": [],
+    }
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(json.dumps(minimal), encoding="utf-8")
+
+    # R5-03: deep JSON hits serde_json's fixed 128 limit byte-identically.
+    deep_path = tmp_path / "deep.json"
+    deep_path.write_text("[" * 300 + "]" * 300, encoding="utf-8")
+    envelope = _assert_identical_envelope(
+        ["targets", "--facts", str(deep_path), "--target", "X"], "deep-json"
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "recursion limit exceeded at line 1 column 128",
+    }
+    # YAML alias cycle: shared message core, location suffix engine-specific.
+    cycle_path = tmp_path / "cycle.yml"
+    cycle_path.write_text(
+        "slices:\n  - name: app\n    metadata: &a\n      x: *a\n", encoding="utf-8"
+    )
+    argv = ["slices", "--facts", str(facts_path), "--slices", str(cycle_path)]
+    python_run = _run_python_cli_raw(argv)
+    rust_run = _run_rust_cli_raw(argv)
+    assert python_run.returncode == 2, python_run.stderr
+    assert rust_run.returncode == 2, rust_run.stderr
+    for run in (python_run, rust_run):
+        assert json.loads(run.stderr)["error"].startswith("recursion limit exceeded")
+
+    # R5-07: duplicate slice names fail closed identically.
+    dup_path = tmp_path / "dup.yml"
+    dup_path.write_text(
+        "slices:\n  - name: App\n    paths: [/app]\n  - name: App\n    paths: [/o]\n",
+        encoding="utf-8",
+    )
+    envelope = _assert_identical_envelope(
+        ["slices", "--facts", str(facts_path), "--slices", str(dup_path)],
+        "dup-slice-names",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Slice config declares duplicate slice name: App. "
+        "Each slice name may be defined once.",
+    }
+
+    # R5-08: v2 profile metadata is validated, never defaulted or coerced.
+    profile = cast(dict[str, object], minimal["profile"])
+    missing_pvi = {**profile}
+    del missing_pvi["primary_value_index"]
+    meta_cases: list[tuple[str, dict[str, object], str]] = [
+        (
+            "no-pvi",
+            missing_pvi,
+            "Sample facts payload missing required key: 'primary_value_index'.",
+        ),
+        (
+            "bool-type",
+            {**profile, "value_types": [{"type": True, "unit": 7}]},
+            "Sample facts value type type must be a string.",
+        ),
+        (
+            "bool-dst",
+            {**profile, "default_sample_type": True},
+            "Sample facts profile default_sample_type must be a string.",
+        ),
+    ]
+    for label, meta, message in meta_cases:
+        case_path = tmp_path / f"meta-{label}.json"
+        case_path.write_text(json.dumps({**minimal, "profile": meta}), encoding="utf-8")
+        envelope = _assert_identical_envelope(
+            ["targets", "--facts", str(case_path), "--target", "X"], f"meta-{label}"
+        )
+        assert json.loads(envelope) == {"ok": False, "error": message}
+
+    # R5-10: tuple-identity aggregation renders two distinct rows for frames
+    # whose NUL-joined spellings collide.
+    nul = "\x00"
+    collision = {
+        **minimal,
+        "strings": ["A", f"B{nul}C", f"A{nul}B", "C"],
+        "frames": [[1, 1, 0, 1, 0, False], [2, 2, 2, 3, 0, False]],
+        "samples": [
+            {"sample_index": 0, "values": [10], "location_ids": [1], "stack": [0]},
+            {"sample_index": 1, "values": [20], "location_ids": [2], "stack": [1]},
+        ],
+        "summary": {
+            "sample_count": 2,
+            "empty_sample_count": 0,
+            "non_empty_sample_count": 2,
+            "total_primary_value": 30,
+        },
+    }
+    collision_path = tmp_path / "nul-collision.json"
+    collision_path.write_text(json.dumps(collision), encoding="utf-8")
+    output = _assert_identical_success(
+        ["slices", "--facts", str(collision_path)], "nul-collision"
+    )
+    payload = json.loads(output)
+    frames = [
+        (frame["function"], frame["filename"], frame["time_ns"])
+        for item in payload["slices"]
+        for frame in item["frames"]
+    ]
+    assert sorted(frames) == [("A", f"B{nul}C", 10), (f"A{nul}B", "C", 20)]
+
+    # R5-11: protobuf strictness — field zero and invalid UTF-8.
+    field_zero = tmp_path / "field0.pb"
+    field_zero.write_bytes(b"\x00\x00")
+    envelope = _assert_identical_envelope(
+        ["facts", "--profile", str(field_zero)], "proto-field0"
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Illegal protobuf field number 0.",
+    }
+    bad_utf8 = tmp_path / "badutf8.pb"
+    bad_utf8.write_bytes(b"\x32\x01\xff")
+    envelope = _assert_identical_envelope(
+        ["facts", "--profile", str(bad_utf8)], "proto-bad-utf8"
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Invalid UTF-8 in pprof string table.",
+    }
+
+    # R5-12 (verified non-divergence, pinned): bare CR in core-class CSV is a
+    # record break through the real loaders in both languages.
+    core_csv = tmp_path / "core.csv"
+    core_csv.write_bytes(b'Weird\rArray\n"Quoted"\n')
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.function("Array#map", "<cfunc>")
+    parent = builder.function("Parent", "/app/parent.rb")
+    builder.sample((builder.location(leaf), builder.location(parent)), 10)
+    profile_path = tmp_path / "core-cr.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "core-cr-config.json"
+    config_path.write_text(json.dumps({"Parent": {}}), encoding="utf-8")
+    output = _assert_identical_success(
+        [
+            "targets",
+            "--profile",
+            str(profile_path),
+            "--config",
+            str(config_path),
+            "--runtime",
+            "ruby",
+            "--core-classes",
+            str(core_csv),
+        ],
+        "core-cr-record-break",
+    )
+    assert "Ruby Core (Native)" in output

@@ -200,6 +200,20 @@ fn u64_list(payload: &Value, key: &str, field_name: &str) -> Result<Vec<u64>, St
     }
 }
 
+fn meta_string(
+    entry: &serde_json::Map<String, Value>,
+    key: &str,
+    label: &str,
+) -> Result<String, String> {
+    // String-domain profile metadata is never coerced: as_str's silent empty
+    // default diverged from Python's str() coercion on booleans/numbers.
+    match entry.get(key) {
+        None => Ok(String::new()),
+        Some(Value::String(text)) => Ok(text.clone()),
+        Some(_) => Err(format!("Sample facts {label} {key} must be a string.")),
+    }
+}
+
 fn sample_facts_from_v2(payload: &Value) -> Result<ProfileFacts, String> {
     let profile = payload
         .get("profile")
@@ -218,16 +232,8 @@ fn sample_facts_from_v2(payload: &Value) -> Result<ProfileFacts, String> {
                         return Err("Sample facts value type must be an object.".to_string());
                     };
                     Ok(ValueType {
-                        type_name: entry
-                            .get("type")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default()
-                            .to_string(),
-                        unit: entry
-                            .get("unit")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default()
-                            .to_string(),
+                        type_name: meta_string(entry, "type", "value type")?,
+                        unit: meta_string(entry, "unit", "value type")?,
                     })
                 })
                 .collect()
@@ -237,21 +243,19 @@ fn sample_facts_from_v2(payload: &Value) -> Result<ProfileFacts, String> {
     let period_type = match profile.get("period_type") {
         None | Some(Value::Null) => None,
         Some(Value::Object(entry)) => Some(ValueType {
-            type_name: entry
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            unit: entry
-                .get("unit")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
+            type_name: meta_string(entry, "type", "value type")?,
+            unit: meta_string(entry, "unit", "value type")?,
         }),
         Some(_) => return Err("Sample facts value type must be an object.".to_string()),
     };
     let primary_value_index = match profile.get("primary_value_index") {
-        None => 0i64,
+        // Exporters always write it; re-deriving on absence would make the
+        // imported meaning depend on two other optional fields.
+        None => {
+            return Err(
+                "Sample facts payload missing required key: 'primary_value_index'.".to_string(),
+            );
+        }
         Some(Value::Number(number)) if number.is_i64() => number.as_i64().unwrap_or(0),
         Some(_) => {
             return Err("Sample facts primary_value_index must be an integer.".to_string());
@@ -266,11 +270,7 @@ fn sample_facts_from_v2(payload: &Value) -> Result<ProfileFacts, String> {
             .as_i64()
             .ok_or("Sample facts profile period must be an integer.")?,
     };
-    let default_sample_type = profile
-        .get("default_sample_type")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
+    let default_sample_type = meta_string(profile, "default_sample_type", "profile")?;
 
     let strings: Vec<String> = match payload.get("strings") {
         Some(Value::Array(items)) => items
@@ -778,5 +778,18 @@ mod tests {
         let facts = sample_facts_from_json(&lenient_v1).expect("lenient v1 sample");
         assert!(facts.samples[0].sample.values.is_empty());
         assert!(facts.samples[0].stack.is_empty());
+    }
+
+    #[test]
+    fn meta_string_rejects_non_strings_and_defaults_absent() {
+        let mut entry = serde_json::Map::new();
+        assert_eq!(meta_string(&entry, "type", "value type").unwrap(), "");
+        entry.insert("type".to_string(), serde_json::json!("cpu"));
+        assert_eq!(meta_string(&entry, "type", "value type").unwrap(), "cpu");
+        entry.insert("type".to_string(), serde_json::json!(true));
+        assert_eq!(
+            meta_string(&entry, "type", "value type").unwrap_err(),
+            "Sample facts value type type must be a string."
+        );
     }
 }

@@ -37,9 +37,12 @@ Signed pprof `int64` fields (sample values, line numbers, start lines,
 `-1` must decode as `-1`, never as `2^64 - 1`.
 
 The decoder is strict about malformed input: varints longer than 10 bytes,
-length-delimited fields extending past the stream, and truncated fixed32/64
-fields (even in skipped unknown fields) are decode errors, never silently
-accepted. Varint bits past 63 drop, per protobuf 64-bit semantics.
+length-delimited fields extending past the stream, truncated fixed32/64
+fields (even in skipped unknown fields), illegal field number zero in any
+message, and invalid UTF-8 in the string table are decode errors, never
+silently accepted (shared errors: "Illegal protobuf field number 0.",
+"Invalid UTF-8 in pprof string table."). Varint bits past 63 drop, per
+protobuf 64-bit semantics.
 
 ### Primary-value selection
 
@@ -126,6 +129,14 @@ any of them is a validation error (`Sample facts payload missing required
 key: '<field>'.`), never an empty default. Legacy v1 payloads keep their
 historical leniency (missing per-sample arrays read as empty) in both
 implementations.
+
+`profile.primary_value_index` is likewise required in v2 (exporters always
+write it; silently defaulting it to `0` contradicted the documented
+last-declared-type selection fallback). String-domain profile metadata —
+value-type `type`/`unit` fields and `default_sample_type` — must be JSON
+strings when present (absent reads as `""`): booleans and numbers are
+validation errors in both languages, never coerced (`Sample facts value type
+type must be a string.`), matching the numeric-domain rule below.
 
 Per-sample primary values and emptiness are derived on import:
 `primary_value = values[profile.primary_value_index]` (with the fallbacks from
@@ -342,6 +353,13 @@ compatibility bug, not a presentation choice.
 
 ## Scope decomposition contract
 
+Aggregation identity is structural in both implementations: slice frame rows
+key on the `(function, filename)` pair and scope caller/leaf evidence keys on
+the `(caller, leaf)` pair — never on delimiter-joined display strings, which
+merged legitimately distinct symbols containing the delimiter (NUL bytes,
+`" -> "`). Rendered `pair` fields remain display strings built at emission.
+
+
 `scopes` answers: “inside this parent denominator, which rollups and cost
 kinds consumed CPU, and which owner frame below the scope drove each cost
 kind?”
@@ -530,7 +548,10 @@ rule matches `slice:<name>` and is excluded by `!slice:<name>`. Collapse
 
 At most one slice may set `default: true`; declaring several is a validation
 error (previously attribution silently used the last while tracking used the
-first). The `default` value must be a YAML boolean — absent and `null` read
+first). Slice names must be unique: duplicates are a validation error in
+both languages ("Slice config declares duplicate slice name: <name>. Each
+slice name may be defined once.") — previously Python kept the last
+definition's metadata while Rust kept the first. The `default` value must be a YAML boolean — absent and `null` read
 as false, and any other type is a validation error in both languages
 (`Slice default must be a boolean.`); truthiness coercion is forbidden
 because it silently diverged between implementations.
@@ -640,6 +661,13 @@ gzip), missing or unreadable input files, malformed YAML/JSON/TOML configs and
 rule packs, invalid facts payloads (wrong schema version, missing keys, index
 or summary mismatches), and option validation — exits `2` and prints a single
 `{"ok": false, "error": ...}` JSON envelope to stderr, never a traceback.
+Inputs exceeding the recursion limit fail closed in both implementations:
+JSON nesting deeper than 128 levels (serde_json's fixed parse limit,
+mirrored exactly by Python's pre-scan including the reported position) and
+YAML nesting or alias cycles (which necessarily exceed any finite cap) exit
+`2` with an envelope message starting "recursion limit exceeded"; for the
+YAML case the location detail is engine-specific (serde_yaml detects it at
+parse time, Python during the metadata walk).
 Usage errors (unknown flags or subcommands, missing required options, invalid
 option values) follow the same envelope through the standalone `clankerprof`
 and `clankerprof-rs` CLIs, while `--help` and `--version` stay human-readable

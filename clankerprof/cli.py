@@ -95,6 +95,12 @@ def _contracted(
             return handler(args)
         except ValueError:
             raise
+        except RecursionError as exc:
+            # PyYAML's composer recurses on deep nesting; by the time this
+            # handler runs the recursive frames have unwound. Message core
+            # matches serde's parse-time limit (location suffix is
+            # engine-specific detail).
+            raise ValueError("recursion limit exceeded") from exc
         except (OSError, EOFError, zlib.error, yaml.YAMLError, OverflowError) as exc:
             raise ValueError(str(exc) or exc.__class__.__name__) from exc
 
@@ -1029,7 +1035,13 @@ def _load_boundary_options(
     return options
 
 
-def _json_compatible(value: object) -> JsonValue:
+def _json_compatible(value: object, depth: int = 0) -> JsonValue:
+    if depth >= 128:
+        # serde_yaml detects alias cycles and deep nesting at parse time
+        # with its 128-level limit; PyYAML builds the (possibly cyclic)
+        # object graph first, so the walk enforces the same cap — a cyclic
+        # alias necessarily exceeds any finite limit.
+        raise ValueError("recursion limit exceeded")
     if isinstance(value, float) and not math.isfinite(value):
         # serde_json would silently null a non-finite number; neither
         # implementation can "preserve" it, so both fail closed.
@@ -1037,10 +1049,10 @@ def _json_compatible(value: object) -> JsonValue:
     if value is None or isinstance(value, str | int | float | bool):
         return value
     if isinstance(value, list):
-        return [_json_compatible(item) for item in cast(list[object], value)]
+        return [_json_compatible(item, depth + 1) for item in cast(list[object], value)]
     if isinstance(value, dict):
         return {
-            str(key): _json_compatible(item)
+            str(key): _json_compatible(item, depth + 1)
             for key, item in cast(dict[object, object], value).items()
         }
     return str(value)

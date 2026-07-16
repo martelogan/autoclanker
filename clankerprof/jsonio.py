@@ -39,12 +39,74 @@ def _strict_object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return obj
 
 
+JSON_DEPTH_LIMIT = 128
+
+_JSON_STRING_RE = re.compile(r'"(?:[^"\\]|\\.)*"')
+_JSON_NON_BRACKET_RE = re.compile(r"[^\[\]{}]+")
+
+
+def _check_json_depth(text: str) -> None:
+    """Mirror serde_json's fixed 128-level parse recursion limit.
+
+    Python's own JSON recursion limit is interpreter-stack dependent
+    (~1000), so without this the 129..~1000 nesting band would parse here
+    and error in Rust. Detection runs over a C-speed bracket projection with
+    string literals stripped; the slow positional rescan only runs on
+    violating input.
+    """
+    brackets = _JSON_NON_BRACKET_RE.sub("", _JSON_STRING_RE.sub("", text))
+    if len(brackets) <= JSON_DEPTH_LIMIT:
+        return
+    depth = 0
+    for item in brackets:
+        if item in "[{":
+            depth += 1
+            if depth > JSON_DEPTH_LIMIT:
+                raise ValueError(_json_depth_message(text))
+        elif depth:
+            depth -= 1
+
+
+def _json_depth_message(text: str) -> str:
+    # serde_json reports the position just before the offending bracket;
+    # the "at line N column M" suffix is engine-aligned detail.
+    depth = 0
+    line = 1
+    column = 0
+    in_string = False
+    escaped = False
+    for ch in text:
+        if ch == "\n" and not in_string:
+            line += 1
+            column = 0
+            continue
+        column += 1
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in "[{":
+            depth += 1
+            if depth > JSON_DEPTH_LIMIT:
+                return f"recursion limit exceeded at line {line} column {column - 1}"
+        elif ch in "]}" and depth:
+            depth -= 1
+    return "recursion limit exceeded"
+
+
 def parse_strict_json(text: str) -> Any:
     # Integer literals outside [i64::MIN, u64::MAX] need no guard here:
     # serde_json parses them as f64, and Python's unbounded int coerces to
     # the identical f64 in float-domain fields while integer-domain fields
     # reject both representations with the same messages (pinned by the
     # parity suite).
+    _check_json_depth(text)
     return json.loads(
         text,
         parse_constant=_reject_constant,

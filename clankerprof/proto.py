@@ -60,7 +60,11 @@ class _Reader:
 
     def read_key(self) -> tuple[int, int]:
         key = self.read_varint()
-        return key >> 3, key & 0x07
+        field = key >> 3
+        # Field number 0 is illegal protobuf; shared by every message parser.
+        if field == 0:
+            raise PprofDecodeError("Illegal protobuf field number 0.")
+        return field, key & 0x07
 
     def read_length_delimited(self) -> bytes:
         length = self.read_varint()
@@ -269,9 +273,11 @@ def decode_profile_bytes(data: bytes) -> Profile:
         elif field == 5 and wire == 2:
             raw_functions.append(_parse_function(reader.read_length_delimited()))
         elif field == 6 and wire == 2:
-            strings.append(
-                reader.read_length_delimited().decode("utf-8", errors="replace")
-            )
+            payload = reader.read_length_delimited()
+            try:
+                strings.append(payload.decode("utf-8"))
+            except UnicodeDecodeError as exc:
+                raise PprofDecodeError("Invalid UTF-8 in pprof string table.") from exc
         elif field == 11 and wire == 2:
             raw_period_type = _parse_value_type(reader.read_length_delimited())
         elif field == 12 and wire == 0:

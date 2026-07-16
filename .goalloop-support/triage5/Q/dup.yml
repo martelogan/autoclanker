@@ -1,0 +1,5 @@
+slices:
+  - name: App
+    paths: [/app]
+  - name: App
+    paths: [/other]

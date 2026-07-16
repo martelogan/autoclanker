@@ -75,7 +75,7 @@ class SliceFrameStats:
     time_ns: TimeNs = 0
 
 
-def _slice_frame_stats_by_string() -> dict[str, SliceFrameStats]:
+def _slice_frame_stats_by_key() -> dict[tuple[str, str], SliceFrameStats]:
     return {}
 
 
@@ -87,8 +87,10 @@ def _time_by_string() -> dict[str, TimeNs]:
 class SliceStats:
     name: str
     time_ns: TimeNs = 0
-    frames: dict[str, SliceFrameStats] = field(
-        default_factory=_slice_frame_stats_by_string
+    # Tuple identity: a "name\0filename" string key merged distinct frames
+    # whose symbols contained the delimiter.
+    frames: dict[tuple[str, str], SliceFrameStats] = field(
+        default_factory=_slice_frame_stats_by_key
     )
     unattributed_gems: dict[str, TimeNs] = field(default_factory=_time_by_string)
     unattributed_libraries: dict[str, TimeNs] = field(default_factory=_time_by_string)
@@ -344,6 +346,16 @@ def analyze_slice_facts(
             "Slice config declares multiple default slices: "
             f"{', '.join(default_names)}. Exactly one slice may set default."
         )
+    seen_names: set[str] = set()
+    for item in options.slices:
+        # Duplicate names silently merged with first/last-wins metadata that
+        # diverged across implementations; fail closed like multiple defaults.
+        if item.name in seen_names:
+            raise ValueError(
+                f"Slice config declares duplicate slice name: {item.name}. "
+                "Each slice name may be defined once."
+            )
+        seen_names.add(item.name)
     default_slice = default_names[0] if default_names else "(all)"
     matcher = _SliceMatcher(options)
     index = ProfileFactIndex.from_input(sample_facts)
@@ -377,7 +389,7 @@ def analyze_slice_facts(
                 SliceStats(name=GC_PSEUDO_SLICE),
             )
             gc_stats.time_ns += value
-            frame_key = f"{leaf.name}\0{leaf.filename}"
+            frame_key = (leaf.name, leaf.filename)
             frame_stats = gc_stats.frames.setdefault(
                 frame_key,
                 SliceFrameStats(
@@ -395,7 +407,7 @@ def analyze_slice_facts(
             SliceStats(name=slice_name, is_default=slice_name == default_slice),
         )
         slice_stats.time_ns += value
-        frame_key = f"{bottom.name}\0{bottom.filename}"
+        frame_key = (bottom.name, bottom.filename)
         frame_stats = slice_stats.frames.setdefault(
             frame_key,
             SliceFrameStats(
@@ -417,7 +429,7 @@ def analyze_slice_facts(
         if bottom_is_collapsed:
             uncollapsible_stats.time_ns += value
             frame = uncollapsible_frame or bottom
-            frame_key = f"{frame.name}\0{frame.filename}"
+            frame_key = (frame.name, frame.filename)
             frame_stats = uncollapsible_stats.frames.setdefault(
                 frame_key,
                 SliceFrameStats(

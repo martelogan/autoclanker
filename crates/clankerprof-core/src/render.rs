@@ -251,9 +251,8 @@ fn function_summary(row: &CategoryRow<'_>, limit: usize, with_samples: bool) -> 
 
 fn callsites_summary(row: &CategoryRow<'_>, separator: &str) -> String {
     let mut caller_totals: IndexMap<&str, TimeNs> = IndexMap::new();
-    for (pair, metrics) in &row.stats.caller_leaf_pairs {
-        let caller = pair.split(" -> ").next().unwrap_or(pair);
-        *caller_totals.entry(caller).or_insert(0) += metrics.cpu_time;
+    for ((caller, _leaf), metrics) in &row.stats.caller_leaf_pairs {
+        *caller_totals.entry(caller.as_str()).or_insert(0) += metrics.cpu_time;
     }
     let mut top: Vec<_> = caller_totals.into_iter().collect();
     top.sort_by(|left, right| right.1.cmp(&left.1));
@@ -264,7 +263,7 @@ fn callsites_summary(row: &CategoryRow<'_>, separator: &str) -> String {
         .join(separator)
 }
 
-fn top_pairs<'a>(row: &'a CategoryRow<'a>) -> Vec<(&'a String, &'a CallerMetrics)> {
+fn top_pairs<'a>(row: &'a CategoryRow<'a>) -> Vec<(&'a (String, String), &'a CallerMetrics)> {
     let mut pairs: Vec<_> = row.stats.caller_leaf_pairs.iter().collect();
     pairs.sort_by(|left, right| right.1.cpu_time.cmp(&left.1.cpu_time));
     pairs.truncate(3);
@@ -338,9 +337,9 @@ pub fn render_target_csv(
             }
             let mut pair_columns: Vec<String> = top_pairs(&row)
                 .iter()
-                .map(|(pair, metrics)| {
+                .map(|((caller, leaf), metrics)| {
                     format!(
-                        "{pair} ({} samples, {:.1}%)",
+                        "{caller} -> {leaf} ({} samples, {:.1}%)",
                         metrics.count,
                         pct_of(metrics.cpu_time, total)
                     )
@@ -425,10 +424,9 @@ fn render_legacy_target_csv(
             }
             let mut pair_columns: Vec<String> = top_pairs(&row)
                 .iter()
-                .map(|(pair, metrics)| {
+                .map(|((caller, leaf), metrics)| {
                     quote_legacy_csv(&format!(
-                        "{} ({} samples, {:.1}%)",
-                        pair.replace(" -> ", " \u{2192} "),
+                        "{caller} \u{2192} {leaf} ({} samples, {:.1}%)",
                         metrics.count,
                         pct_of(metrics.cpu_time, total)
                     ))

@@ -406,7 +406,7 @@ fn run_report(args: ReportArgs) -> Result<(), String> {
         };
         payload.insert(
             "slices".to_string(),
-            render_slice_json(&analyze_slice_facts(&facts, &options), &options)?,
+            render_slice_json(&analyze_slice_facts(&facts, &options)?, &options)?,
         );
     }
     if let Some(scopes_config_path) = &args.scopes_config {
@@ -839,7 +839,7 @@ fn run_slices(args: SlicesArgs) -> Result<(), String> {
         options.slices = load_slices_file(slices_path)?;
     }
     validate_slice_options(&options, args.allow_virtual_attribute_slices)?;
-    let payload = render_slice_json(&analyze_slice_facts(&facts, &options), &options)?;
+    let payload = render_slice_json(&analyze_slice_facts(&facts, &options)?, &options)?;
     clankerprof_core::targets::take_pattern_error()?;
     clankerprof_core::scopes::take_attributable_error()?;
     let rendered = clankerprof_core::pyjson::dumps_pretty(&payload);

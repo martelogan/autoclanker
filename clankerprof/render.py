@@ -272,7 +272,7 @@ def _render_boundary_category(
         ),
         "caller_leaf_pairs": [
             {
-                "pair": pair,
+                "pair": f"{caller} -> {leaf}",
                 "time_ns": metrics.cpu_time,
                 "samples": metrics.count,
                 "pct": (_f64_ratio(metrics.cpu_time, total) * 100) if total else 0,
@@ -282,7 +282,7 @@ def _render_boundary_category(
                     metrics.cpu_time,
                 ),
             }
-            for pair, metrics in sorted(
+            for (caller, leaf), metrics in sorted(
                 stats.caller_leaf_pairs.items(),
                 key=lambda item: item[1].cpu_time,
                 reverse=True,
@@ -579,8 +579,7 @@ def render_target_csv(
                 for name, metrics in top_functions
             )
             caller_totals: dict[str, int] = {}
-            for pair, metrics in stats.caller_leaf_pairs.items():
-                caller = pair.split(" -> ", 1)[0]
+            for (caller, _leaf), metrics in stats.caller_leaf_pairs.items():
                 caller_totals[caller] = caller_totals.get(caller, 0) + metrics.cpu_time
             top_callers = sorted(
                 caller_totals.items(), key=lambda item: item[1], reverse=True
@@ -617,8 +616,9 @@ def render_target_csv(
                 reverse=True,
             )[:3]
             pair_columns = [
-                f"{pair} ({metrics.count} samples, {_pct_of(metrics.cpu_time, total):.1f}%)"
-                for pair, metrics in top_pairs
+                f"{caller} -> {leaf} "
+                f"({metrics.count} samples, {_pct_of(metrics.cpu_time, total):.1f}%)"
+                for (caller, leaf), metrics in top_pairs
             ]
             while len(pair_columns) < 3:
                 pair_columns.append("")
@@ -694,8 +694,7 @@ def _render_legacy_target_csv(
                 )
 
             caller_totals: dict[str, int] = {}
-            for pair, metrics in stats.caller_leaf_pairs.items():
-                caller = pair.split(" -> ", 1)[0]
+            for (caller, _leaf), metrics in stats.caller_leaf_pairs.items():
                 caller_totals[caller] = caller_totals.get(caller, 0) + metrics.cpu_time
             top_callers = sorted(
                 caller_totals.items(), key=lambda item: item[1], reverse=True
@@ -738,10 +737,10 @@ def _render_legacy_target_csv(
             )[:3]
             pair_columns = [
                 _quote_legacy_csv(
-                    f"{_legacy_pair_arrow(pair)} "
+                    f"{caller} \u2192 {leaf} "
                     f"({metrics.count} samples, {_pct_of(metrics.cpu_time, total):.1f}%)"
                 )
-                for pair, metrics in top_pairs
+                for (caller, leaf), metrics in top_pairs
             ]
             while len(pair_columns) < 3:
                 pair_columns.append('""')
@@ -762,10 +761,6 @@ def _render_legacy_target_csv(
             lines.append(row)
 
     return "\n".join(lines)
-
-
-def _legacy_pair_arrow(pair: str) -> str:
-    return pair.replace(" -> ", " \u2192 ")
 
 
 def render_target_text(

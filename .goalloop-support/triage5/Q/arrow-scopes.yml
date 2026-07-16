@@ -1,0 +1,4 @@
+cost_kind:
+  Work: "name:C"
+scope:
+  - function: T

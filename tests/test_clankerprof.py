@@ -6545,3 +6545,187 @@ def test_clankerprof_compare_derived_values_fail_closed_on_overflow() -> None:
     high = _round3_slice_report([{"name": "A", "pct": 1e308}])
     with pytest.raises(ValueError, match=r"Compare values for 'A' are not finite\."):
         compare_slice_json(low, high)
+
+
+def _minimal_v2_facts(**overrides: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "clankerprof.sample_facts.v2",
+        "tool": "clankerprof_facts",
+        "profile": {
+            "value_types": [],
+            "period_type": None,
+            "period": 0,
+            "default_sample_type": "",
+            "primary_value_index": 0,
+        },
+        "summary": {
+            "sample_count": 0,
+            "empty_sample_count": 0,
+            "non_empty_sample_count": 0,
+            "total_primary_value": 0,
+        },
+        "strings": [],
+        "frames": [],
+        "samples": [],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_clankerprof_recursion_limit_envelopes(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(json.dumps(_minimal_v2_facts()), encoding="utf-8")
+
+    # YAML alias cycle: PyYAML constructs a cyclic graph; the metadata walk
+    # enforces serde_yaml's 128-level limit (its parse-time position suffix
+    # is engine-specific detail).
+    cycle_path = tmp_path / "cycle.yml"
+    cycle_path.write_text(
+        "slices:\n  - name: app\n    metadata: &a\n      x: *a\n", encoding="utf-8"
+    )
+    exit_code = clankerprof_main(
+        ["slices", "--facts", str(facts_path), "--slices", str(cycle_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert cast(str, envelope["error"]).startswith("recursion limit exceeded")
+
+    # Deep JSON: serde_json's fixed limit is 128; the pre-scan mirrors its
+    # reported position exactly (pinned byte-for-byte by the parity suite).
+    deep_path = tmp_path / "deep.json"
+    deep_path.write_text("[" * 1100 + "]" * 1100, encoding="utf-8")
+    exit_code = clankerprof_main(["targets", "--facts", str(deep_path), "--target", "X"])
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "recursion limit exceeded at line 1 column 128"
+
+    # 129..~1000 band: previously parsed in Python while Rust errored.
+    band_path = tmp_path / "band.json"
+    band_path.write_text("[" * 300 + "]" * 300, encoding="utf-8")
+    exit_code = clankerprof_main(["targets", "--facts", str(band_path), "--target", "X"])
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "recursion limit exceeded at line 1 column 128"
+
+
+def test_clankerprof_duplicate_slice_names_rejected(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(json.dumps(_minimal_v2_facts()), encoding="utf-8")
+    slices_path = tmp_path / "slices.yml"
+    slices_path.write_text(
+        "slices:\n"
+        "  - name: App\n    paths: [/app]\n"
+        "  - name: App\n    paths: [/other]\n",
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["slices", "--facts", str(facts_path), "--slices", str(slices_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == (
+        "Slice config declares duplicate slice name: App. "
+        "Each slice name may be defined once."
+    )
+
+
+def test_clankerprof_facts_profile_metadata_strictness(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cases: list[tuple[dict[str, Any], str]] = []
+    missing = _minimal_v2_facts()
+    del missing["profile"]["primary_value_index"]
+    cases.append(
+        (missing, "Sample facts payload missing required key: 'primary_value_index'.")
+    )
+    bool_type = _minimal_v2_facts()
+    bool_type["profile"]["value_types"] = [{"type": True, "unit": 7}]
+    cases.append((bool_type, "Sample facts value type type must be a string."))
+    bool_period = _minimal_v2_facts()
+    bool_period["profile"]["period_type"] = {"type": False, "unit": 8}
+    cases.append((bool_period, "Sample facts value type type must be a string."))
+    bool_default = _minimal_v2_facts()
+    bool_default["profile"]["default_sample_type"] = True
+    cases.append(
+        (bool_default, "Sample facts profile default_sample_type must be a string.")
+    )
+    for payload, message in cases:
+        facts_path = tmp_path / "facts.json"
+        facts_path.write_text(json.dumps(payload), encoding="utf-8")
+        exit_code = clankerprof_main(
+            ["targets", "--facts", str(facts_path), "--target", "X"]
+        )
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == message
+
+
+def test_clankerprof_aggregation_keys_use_tuple_identity(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # (A, B\0C) and (A\0B, C) collide under "name\0filename" string keys.
+    nul = "\x00"
+    facts = _minimal_v2_facts(
+        strings=["A", f"B{nul}C", f"A{nul}B", "C"],
+        frames=[[1, 1, 0, 1, 0, False], [2, 2, 2, 3, 0, False]],
+        samples=[
+            {"sample_index": 0, "values": [10], "location_ids": [1], "stack": [0]},
+            {"sample_index": 1, "values": [20], "location_ids": [2], "stack": [1]},
+        ],
+        summary={
+            "sample_count": 2,
+            "empty_sample_count": 0,
+            "non_empty_sample_count": 2,
+            "total_primary_value": 30,
+        },
+    )
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(json.dumps(facts), encoding="utf-8")
+    exit_code = clankerprof_main(["slices", "--facts", str(facts_path)])
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    frames = [
+        (frame["function"], frame["filename"], frame["time_ns"])
+        for item in payload["slices"]
+        for frame in item["frames"]
+    ]
+    assert sorted(frames) == [("A", f"B{nul}C", 10), (f"A{nul}B", "C", 20)]
+
+
+def test_clankerprof_decoder_rejects_field_zero_and_invalid_utf8(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    field_zero = tmp_path / "field0.pb"
+    field_zero.write_bytes(b"\x00\x00")
+    exit_code = clankerprof_main(["facts", "--profile", str(field_zero)])
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Illegal protobuf field number 0."
+
+    bad_utf8 = tmp_path / "badutf8.pb"
+    bad_utf8.write_bytes(b"\x32\x01\xff")
+    exit_code = clankerprof_main(["facts", "--profile", str(bad_utf8)])
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Invalid UTF-8 in pprof string table."
+
+
+def test_clankerprof_core_class_csv_bare_cr_is_a_record_break(
+    tmp_path: Path,
+) -> None:
+    # Verified non-divergence (R5-12): the file loader's newline="" open
+    # splits records on bare \r exactly like the Rust whole-payload scanner.
+    from clankerprof.categorize import load_ruby_core_classes
+
+    csv_path = tmp_path / "core.csv"
+    csv_path.write_bytes(b"Array\rExtra\nOther\n")
+    assert load_ruby_core_classes(csv_path) == frozenset({"Array", "Extra", "Other"})

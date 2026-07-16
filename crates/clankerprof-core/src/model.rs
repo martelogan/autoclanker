@@ -185,7 +185,9 @@ pub struct CategoryStats {
     pub folded_from: IndexMap<String, TimeNs>,
     pub semantic_callers: IndexMap<String, SemanticCallerMetrics>,
     // Rendered as a ranked array in scope output; ties break first-seen.
-    pub caller_leaf_pairs: IndexMap<String, CallerMetrics>,
+    // Tuple identity: delimiter-composed string keys merged distinct pairs
+    // whose symbols contained the delimiter; display strings are render-time.
+    pub caller_leaf_pairs: IndexMap<(String, String), CallerMetrics>,
 }
 
 impl CategoryStats {
@@ -198,7 +200,7 @@ impl CategoryStats {
     pub fn add_caller_leaf_pair(&mut self, caller: &str, leaf: &str, value: TimeNs) {
         let metrics = self
             .caller_leaf_pairs
-            .entry(format!("{caller} -> {leaf}"))
+            .entry((caller.to_string(), leaf.to_string()))
             .or_default();
         metrics.count += 1;
         metrics.cpu_time += value;

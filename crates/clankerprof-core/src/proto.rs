@@ -81,7 +81,14 @@ impl<'a> Reader<'a> {
 
     fn read_key(&mut self) -> DecodeResult<(u64, u8)> {
         let key = self.read_varint()?;
-        Ok((key >> 3, (key & 0x07) as u8))
+        let field = key >> 3;
+        // Field number 0 is illegal protobuf; shared by every message parser.
+        if field == 0 {
+            return Err(PprofDecodeError::InvalidProtobuf(
+                "Illegal protobuf field number 0.".to_string(),
+            ));
+        }
+        Ok((field, (key & 0x07) as u8))
     }
 
     fn read_length_delimited(&mut self) -> DecodeResult<&'a [u8]> {
@@ -211,7 +218,7 @@ pub fn decode_profile_bytes(data: &[u8]) -> DecodeResult<Profile> {
             (2, 2) => samples.push(parse_sample(reader.read_length_delimited()?)?),
             (4, 2) => raw_locations.push(parse_location(reader.read_length_delimited()?)?),
             (5, 2) => raw_functions.push(parse_function(reader.read_length_delimited()?)?),
-            (6, 2) => strings.push(decode_utf8_lossy(reader.read_length_delimited()?)),
+            (6, 2) => strings.push(decode_utf8_strict(reader.read_length_delimited()?)?),
             (11, 2) => raw_period_type = Some(parse_value_type(reader.read_length_delimited()?)?),
             (12, 0) => period = int64_from_varint(reader.read_varint()?),
             (14, 0) => default_sample_type_index = int64_from_varint(reader.read_varint()?),
@@ -395,8 +402,12 @@ fn read_packed_varints(payload: &[u8]) -> DecodeResult<Vec<u64>> {
     Ok(values)
 }
 
-fn decode_utf8_lossy(data: &[u8]) -> String {
-    String::from_utf8_lossy(data).into_owned()
+fn decode_utf8_strict(data: &[u8]) -> DecodeResult<String> {
+    // Python's strict "utf-8" codec and String::from_utf8 accept exactly the
+    // same byte set (well-formed UTF-8, surrogates rejected in both).
+    String::from_utf8(data.to_vec()).map_err(|_| {
+        PprofDecodeError::InvalidProtobuf("Invalid UTF-8 in pprof string table.".to_string())
+    })
 }
 
 fn string_at(strings: &[String], index: usize) -> String {

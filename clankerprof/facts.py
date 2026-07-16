@@ -365,7 +365,13 @@ def _validated_profile_meta(raw: object) -> _ProfileMeta:
         if raw_period_type is not None
         else None
     )
-    raw_primary_value_index = payload.get("primary_value_index", 0)
+    if "primary_value_index" not in payload:
+        # Exporters always write it; re-deriving on absence would make the
+        # imported meaning depend on two other optional fields.
+        raise ValueError(
+            "Sample facts payload missing required key: 'primary_value_index'."
+        )
+    raw_primary_value_index = payload["primary_value_index"]
     primary_value_index = _strict_int(raw_primary_value_index)
     if primary_value_index is None or primary_value_index > _I64_MAX:
         raise ValueError("Sample facts primary_value_index must be an integer.")
@@ -379,9 +385,18 @@ def _validated_profile_meta(raw: object) -> _ProfileMeta:
         value_types=value_types,
         period_type=period_type,
         period=period,
-        default_sample_type=str(payload.get("default_sample_type", "")),
+        default_sample_type=_meta_string(payload, "default_sample_type", "profile"),
         primary_value_index=primary_value_index,
     )
+
+
+def _meta_string(payload: JsonObject, key: str, label: str) -> str:
+    # String-domain profile metadata is never coerced: str() would silently
+    # turn booleans/numbers into "True"/"7" where Rust silently emptied them.
+    raw = payload.get(key, "")
+    if not isinstance(raw, str):
+        raise ValueError(f"Sample facts {label} {key} must be a string.")
+    return raw
 
 
 def _value_type_from_jsonable(raw: object) -> ValueType:
@@ -389,8 +404,8 @@ def _value_type_from_jsonable(raw: object) -> ValueType:
         raise ValueError("Sample facts value type must be an object.")
     payload = cast(JsonObject, raw)
     return ValueType(
-        type_name=str(payload.get("type", "")),
-        unit=str(payload.get("unit", "")),
+        type_name=_meta_string(payload, "type", "value type"),
+        unit=_meta_string(payload, "unit", "value type"),
     )
 
 

@@ -81,7 +81,9 @@ pub struct SliceFrameStats {
 pub struct SliceStats {
     pub name: String,
     pub time_ns: TimeNs,
-    pub frames: IndexMap<String, SliceFrameStats>,
+    // Tuple identity: a "name\0filename" string key merged distinct frames
+    // whose symbols contained the delimiter.
+    pub frames: IndexMap<(String, String), SliceFrameStats>,
     pub unattributed_libraries: IndexMap<String, TimeNs>,
     pub is_default: bool,
 }
@@ -187,7 +189,18 @@ pub fn load_slices_file(path: impl AsRef<Path>) -> Result<Vec<SliceDefinition>, 
             metadata,
         });
     }
-    let default_names: Vec<&str> = slices
+    Ok(slices)
+}
+
+pub fn analyze_slice_facts(
+    facts: &ProfileFacts,
+    options: &SliceAnalysisOptions,
+) -> Result<SliceAnalysisResult, String> {
+    // Definition validation lives in the analysis layer, mirroring Python
+    // `analyze_slice_facts`, so file, config, and programmatic paths all
+    // share it with identical error ordering.
+    let default_names: Vec<&str> = options
+        .slices
         .iter()
         .filter(|slice| slice.is_default)
         .map(|slice| slice.name.as_str())
@@ -198,23 +211,23 @@ pub fn load_slices_file(path: impl AsRef<Path>) -> Result<Vec<SliceDefinition>, 
             default_names.join(", ")
         ));
     }
-    Ok(slices)
-}
-
-pub fn analyze_slice_facts(
-    facts: &ProfileFacts,
-    options: &SliceAnalysisOptions,
-) -> SliceAnalysisResult {
+    let mut seen_names: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for definition in &options.slices {
+        if !seen_names.insert(definition.name.as_str()) {
+            return Err(format!(
+                "Slice config declares duplicate slice name: {}. Each slice name may be defined once.",
+                definition.name
+            ));
+        }
+    }
     let mut total_time = 0;
     let mut matching_time = 0;
     let mut gc_time = 0;
     let mut stats_by_slice: IndexMap<String, SliceStats> = IndexMap::new();
     let mut uncollapsible_stats = SliceStats::new(UNCOLLAPSIBLE_PSEUDO_SLICE);
-    let default_slice = options
-        .slices
-        .iter()
-        .find(|slice| slice.is_default)
-        .map(|slice| slice.name.clone())
+    let default_slice = default_names
+        .first()
+        .map(|name| name.to_string())
         .unwrap_or_else(|| "(all)".to_string());
 
     for fact in &facts.samples {
@@ -274,13 +287,13 @@ pub fn analyze_slice_facts(
 
     let mut slices: Vec<_> = stats_by_slice.into_values().collect();
     slices.sort_by(|left, right| right.time_ns.cmp(&left.time_ns));
-    SliceAnalysisResult {
+    Ok(SliceAnalysisResult {
         matching_time_ns: matching_time,
         total_time_ns: total_time,
         slices,
         gc_time_ns: gc_time,
         uncollapsible: (uncollapsible_stats.time_ns != 0).then_some(uncollapsible_stats),
-    }
+    })
 }
 
 pub fn render_slice_json(
@@ -486,7 +499,7 @@ fn select_bottom_frame<'a>(
 }
 
 fn add_frame_stats(slice: &mut SliceStats, frame: &Frame, value: TimeNs) {
-    let frame_key = format!("{}\0{}", frame.name, frame.filename);
+    let frame_key = (frame.name.clone(), frame.filename.clone());
     let frame_stats = slice
         .frames
         .entry(frame_key)
@@ -741,8 +754,9 @@ fn is_gc_function(name: &str) -> bool {
 #[cfg(test)]
 mod limit_tests {
     use super::{
-        apply_python_limit, filter_matches_stack, metadata_value, parse_by_slice_threshold,
-        AttributionRule, Frame, SliceAnalysisOptions, SliceDefinition,
+        analyze_slice_facts, apply_python_limit, filter_matches_stack, metadata_value,
+        parse_by_slice_threshold, AttributionRule, Frame, ProfileFacts, SliceAnalysisOptions,
+        SliceDefinition,
     };
     use std::collections::BTreeMap;
 
@@ -874,5 +888,41 @@ mod limit_tests {
                 "{raw}"
             );
         }
+    }
+
+    #[test]
+    fn analyze_rejects_duplicate_slice_names() {
+        let facts = ProfileFacts {
+            samples: Vec::new(),
+            total_primary_value: 0,
+            empty_sample_count: 0,
+            value_types: Vec::new(),
+            period_type: None,
+            period: 0,
+            default_sample_type: String::new(),
+            primary_value_index: 0,
+        };
+        let options = SliceAnalysisOptions {
+            slices: vec![
+                SliceDefinition {
+                    name: "App".to_string(),
+                    path_patterns: vec!["/app".to_string()],
+                    is_default: false,
+                    metadata: BTreeMap::new(),
+                },
+                SliceDefinition {
+                    name: "App".to_string(),
+                    path_patterns: vec!["/other".to_string()],
+                    is_default: false,
+                    metadata: BTreeMap::new(),
+                },
+            ],
+            ..SliceAnalysisOptions::default()
+        };
+        assert_eq!(
+            analyze_slice_facts(&facts, &options).unwrap_err(),
+            "Slice config declares duplicate slice name: App. \
+             Each slice name may be defined once."
+        );
     }
 }
