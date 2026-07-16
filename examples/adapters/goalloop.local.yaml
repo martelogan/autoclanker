@@ -1,0 +1,16 @@
+adapter:
+  kind: goalloop
+  mode: local_repo_path
+  repo_path: ../../.local/goal-loops/demo
+  session_root: .autoclanker
+  allow_missing: true
+  metadata:
+    genes:
+      tuning.chunk:
+        states: [chunk_small, chunk_large]
+        default_state: chunk_small
+        description: Chunk size the loop's benchmark gate reads from GOALLOOP_GENE_TUNING_CHUNK.
+      tuning.matcher:
+        states: [matcher_interpreted, matcher_compiled]
+        default_state: matcher_interpreted
+        description: Matcher strategy the loop's benchmark gate reads from GOALLOOP_GENE_TUNING_MATCHER.

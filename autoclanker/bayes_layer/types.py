@@ -27,6 +27,7 @@ AdapterKind: TypeAlias = Literal[
     "cevolve",
     "python_module",
     "subprocess",
+    "goalloop",
 ]
 AdapterMode: TypeAlias = Literal[
     "fixture",

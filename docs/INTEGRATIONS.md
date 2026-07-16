@@ -24,10 +24,18 @@ For hardened sessions, the adapter boundary also owns two trust-critical jobs:
 - `cevolve`
 - `python_module`
 - `subprocess`
+- `goalloop`
 
 `fixture` keeps the repo self-contained.
 `autoresearch` and `cevolve` are first-party integrations.
 `python_module` and `subprocess` are the generic escape hatches for external loops.
+`goalloop` evaluates candidates against a goal loop's charter gates (see
+`docs/GOALLOOP.md`): it requires `mode: local_repo_path` with `repo_path`
+pointing at the loop root and `metadata.genes` declaring the knobs the gates
+read from `GOALLOOP_GENE_*` environment variables; gates report measurements
+by printing a `GOALLOOP_METRICS={...}` JSON line, and evaluation is refused
+while the loop's charter contract is drifted from its lock. See
+`examples/adapters/goalloop.local.yaml`.
 
 ## 3. First-party adapter modes
 

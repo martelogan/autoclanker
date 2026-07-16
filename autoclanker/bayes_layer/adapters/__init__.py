@@ -7,6 +7,7 @@ from autoclanker.bayes_layer.adapters.external import (
     load_module_adapter,
 )
 from autoclanker.bayes_layer.adapters.fixture import FixtureAdapter
+from autoclanker.bayes_layer.adapters.goalloop_loop import GoalloopAdapter
 from autoclanker.bayes_layer.adapters.protocols import (
     AdapterProbeResult,
     EvalLoopAdapter,
@@ -15,7 +16,14 @@ from autoclanker.bayes_layer.types import AdapterFailure, ValidAdapterConfig
 
 
 def available_adapter_kinds() -> tuple[str, ...]:
-    return ("fixture", "autoresearch", "cevolve", "python_module", "subprocess")
+    return (
+        "fixture",
+        "autoresearch",
+        "cevolve",
+        "python_module",
+        "subprocess",
+        "goalloop",
+    )
 
 
 def load_adapter(config: ValidAdapterConfig) -> EvalLoopAdapter:
@@ -37,6 +45,8 @@ def load_adapter(config: ValidAdapterConfig) -> EvalLoopAdapter:
         return AutoresearchAdapter(config)
     if config.kind == "cevolve":
         return CevolveAdapter(config)
+    if config.kind == "goalloop":
+        return GoalloopAdapter(config)
     raise AdapterFailure(
         f"No builtin adapter implementation exists for kind {config.kind!r}."
     )
@@ -48,6 +58,7 @@ __all__ = [
     "CevolveAdapter",
     "EvalLoopAdapter",
     "FixtureAdapter",
+    "GoalloopAdapter",
     "available_adapter_kinds",
     "load_adapter",
 ]

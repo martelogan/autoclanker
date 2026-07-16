@@ -245,10 +245,16 @@ def test_eval_and_adapter_examples_validate() -> None:
         base_dir=ROOT / "examples/adapters",
     )
 
+    goalloop_config = validate_adapter_config(
+        load_serialized_payload(ROOT / "examples/adapters/goalloop.local.yaml"),
+        base_dir=ROOT / "examples/adapters",
+    )
+
     assert eval_result.status == "valid"
     assert fixture_config.kind == "fixture"
     assert autoresearch_config.kind == "autoresearch"
     assert cevolve_config.kind == "cevolve"
+    assert goalloop_config.kind == "goalloop"
 
 
 @covers("M1-002")
