@@ -4349,3 +4349,134 @@ def test_clankerprof_rust_yaml_tags_match_python(tmp_path: Path) -> None:
     assert rust_run.returncode == 2, rust_run.stderr
     assert core in cast(str, json.loads(python_run.stderr)["error"])
     assert core in cast(str, json.loads(rust_run.stderr)["error"])
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_round6_cluster_s_matches_python(tmp_path: Path) -> None:
+    # R6-01: the pseudo-slice names are reserved at validation in both
+    # languages instead of being attributed and silently stripped at render.
+    facts_builder = PprofFixtureBuilder.create()
+    facts_builder.sample(
+        (facts_builder.location(facts_builder.function("work", "/app/x.rb")),), 7
+    )
+    pseudo_profile = tmp_path / "pseudo.pb"
+    pseudo_profile.write_bytes(facts_builder.encode())
+    for reserved in ("(gc)", "(uncollapsible)"):
+        pseudo_slices = tmp_path / "pseudo-slices.yml"
+        pseudo_slices.write_text(
+            f'slices:\n  - name: "{reserved}"\n    paths: [/app]\n',
+            encoding="utf-8",
+        )
+        envelope = _assert_identical_envelope(
+            [
+                "slices",
+                "--profile",
+                str(pseudo_profile),
+                "--slices",
+                str(pseudo_slices),
+            ],
+            f"reserved-{reserved}",
+        )
+        assert json.loads(envelope) == {
+            "ok": False,
+            "error": (
+                f"Slice config declares reserved pseudo-slice name: {reserved}. "
+                "The names (gc) and (uncollapsible) are reserved for analyzer "
+                "pseudo-outputs."
+            ),
+        }
+
+    # R6-02: a filtered matching total that cancels to zero renders every
+    # dependent percentage through the zero arm, never the whole-profile
+    # total; byte-identical across languages.
+    cancel_builder = PprofFixtureBuilder.create()
+    cancel_builder.sample(
+        (cancel_builder.location(cancel_builder.function("match_a", "/a/one.rb")),), 10
+    )
+    cancel_builder.sample(
+        (cancel_builder.location(cancel_builder.function("match_b", "/b/two.rb")),), -10
+    )
+    cancel_builder.sample(
+        (cancel_builder.location(cancel_builder.function("other_c", "/c/three.rb")),), 5
+    )
+    cancel_profile = tmp_path / "cancel.pb"
+    cancel_profile.write_bytes(cancel_builder.encode())
+    cancel_slices = tmp_path / "cancel-slices.yml"
+    cancel_slices.write_text(
+        "slices:\n"
+        "  - name: A\n    paths: [/a/**]\n"
+        "  - name: B\n    paths: [/b/**]\n"
+        "  - name: default\n    default: true\n",
+        encoding="utf-8",
+    )
+    cancelled = _assert_identical_success(
+        [
+            "slices",
+            "--profile",
+            str(cancel_profile),
+            "--slices",
+            str(cancel_slices),
+            "--filter",
+            "name:match",
+        ],
+        "zero-sum-filter",
+    )
+    payload = json.loads(cancelled)
+    assert payload["summary"]["matching_time_ns"] == 0
+    assert {item["name"]: (item["time_ns"], item["pct"]) for item in payload["slices"]} == {
+        "A": (10, 0),
+        "B": (-10, 0),
+    }
+
+    # R6-03: a bucket whose signed categories cancel to zero keeps its
+    # nonzero category rows in both languages.
+    bucket_builder = PprofFixtureBuilder.create()
+    scope_loc = bucket_builder.location(bucket_builder.function("S", "/srv/app/s.py"))
+    bucket_builder.sample(
+        (bucket_builder.location(bucket_builder.function("Pos", "/srv/app/pos.py")), scope_loc),
+        10,
+    )
+    bucket_builder.sample(
+        (bucket_builder.location(bucket_builder.function("Neg", "/srv/app/neg.py")), scope_loc),
+        -10,
+    )
+    bucket_builder.sample(
+        (bucket_builder.location(bucket_builder.function("Unrelated", "/x/u.py")),), 5
+    )
+    bucket_profile = tmp_path / "cancel-bucket.pb"
+    bucket_profile.write_bytes(bucket_builder.encode())
+    bucket_config = tmp_path / "cancel-bucket.yml"
+    bucket_config.write_text(
+        'cost_kind:\n  Positive: "name:Pos"\n  Negative: "name:Neg"\n'
+        "scope:\n  - function: S\n"
+        '    rollup:\n      Work: ["Positive", "Negative"]\n',
+        encoding="utf-8",
+    )
+    bucket_output = _assert_identical_success(
+        ["scopes", "--profile", str(bucket_profile), "--config", str(bucket_config)],
+        "zero-sum-bucket",
+    )
+    boundary = json.loads(bucket_output)["boundaries"][0]
+    assert [bucket["name"] for bucket in boundary["buckets"]] == ["Work"]
+    assert {
+        category["name"]: category["time_ns"]
+        for category in boundary["buckets"][0]["categories"]
+    } == {"Positive": 10, "Negative": -10}
+
+    # R6-04: the rollup name `Other` is reserved (the renderer appends the
+    # implicit leftover bucket under that name), identical envelopes.
+    other_config = tmp_path / "other.yml"
+    other_config.write_text(
+        'cost_kind:\n  Positive: "name:Pos"\n'
+        "scope:\n  - function: S\n"
+        '    rollup:\n      Other: ["Positive"]\n',
+        encoding="utf-8",
+    )
+    envelope = _assert_identical_envelope(
+        ["scopes", "--profile", str(bucket_profile), "--config", str(other_config)],
+        "reserved-other",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "scope.rollup name 'Other' is reserved for unbucketed cost kinds.",
+    }

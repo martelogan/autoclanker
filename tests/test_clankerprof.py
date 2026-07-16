@@ -5456,6 +5456,69 @@ def test_clankerprof_scope_rollups_render_negative_costs_additively(
     assert categories == {"Pos": 10, "Neg": -5}
 
 
+def test_clankerprof_zero_sum_buckets_keep_nonzero_categories(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # A bucket whose signed categories cancel to zero is not an omittable
+    # zero row: its nonzero children must render.
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("S", "/srv/app/s.py"))
+    pos = builder.location(builder.function("Pos", "/srv/app/pos.py"))
+    neg = builder.location(builder.function("Neg", "/srv/app/neg.py"))
+    builder.sample((pos, target), 10)
+    builder.sample((neg, target), -10)
+    builder.sample((builder.location(builder.function("Unrelated", "/x/u.py")),), 5)
+    profile_path = tmp_path / "cancel-bucket.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "cancel-bucket.yml"
+    config_path.write_text(
+        'cost_kind:\n  Positive: "name:Pos"\n  Negative: "name:Neg"\n'
+        "scope:\n  - function: S\n"
+        '    rollup:\n      Work: ["Positive", "Negative"]\n',
+        encoding="utf-8",
+    )
+    argv = ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+    assert clankerprof_main(argv) == 0
+    boundary = json.loads(capsys.readouterr().out)["boundaries"][0]
+    assert boundary["total_time_ns"] == 0
+    assert [bucket["name"] for bucket in boundary["buckets"]] == ["Work"]
+    bucket = boundary["buckets"][0]
+    assert bucket["time_ns"] == 0
+    assert {
+        category["name"]: category["time_ns"] for category in bucket["categories"]
+    } == {"Positive": 10, "Negative": -10}
+
+
+def test_clankerprof_scope_rollup_name_other_is_reserved(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Rendering appends an implicit `Other` bucket for unbucketed cost kinds;
+    # a configured `Other` would emit duplicate bucket rows that the compare
+    # gate rejects.
+    builder = PprofFixtureBuilder.create()
+    target = builder.location(builder.function("T", "/srv/app/t.py"))
+    leaf = builder.location(builder.function("LeafA", "/srv/app/a.py"))
+    builder.sample((leaf, target), 10)
+    profile_path = tmp_path / "other.pb"
+    profile_path.write_bytes(builder.encode())
+    for rollup_key, expected_field in (("rollup", "scope.rollup"), ("bucket", "scope.bucket")):
+        config_path = tmp_path / "other.yml"
+        config_path.write_text(
+            'cost_kind:\n  A: "name:LeafA"\n'
+            "scope:\n  - function: T\n"
+            f'    {rollup_key}:\n      Other: ["A"]\n',
+            encoding="utf-8",
+        )
+        argv = ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+        assert clankerprof_main(argv) == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == (
+            f"{expected_field} name 'Other' is reserved for unbucketed cost kinds."
+        )
+
+
 def test_clankerprof_scope_attributables_scale_for_negative_totals(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -6633,6 +6696,77 @@ def test_clankerprof_duplicate_slice_names_rejected(
         "Slice config declares duplicate slice name: App. "
         "Each slice name may be defined once."
     )
+
+
+def test_clankerprof_reserved_pseudo_slice_names_rejected(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # A user slice under a pseudo name would be attributed and then stripped
+    # at render, reporting matched time with no owning row.
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text(json.dumps(_minimal_v2_facts()), encoding="utf-8")
+    for reserved in ("(gc)", "(uncollapsible)"):
+        slices_path = tmp_path / "slices.yml"
+        slices_path.write_text(
+            f'slices:\n  - name: "{reserved}"\n    paths: [/app]\n',
+            encoding="utf-8",
+        )
+        exit_code = clankerprof_main(
+            ["slices", "--facts", str(facts_path), "--slices", str(slices_path)]
+        )
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == (
+            f"Slice config declares reserved pseudo-slice name: {reserved}. "
+            "The names (gc) and (uncollapsible) are reserved for analyzer "
+            "pseudo-outputs."
+        )
+
+
+def test_clankerprof_zero_sum_filtered_slices_use_zero_percentages(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Percentages are shares of matching time; when the filtered signed
+    # samples cancel to exactly zero the zero arm renders 0 — never a
+    # fallback to the unrelated whole-profile total.
+    builder = PprofFixtureBuilder.create()
+    builder.sample((builder.location(builder.function("match_a", "/a/one.rb")),), 10)
+    builder.sample((builder.location(builder.function("match_b", "/b/two.rb")),), -10)
+    builder.sample((builder.location(builder.function("other_c", "/c/three.rb")),), 5)
+    profile_path = tmp_path / "cancel.pb"
+    profile_path.write_bytes(builder.encode())
+    slices_path = tmp_path / "slices.yml"
+    slices_path.write_text(
+        "slices:\n"
+        "  - name: A\n    paths: [/a/**]\n"
+        "  - name: B\n    paths: [/b/**]\n"
+        "  - name: default\n    default: true\n",
+        encoding="utf-8",
+    )
+    argv = [
+        "slices",
+        "--profile",
+        str(profile_path),
+        "--slices",
+        str(slices_path),
+        "--filter",
+        "name:match",
+    ]
+    assert clankerprof_main(argv) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["summary"] == {
+        "matching_pct": 0.0,
+        "matching_time_ns": 0,
+        "total_time_ns": 5,
+    }
+    rows = {
+        item["name"]: (item["time_ns"], item["pct"], [f["pct"] for f in item["frames"]])
+        for item in payload["slices"]
+    }
+    # Signed time_ns is preserved; every dependent pct is integer 0.
+    assert rows == {"A": (10, 0, [0]), "B": (-10, 0, [0])}
 
 
 def test_clankerprof_facts_profile_metadata_strictness(

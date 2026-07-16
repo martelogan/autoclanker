@@ -696,9 +696,15 @@ fn render_boundary(boundary: &BoundaryStats, profile_total: TimeNs, top: Option<
     if !leftover.is_empty() {
         buckets.push(render_bucket(boundary, "Other", &leftover));
     }
+    // A bucket is kept while any category row rendered: signed categories can
+    // cancel to a zero bucket total without being omittable zero rows.
     let mut buckets: Vec<Value> = buckets
         .into_iter()
-        .filter(|bucket| time_ns_of(&bucket["time_ns"]) != 0)
+        .filter(|bucket| {
+            bucket["categories"]
+                .as_array()
+                .is_some_and(|rows| !rows.is_empty())
+        })
         .collect();
     buckets.sort_by_key(|bucket| std::cmp::Reverse(time_ns_of(&bucket["time_ns"])));
 
@@ -707,7 +713,13 @@ fn render_boundary(boundary: &BoundaryStats, profile_total: TimeNs, top: Option<
     let domains: Vec<Value> = truncated(
         domains_sorted
             .into_iter()
-            .filter(|(_, stats)| stats.cpu_time != 0)
+            .filter(|(_, stats)| {
+                stats.cpu_time != 0
+                    || stats
+                        .cost_kinds
+                        .values()
+                        .any(|metrics| metrics.cpu_time != 0)
+            })
             .map(|(name, stats)| render_domain(boundary, name, stats, top))
             .collect(),
         top,
@@ -1287,6 +1299,14 @@ fn load_boundaries(
             };
             let mut category_to_bucket: HashMap<String, String> = HashMap::new();
             for (bucket_name, raw_categories) in rollup_table {
+                // Rendering appends an implicit `Other` bucket for unbucketed
+                // cost kinds; a configured `Other` would emit duplicate bucket
+                // rows that the compare gate rejects.
+                if bucket_name == "Other" {
+                    return Err(format!(
+                        "{section_name}.{rollup_name} name 'Other' is reserved for unbucketed cost kinds."
+                    ));
+                }
                 let categories = string_values(
                     raw_categories,
                     &format!("{section_name}.{rollup_name} {bucket_name}"),
@@ -1489,6 +1509,29 @@ match = "name_eq:X"
         assert!(
             error.contains("Use only one of [cost_kind] or [category]"),
             "{error}"
+        );
+    }
+
+    #[test]
+    fn rollup_name_other_is_reserved() {
+        // Rendering appends an implicit `Other` bucket for unbucketed cost
+        // kinds; a configured `Other` would emit duplicate bucket rows.
+        let config = r#"
+cost_kind:
+  A: "name:LeafA"
+scope:
+  - function: T
+    rollup:
+      Other: ["A"]
+"#;
+        let path = std::env::temp_dir().join("clankerprof-reserved-other-test.yml");
+        std::fs::write(&path, config).unwrap();
+        let error = load_boundary_options(&path, crate::rules::RuntimeRuleSet::generic().clone())
+            .unwrap_err();
+        std::fs::remove_file(&path).ok();
+        assert_eq!(
+            error,
+            "scope.rollup name 'Other' is reserved for unbucketed cost kinds."
         );
     }
 

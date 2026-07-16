@@ -811,6 +811,13 @@ def _load_boundary_bucket(
     category_to_bucket: dict[str, str] = {}
     for raw_name, raw_categories in cast(dict[object, object], raw_value).items():
         name = str(raw_name)
+        # Rendering appends an implicit `Other` bucket for unbucketed cost
+        # kinds; a configured `Other` would emit duplicate bucket rows that
+        # the compare gate rejects.
+        if name == "Other":
+            raise ValueError(
+                f"{field_name} name 'Other' is reserved for unbucketed cost kinds."
+            )
         categories = _string_values(
             raw_categories,
             field_name=f"{field_name} {name}",

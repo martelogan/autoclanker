@@ -356,6 +356,15 @@ def analyze_slice_facts(
                 "Each slice name may be defined once."
             )
         seen_names.add(item.name)
+        # A user slice under a pseudo name would be attributed and then
+        # unconditionally stripped at render, leaving matched time with no
+        # owning row.
+        if item.name in (GC_PSEUDO_SLICE, UNCOLLAPSIBLE_PSEUDO_SLICE):
+            raise ValueError(
+                f"Slice config declares reserved pseudo-slice name: {item.name}. "
+                "The names (gc) and (uncollapsible) are reserved for analyzer "
+                "pseudo-outputs."
+            )
     default_slice = default_names[0] if default_names else "(all)"
     matcher = _SliceMatcher(options)
     index = ProfileFactIndex.from_input(sample_facts)

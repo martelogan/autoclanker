@@ -219,6 +219,15 @@ pub fn analyze_slice_facts(
                 definition.name
             ));
         }
+        // A user slice under a pseudo name would be attributed and then
+        // unconditionally stripped at render, leaving matched time with no
+        // owning row.
+        if definition.name == GC_PSEUDO_SLICE || definition.name == UNCOLLAPSIBLE_PSEUDO_SLICE {
+            return Err(format!(
+                "Slice config declares reserved pseudo-slice name: {}. The names (gc) and (uncollapsible) are reserved for analyzer pseudo-outputs.",
+                definition.name
+            ));
+        }
     }
     let mut total_time = 0;
     let mut matching_time = 0;
@@ -300,11 +309,10 @@ pub fn render_slice_json(
     result: &SliceAnalysisResult,
     options: &SliceAnalysisOptions,
 ) -> Result<Value, String> {
-    let total = if result.matching_time_ns != 0 {
-        result.matching_time_ns
-    } else {
-        result.total_time_ns
-    };
+    // Percentages are shares of the filtered matching total; when matched
+    // signed samples cancel to exactly zero the zero arms below render 0 —
+    // never a silent fallback to the unrelated whole-profile total.
+    let total = result.matching_time_ns;
     let mut selected_slices: Vec<_> = result
         .slices
         .iter()
@@ -762,7 +770,7 @@ mod limit_tests {
     use super::{
         analyze_slice_facts, apply_python_limit, filter_matches_stack, metadata_value,
         parse_by_slice_threshold, AttributionRule, Frame, ProfileFacts, SliceAnalysisOptions,
-        SliceDefinition,
+        SliceDefinition, GC_PSEUDO_SLICE, UNCOLLAPSIBLE_PSEUDO_SLICE,
     };
     use std::collections::BTreeMap;
 
@@ -930,5 +938,37 @@ mod limit_tests {
             "Slice config declares duplicate slice name: App. \
              Each slice name may be defined once."
         );
+    }
+
+    #[test]
+    fn analyze_rejects_reserved_pseudo_slice_names() {
+        let facts = ProfileFacts {
+            samples: Vec::new(),
+            total_primary_value: 0,
+            empty_sample_count: 0,
+            value_types: Vec::new(),
+            period_type: None,
+            period: 0,
+            default_sample_type: String::new(),
+            primary_value_index: 0,
+        };
+        for reserved in [GC_PSEUDO_SLICE, UNCOLLAPSIBLE_PSEUDO_SLICE] {
+            let options = SliceAnalysisOptions {
+                slices: vec![SliceDefinition {
+                    name: reserved.to_string(),
+                    path_patterns: vec!["/app".to_string()],
+                    is_default: false,
+                    metadata: BTreeMap::new(),
+                }],
+                ..SliceAnalysisOptions::default()
+            };
+            assert_eq!(
+                analyze_slice_facts(&facts, &options).unwrap_err(),
+                format!(
+                    "Slice config declares reserved pseudo-slice name: {reserved}. \
+                     The names (gc) and (uncollapsible) are reserved for analyzer pseudo-outputs."
+                )
+            );
+        }
     }
 }

@@ -527,7 +527,15 @@ Scope totals for one scope must remain internally additive: rollup cost-kind
 rows sum to the scope total, and owner cost-kind rows sum to their owner totals.
 Zero-aggregate rows may be omitted from rendered rollups (they cannot affect
 the sums), but rows with negative aggregates must be rendered — sample values
-are signed, and dropping negative rows breaks additivity.
+are signed, and dropping negative rows breaks additivity. A row may be
+omitted only when its aggregate AND its entire rendered subtree are zero:
+signed children can cancel to a zero parent total (a `+10`/`-10` bucket, a
+zero-sum domain), and such a parent renders with its nonzero rows rather
+than erasing them.
+Rendering appends an implicit `Other` bucket collecting unbucketed nonzero
+cost kinds, so the rollup name `Other` is reserved: a configured `Other`
+rollup is a validation error in both implementations (otherwise projections
+could emit duplicate bucket rows that the compare gate correctly rejects).
 Calibrated attributables are caller-supplied same-scope metrics; the analyzer
 only scales them proportionally by scope CPU share. The share is signed —
 a `-10` row inside a `-10` scope is 100% of it — so estimates are emitted
@@ -567,12 +575,22 @@ in both polarities: a sample rescued into a slice by a descendant attribute
 rule matches `slice:<name>` and is excluded by `!slice:<name>`. Collapse
 `slice:` rules intentionally do not use the descendant-attribute rescue.
 
+Slice, frame, library, and pseudo-output `pct` fields are shares of
+`matching_time_ns` — the filtered, attributed total; the whole-profile
+`total_time_ns` is reported in the summary only. A zero matching total
+(valid signed samples can cancel to exactly zero) renders every dependent
+percentage as `0` — never a silent fallback to the whole-profile total.
+
 At most one slice may set `default: true`; declaring several is a validation
 error (previously attribution silently used the last while tracking used the
 first). Slice names must be unique: duplicates are a validation error in
 both languages ("Slice config declares duplicate slice name: <name>. Each
 slice name may be defined once.") — previously Python kept the last
-definition's metadata while Rust kept the first. The `default` value must be a YAML boolean — absent and `null` read
+definition's metadata while Rust kept the first. The pseudo-output names
+`(gc)` and `(uncollapsible)` are reserved: a user slice under either name
+is a validation error in both languages, because such a slice would be
+attributed and then stripped at render, reporting matched time with no
+owning row. The `default` value must be a YAML boolean — absent and `null` read
 as false, and any other type is a validation error in both languages
 (`Slice default must be a boolean.`); truthiness coercion is forbidden
 because it silently diverged between implementations.

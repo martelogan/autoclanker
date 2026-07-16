@@ -185,7 +185,9 @@ def _render_boundary(
     )
     if leftover:
         buckets.append(_render_boundary_bucket(boundary, "Other", leftover))
-    buckets = [bucket for bucket in buckets if cast(int, bucket["time_ns"]) != 0]
+    # A bucket is kept while any category row rendered: signed categories can
+    # cancel to a zero bucket total without being omittable zero rows.
+    buckets = [bucket for bucket in buckets if cast("list[object]", bucket["categories"])]
     buckets.sort(key=lambda bucket: cast(int, bucket["time_ns"]), reverse=True)
     return {
         "name": boundary.name,
@@ -207,6 +209,7 @@ def _render_boundary(
                 reverse=True,
             )
             if stats.cpu_time != 0
+            or any(metrics.cpu_time != 0 for metrics in stats.cost_kinds.values())
         ][:top],
     }
 
@@ -899,7 +902,10 @@ def render_slice_json(
     options: SliceAnalysisOptions | None = None,
 ) -> dict[str, object]:
     resolved_options = options or SliceAnalysisOptions()
-    total = result.matching_time_ns or result.total_time_ns
+    # Percentages are shares of the filtered matching total; when matched
+    # signed samples cancel to exactly zero the zero arms below render 0 —
+    # never a silent fallback to the unrelated whole-profile total.
+    total = result.matching_time_ns
     library_limit = (
         resolved_options.unattributed_libraries
         if resolved_options.unattributed_libraries is not None
