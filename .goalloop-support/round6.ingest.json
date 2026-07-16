@@ -1,0 +1,62 @@
+[
+ {
+  "title": "Configured pseudo-slice names silently erase matched samples",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. User slices named (gc)/(uncollapsible) accepted, attributed, then unconditionally stripped at render -> matched time with no owning row, both languages. Fix: reserve the pseudo names at validation. Evidence: .goalloop-support/round6.triage.json#Q1"
+ },
+ {
+  "title": "Zero-sum filtered samples use unrelated profile time as the percentage denominator",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Zero-sum filtered matching time falls back to the unrelated profile total as denominator (matching or total) -> pct 200/-200. Fix: honor the documented zero arm. #Q2"
+ },
+ {
+  "title": "Zero-sum scope buckets discard their nonzero negative children",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Buckets filtered on summed time_ns drop nonzero +10/-10 children when they cancel. Fix: keep buckets with any rendered category rows. #Q3"
+ },
+ {
+  "title": "A configured `Other` rollup makes projections emit reports rejected by compare",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Configured rollup named Other collides with the implicit leftover bucket -> projections emit duplicate rows compare itself rejects. Fix: reserve the name at config load. #Q4"
+ },
+ {
+  "title": "YAML merge keys silently change slice ownership between Python and Rust",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. YAML merge keys: PyYAML expands <<, serde keeps ordinary key -> same file changes slice ownership. Fix: fail closed on merge keys in both, shared message. #Q5"
+ },
+ {
+  "title": "Facts-v2 JSON acceptance diverges for lone UTF-16 surrogates",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Lone UTF-16 surrogate escapes accepted by Python json, unrepresentable in Rust strings -> acceptance parity impossible. Fix: Python rejects, aligning to serde outcome. #Q6"
+ },
+ {
+  "title": "An unknown focus name turns a real compare regression into success",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Unknown --focus name silently matches zero rows -> real 40pp regression exits 0 stable. Fix: fail closed on zero-match focus vs union of row names. #Q7"
+ },
+ {
+  "title": "A valid large core-class CSV escapes Python's JSON error boundary",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. csv module 131072-byte field limit + uncontracted _csv.Error -> Python traceback exit 1 on valid CSV Rust accepts. Python-only fix: unbounded field size + contracted error. #Q8"
+ },
+ {
+  "title": "Valid large target totals break CSV and text byte parity",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Elapsed-time formatting divides exact int (Python) vs f64-rounded aggregate (Rust) -> .24 vs .25 min on valid u64-range totals. Fix: Python adopts f64 op order (R3-04 precedent). #Q9"
+ },
+ {
+  "title": "Rust's custom JSON float writer does not implement CPython repr",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. pyjson scientific formatting is not CPython-repr shortest-digits in an edge (\u2026893.2 vs \u2026893.3). Rust-only fix to true shortest-roundtrip repr. #Q10"
+ },
+ {
+  "title": "Repeated scalar CLI options have incompatible semantics",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Repeated scalar options: argparse last-wins vs clap duplicate rejection. Fix: last-wins everywhere (focus-flag precedent). #Q11"
+ },
+ {
+  "title": "Rust silently ignores a non-string scope `slices` path",
+  "verdict": "confirmed",
+  "evidence": "Reproduced. Non-string scope slices: path silently ignored by Rust as_str; Python treats as path. Fix: reject non-strings, shared message (R3-06 pattern). #Q12"
+ }
+]

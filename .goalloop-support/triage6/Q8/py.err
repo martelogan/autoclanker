@@ -1,0 +1,18 @@
+Traceback (most recent call last):
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/.venv/bin/clankerprof", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1629, in main
+    payload = cast(dict[str, Any], args.handler(args))
+                                   ^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 95, in wrapped
+    return handler(args)
+           ^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 1084, in run_targets
+    runtime_rules = _runtime_rules(args)
+                    ^^^^^^^^^^^^^^^^^^^^
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/cli.py", line 384, in _runtime_rules
+    load_ruby_core_classes(args.ruby_core_classes)
+  File "/Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit/clankerprof/categorize.py", line 29, in load_ruby_core_classes
+    for row in csv.reader(handle):
+_csv.Error: field larger than field limit (131072)

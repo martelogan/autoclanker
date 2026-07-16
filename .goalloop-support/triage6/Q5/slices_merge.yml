@@ -1,0 +1,5 @@
+defaults: &defaults
+  paths: ["/a"]
+slices:
+  - name: A
+    <<: *defaults

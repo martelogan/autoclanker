@@ -1,0 +1,32 @@
+{
+  "after_total_ns": 1000000000,
+  "before_total_ns": 1000000000,
+  "has_regression": false,
+  "projection": "boundaries",
+  "rows": [
+    {
+      "after_pct": 50.0,
+      "before_pct": 10.0,
+      "boundary": "db",
+      "delta_abs": 40.0,
+      "delta_rel": 400.0,
+      "kind": "boundary",
+      "name": "db",
+      "status": "stable"
+    }
+  ],
+  "tool": "clankerprof_compare",
+  "top_improvements": [],
+  "top_regressions": [
+    {
+      "after_pct": 50.0,
+      "before_pct": 10.0,
+      "boundary": "db",
+      "delta_abs": 40.0,
+      "delta_rel": 400.0,
+      "kind": "boundary",
+      "name": "db",
+      "status": "stable"
+    }
+  ]
+}

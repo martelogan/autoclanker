@@ -1,0 +1,1 @@
+{"tool": "clankerprof_boundaries", "summary": {"total_time_ns": 1000000000}, "boundaries": [{"name": "db", "pct_of_profile": 10.0}]}

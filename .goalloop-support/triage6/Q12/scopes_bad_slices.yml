@@ -1,0 +1,6 @@
+slices: 123
+cost_kind:
+  AppWork: "name:Leaf"
+scope:
+  - function: T
+    label: S

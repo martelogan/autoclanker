@@ -1,0 +1,8 @@
+cost_kind:
+  A: "name:LeafA"
+  B: "name:LeafB"
+scope:
+  - function: T
+    rollup:
+      Other:
+        - A

@@ -1,0 +1,4 @@
+slices:
+  - name: "s\ud800"
+    match:
+      - path: "leaf"

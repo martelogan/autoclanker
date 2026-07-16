@@ -1,0 +1,9 @@
+{
+  "after_total_ns": 0,
+  "before_total_ns": 0,
+  "has_regression": false,
+  "slices": [],
+  "tool": "clankerprof_compare",
+  "top_improvements": [],
+  "top_regressions": []
+}

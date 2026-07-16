@@ -1,0 +1,1 @@
+{"error": "error: the argument '--pretty' cannot be used multiple times\n\nUsage: clankerprof-rs facts [OPTIONS] --profile <PROFILE>\n\nFor more information, try '--help'.", "ok": false}

@@ -1,0 +1,2 @@
+Parent Function,Category,CPU Time (ns),CPU Time,%,Samples,Leaf Functions,Files,Top 3 Callsites,Top Leaf Functions,Top Caller->Leaf Pair,Rank-2 Caller->Leaf Pair,Rank-3 Caller->Leaf Pair
+parent,Other,10717268054699998221,178621134.25 min,100.00,2,2,2,parent (100.0%),leaf_b (53.3%); leaf_a (46.7%),"parent -> leaf_b (1 samples, 53.3%)","parent -> leaf_a (1 samples, 46.7%)",

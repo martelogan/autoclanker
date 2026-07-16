@@ -1,0 +1,89 @@
+{
+  "boundaries": [
+    {
+      "attributable_estimates": {},
+      "buckets": [
+        {
+          "attributable_estimates": {},
+          "categories": [
+            {
+              "attributable_estimates": {},
+              "caller_leaf_pairs": [
+                {
+                  "attributable_estimates": {},
+                  "pair": "LeafA -> LeafA",
+                  "pct": 66.66666666666666,
+                  "samples": 1,
+                  "time_ns": 10
+                }
+              ],
+              "files": [
+                "/srv/app/leaf_a.py"
+              ],
+              "folded_from": {},
+              "leaf_functions": {
+                "LeafA": {
+                  "count": 1,
+                  "cpu_time": 10
+                }
+              },
+              "name": "A",
+              "pct": 66.66666666666666,
+              "samples": 1,
+              "time_ns": 10
+            }
+          ],
+          "name": "Other",
+          "pct": 66.66666666666666,
+          "samples": 1,
+          "time_ns": 10
+        },
+        {
+          "attributable_estimates": {},
+          "categories": [
+            {
+              "attributable_estimates": {},
+              "caller_leaf_pairs": [
+                {
+                  "attributable_estimates": {},
+                  "pair": "LeafB -> LeafB",
+                  "pct": 33.33333333333333,
+                  "samples": 1,
+                  "time_ns": 5
+                }
+              ],
+              "files": [
+                "/srv/app/leaf_b.py"
+              ],
+              "folded_from": {},
+              "leaf_functions": {
+                "LeafB": {
+                  "count": 1,
+                  "cpu_time": 5
+                }
+              },
+              "name": "B",
+              "pct": 33.33333333333333,
+              "samples": 1,
+              "time_ns": 5
+            }
+          ],
+          "name": "Other",
+          "pct": 33.33333333333333,
+          "samples": 1,
+          "time_ns": 5
+        }
+      ],
+      "domains": [],
+      "name": "T",
+      "pct_of_profile": 100.0,
+      "samples": 2,
+      "total_time_ns": 15
+    }
+  ],
+  "summary": {
+    "total_time_ns": 15,
+    "unique_frame_count": 3
+  },
+  "tool": "clankerprof_boundaries"
+}

@@ -1,0 +1,9 @@
+slices:
+  - name: A
+    paths:
+      - /a/**
+  - name: B
+    paths:
+      - /b/**
+  - name: default
+    default: true

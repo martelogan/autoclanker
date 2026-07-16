@@ -1,0 +1,8 @@
+cost_kind:
+  Positive: "name:Pos"
+  Negative: "name:Neg"
+scope:
+  - function: S
+    rollup:
+      Plus: ["Positive"]
+      Minus: ["Negative"]
