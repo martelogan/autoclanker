@@ -1,7 +1,7 @@
 use crate::model::{
     select_primary_value_index, Function, Location, Profile, Sample, TimeNs, ValueType,
 };
-use flate2::read::MultiGzDecoder;
+use flate2::bufread::GzDecoder;
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 use std::fs;
@@ -292,16 +292,31 @@ pub fn decode_profile_bytes(data: &[u8]) -> DecodeResult<Profile> {
 }
 
 fn maybe_gzip_decompress(data: &[u8]) -> DecodeResult<Vec<u8>> {
-    if data.starts_with(&[0x1f, 0x8b]) {
-        // MultiGzDecoder matches Python's gzip.decompress: RFC 1952 allows a
-        // stream of members, and profiles produced by appending writers are
-        // silently truncated by a single-member decoder.
-        let mut decoder = MultiGzDecoder::new(data);
-        let mut payload = Vec::new();
-        decoder.read_to_end(&mut payload)?;
-        return Ok(payload);
+    if !data.starts_with(&[0x1f, 0x8b]) {
+        return Ok(data.to_vec());
     }
-    Ok(data.to_vec())
+    // Mirror CPython's gzip module member by member: RFC 1952 allows a stream
+    // of members, and zero padding after any member is consumed (gzip FAQ #8,
+    // exactly like CPython's _read_eof). Non-zero trailing bytes make CPython
+    // raise BadGzipFile, which decode_profile_bytes treats as "not gzip after
+    // all" and re-parses the original bytes as raw protobuf — so this returns
+    // the raw data for that case instead of erroring.
+    let mut rest: &[u8] = data;
+    let mut payload = Vec::new();
+    loop {
+        let mut decoder = GzDecoder::new(rest);
+        decoder.read_to_end(&mut payload)?;
+        rest = decoder.into_inner();
+        while let Some((&0, tail)) = rest.split_first() {
+            rest = tail;
+        }
+        if rest.is_empty() {
+            return Ok(payload);
+        }
+        if !rest.starts_with(&[0x1f, 0x8b]) {
+            return Ok(data.to_vec());
+        }
+    }
 }
 
 fn parse_function(payload: &[u8]) -> DecodeResult<RawFunction> {
@@ -446,5 +461,35 @@ mod gzip_tests {
         let mut stream = gzip_member(&[0x32, 0x00]);
         stream.truncate(stream.len() - 5);
         assert!(maybe_gzip_decompress(&stream).is_err());
+    }
+
+    #[test]
+    fn zero_padded_gzip_members_decode() {
+        // Zero padding after any member is conventional (gzip FAQ #8) and
+        // consumed by CPython's gzip module — after the final member and
+        // between members alike.
+        let mut trailing = gzip_member(&[0x32, 0x00]);
+        trailing.extend([0u8; 16]);
+        assert_eq!(
+            maybe_gzip_decompress(&trailing).expect("trailing padding"),
+            vec![0x32, 0x00]
+        );
+        let mut between = gzip_member(&[0x32, 0x00]);
+        between.extend([0u8; 8]);
+        between.extend(gzip_member(&[0x12, 0x02, 0x10, 0x07]));
+        assert_eq!(
+            maybe_gzip_decompress(&between).expect("padding between members"),
+            vec![0x32, 0x00, 0x12, 0x02, 0x10, 0x07]
+        );
+    }
+
+    #[test]
+    fn nonzero_trailing_garbage_falls_back_to_raw_bytes() {
+        // CPython raises BadGzipFile on non-zero trailing bytes and
+        // decode_profile_bytes then re-parses the original bytes as raw
+        // protobuf; the decoder mirrors that by returning the input.
+        let mut stream = gzip_member(&[0x32, 0x00]);
+        stream.extend([0x01, 0x02, 0x03]);
+        assert_eq!(maybe_gzip_decompress(&stream).expect("fallback"), stream);
     }
 }

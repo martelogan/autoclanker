@@ -19,6 +19,8 @@ from clankerprof import __version__
 from clankerprof.analysis import (
     DEFAULT_LIBRARY_SELECTORS,
     DEFAULT_RUNTIME_RULES,
+    GC_PSEUDO_SLICE,
+    UNCOLLAPSIBLE_PSEUDO_SLICE,
     AttributionRule,
     BoundaryAnalysisOptions,
     BoundaryCategoryDefinition,
@@ -359,6 +361,15 @@ def _validate_slice_options(options: SliceAnalysisOptions) -> None:
         key = (attribute.key, attribute.value)
         if attribute.key not in valid_attribute_keys:
             raise ValueError(f"Unsupported attribute filter key: {attribute.key}")
+        if attribute.target_slice in (GC_PSEUDO_SLICE, UNCOLLAPSIBLE_PSEUDO_SLICE):
+            # The virtual-slice opt-in waives only the must-name-a-configured-
+            # slice rule; a pseudo-slice target would be attributed and then
+            # stripped at render, leaving matched time with no owning row.
+            raise ValueError(
+                f"Attribute target names reserved pseudo-slice name: "
+                f"{attribute.target_slice}. The names (gc) and (uncollapsible) "
+                "are reserved for analyzer pseudo-outputs."
+            )
         if (
             attribute.target_slice not in names
             and not options.allow_virtual_attribute_slices
@@ -473,7 +484,9 @@ def _parse_attribute(raw: str) -> AttributionRule:
     if body.startswith("!"):
         raise ValueError(f"Attribute rules do not support '!': {raw}")
     key, separator, value = body.partition(":")
-    if not separator:
+    if not separator or not key or not value:
+        # An empty value would substring-match every frame and silently
+        # reassign all ownership; filters already reject the same shape.
         raise ValueError(f"Attribute rule filter must be '<key>:<value>': {raw}")
     if key == "slice":
         raise ValueError(f"Attribute rules do not support slice: filters: {raw}")
@@ -920,10 +933,30 @@ def _load_boundaries(
         raise ValueError(f"Scope config must contain a {section_name} array.")
     boundaries: list[BoundaryDefinition] = []
     seen_names: set[str] = set()
+    known_entry_keys = {
+        "selector",
+        "matcher",
+        "match",
+        "function",
+        "label",
+        "name",
+        "count",
+        "rollup",
+        "bucket",
+        "attributables",
+        "exclude_descendants",
+    }
     for item in cast(list[object], raw_value):
         if not isinstance(item, dict):
             raise ValueError("Each boundary entry must be an object.")
         raw_boundary = cast(dict[object, object], item)
+        # Entries are fixed-shape: a typoed key (exclude_descendents) must
+        # never silently disable its rule, mirroring the rule-pack principle.
+        unknown_keys = sorted(
+            str(key) for key in raw_boundary if str(key) not in known_entry_keys
+        )
+        if unknown_keys:
+            raise ValueError(f"Unknown {section_name} field: {unknown_keys[0]}.")
         raw_predicates = _boundary_predicate_value(
             raw_boundary, section_name=section_name
         )

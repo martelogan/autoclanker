@@ -1255,10 +1255,34 @@ fn load_boundaries(
     };
     let mut boundaries = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
+    const KNOWN_ENTRY_KEYS: [&str; 11] = [
+        "selector",
+        "matcher",
+        "match",
+        "function",
+        "label",
+        "name",
+        "count",
+        "rollup",
+        "bucket",
+        "attributables",
+        "exclude_descendants",
+    ];
     for item in items {
         let Value::Object(raw_boundary) = item else {
             return Err("Each boundary entry must be an object.".to_string());
         };
+        // Entries are fixed-shape: a typoed key (exclude_descendents) must
+        // never silently disable its rule, mirroring the rule-pack principle.
+        let mut unknown_keys: Vec<&str> = raw_boundary
+            .keys()
+            .map(String::as_str)
+            .filter(|key| !KNOWN_ENTRY_KEYS.contains(key))
+            .collect();
+        unknown_keys.sort_unstable();
+        if let Some(first) = unknown_keys.first() {
+            return Err(format!("Unknown {section_name} field: {first}."));
+        }
         let raw_predicates = boundary_predicate_value(raw_boundary, section_name)?;
         // Validated before the label fallback, which derives the label from
         // the first entry: Python str() and serde Display disagree on

@@ -6902,6 +6902,220 @@ def test_clankerprof_zero_sum_filtered_slices_use_zero_percentages(
     # Signed time_ns is preserved; every dependent pct is integer 0.
     assert rows == {"A": (10, 0, [0]), "B": (-10, 0, [0])}
 
+    # %-threshold selection compares against the rendered 0 percentages:
+    # thresholds <= 0 keep every row (0 >= 0 and 0 >= -1), never deleting
+    # signed rows through a nonzero-total short-circuit; positive thresholds
+    # still drop them all (0 >= 1 is false).
+    threshold_cases: list[tuple[str, set[str]]] = [
+        ("0%", {"A", "B"}),
+        ("-1%", {"A", "B"}),
+        ("1%", set()),
+    ]
+    for threshold, expected in threshold_cases:
+        assert clankerprof_main([*argv, f"--by-slice={threshold}"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert {item["name"] for item in payload["slices"]} == expected, threshold
+
+
+def test_clankerprof_zero_total_simple_csv_keeps_signed_rows(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Under a zero parent total every share renders as 0, so the simplified
+    # noise gate may omit only exactly-zero rows; signed rows keep rendering.
+    builder = PprofFixtureBuilder.create()
+    parent = builder.function("T", "/app/t.py")
+    builder.sample(
+        (
+            builder.location(builder.function("PosLeaf", "/app/pos.py")),
+            builder.location(parent),
+        ),
+        10,
+    )
+    builder.sample(
+        (
+            builder.location(builder.function("NegLeaf", "/app/neg.py")),
+            builder.location(parent),
+        ),
+        -10,
+    )
+    profile_path = tmp_path / "cancel.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "targets.json"
+    config_path.write_text(
+        json.dumps({"T": {"Pos": "pos.py", "Neg": "neg.py"}}), encoding="utf-8"
+    )
+    assert (
+        clankerprof_main(
+            [
+                "targets",
+                "--profile",
+                str(profile_path),
+                "--config",
+                str(config_path),
+                "--format",
+                "simple-csv",
+            ]
+        )
+        == 0
+    )
+    lines = capsys.readouterr().out.splitlines()
+    categories = {line.split(",")[1] for line in lines[1:]}
+    assert {"Pos", "Neg"} <= categories
+
+    # Negative rows also render at any magnitude under a nonzero total.
+    builder = PprofFixtureBuilder.create()
+    parent = builder.function("T", "/app/t.py")
+    builder.sample(
+        (
+            builder.location(builder.function("PosLeaf", "/app/pos.py")),
+            builder.location(parent),
+        ),
+        100000,
+    )
+    builder.sample(
+        (
+            builder.location(builder.function("NegLeaf", "/app/neg.py")),
+            builder.location(parent),
+        ),
+        -10,
+    )
+    tiny_path = tmp_path / "tiny.pb"
+    tiny_path.write_bytes(builder.encode())
+    assert (
+        clankerprof_main(
+            [
+                "targets",
+                "--profile",
+                str(tiny_path),
+                "--config",
+                str(config_path),
+                "--format",
+                "simple-csv",
+            ]
+        )
+        == 0
+    )
+    lines = capsys.readouterr().out.splitlines()
+    categories = {line.split(",")[1] for line in lines[1:]}
+    assert "Neg" in categories
+
+
+def test_clankerprof_attribute_targets_cannot_use_reserved_pseudo_slices(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    builder.sample((builder.location(builder.function("Leaf", "/app/leaf.py")),), 10)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    slices_path = tmp_path / "slices.yml"
+    slices_path.write_text(
+        "slices:\n  - name: App\n    paths: [/app/*]\n", encoding="utf-8"
+    )
+    base = ["slices", "--profile", str(profile_path), "--slices", str(slices_path)]
+
+    # The virtual-slice opt-in waives only the must-name-a-configured-slice
+    # rule; a pseudo-slice target would be attributed then stripped at render.
+    for name in ("(gc)", "(uncollapsible)"):
+        exit_code = clankerprof_main(
+            [
+                *base,
+                "--attribute",
+                f"name:Leaf,to:{name}",
+                "--allow-virtual-attribute-slices",
+            ]
+        )
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == (
+            f"Attribute target names reserved pseudo-slice name: {name}. "
+            "The names (gc) and (uncollapsible) are reserved for analyzer "
+            "pseudo-outputs."
+        )
+
+    # Empty predicate keys/values would substring-match every frame.
+    for raw in ("name:,to:App", ":x,to:App"):
+        exit_code = clankerprof_main([*base, "--attribute", raw])
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == (
+            f"Attribute rule filter must be '<key>:<value>': {raw}"
+        )
+
+
+def test_clankerprof_facts_rejects_out_of_range_primary_value_index(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create(
+        sample_types=(("samples", "count"), ("cpu", "nanoseconds")),
+        default_sample_type="cpu",
+    )
+    builder.sample(
+        (builder.location(builder.function("Leaf", "/app/leaf.py")),), (1, 100)
+    )
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    facts_path = tmp_path / "facts.json"
+    assert (
+        clankerprof_main(
+            ["facts", "--profile", str(profile_path), "--output", str(facts_path)]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    payload = json.loads(facts_path.read_text(encoding="utf-8"))
+    assert payload["profile"]["primary_value_index"] == 1
+
+    # No selection rule can produce an index outside the declared types; the
+    # per-sample values[0] fallback must not silently select the wrong metric.
+    payload["profile"]["primary_value_index"] = 99
+    del payload["summary"]
+    bad_path = tmp_path / "bad.json"
+    bad_path.write_text(json.dumps(payload), encoding="utf-8")
+    exit_code = clankerprof_main(
+        ["targets", "--facts", str(bad_path), "--target", "Leaf"]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == (
+        "Sample facts primary_value_index 99 is out of range for 2 declared "
+        "value types."
+    )
+
+
+def test_clankerprof_scope_entries_reject_unknown_keys(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    builder.sample(
+        (
+            builder.location(builder.function("Block", "/app/block.py")),
+            builder.location(builder.function("S", "/app/s.py")),
+        ),
+        10,
+    )
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "scopes.yml"
+    config_path.write_text(
+        'cost_kind:\n  AppWork: "path:app/**"\n'
+        "scope:\n"
+        "  - label: Audited\n"
+        "    function: S\n"
+        '    exclude_descendents: "name_eq:Block"\n',
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    # A typo must never silently disable its rule.
+    assert envelope["error"] == "Unknown scope field: exclude_descendents."
+
 
 def test_clankerprof_facts_profile_metadata_strictness(
     tmp_path: Path,

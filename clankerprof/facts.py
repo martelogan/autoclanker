@@ -377,6 +377,19 @@ def _validated_profile_meta(raw: object) -> _ProfileMeta:
         raise ValueError("Sample facts primary_value_index must be an integer.")
     if primary_value_index < 0:
         raise ValueError("Sample facts primary_value_index must be non-negative.")
+    # Selection rules can only yield a declared type's position (or 0 when no
+    # types are declared); anything else silently selects the wrong metric
+    # through the per-sample values[0] fallback.
+    index_in_range = (
+        primary_value_index < len(value_types)
+        if value_types
+        else primary_value_index == 0
+    )
+    if not index_in_range:
+        raise ValueError(
+            f"Sample facts primary_value_index {primary_value_index} is out of "
+            f"range for {len(value_types)} declared value types."
+        )
     raw_period = payload.get("period", 0)
     period = _strict_int(raw_period)
     if period is None or period < _I64_MIN or period > _I64_MAX:

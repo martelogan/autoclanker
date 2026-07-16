@@ -321,7 +321,15 @@ pub fn render_target_csv(
         let total: TimeNs = categories.values().map(|stats| stats.cpu_time).sum();
         for (category, stats) in sorted_categories(categories) {
             let pct = pct_of(stats.cpu_time, total);
-            if simplified && pct.abs() < 0.1 && category != "Other" {
+            // The noise gate only hides small nonnegative shares: negative
+            // rows are signed data that must render at any magnitude, and a
+            // zero parent total may omit only exactly-zero rows.
+            if simplified
+                && category != "Other"
+                && stats.cpu_time >= 0
+                && pct.abs() < 0.1
+                && (total != 0 || stats.cpu_time == 0)
+            {
                 continue;
             }
             let row = CategoryRow { stats, total };
@@ -397,7 +405,15 @@ fn render_legacy_target_csv(
         let total: TimeNs = categories.values().map(|stats| stats.cpu_time).sum();
         for (category, stats) in sorted_categories(categories) {
             let pct = pct_of(stats.cpu_time, total);
-            if simplified && pct.abs() < 0.1 && category != "Other" {
+            // The noise gate only hides small nonnegative shares: negative
+            // rows are signed data that must render at any magnitude, and a
+            // zero parent total may omit only exactly-zero rows.
+            if simplified
+                && category != "Other"
+                && stats.cpu_time >= 0
+                && pct.abs() < 0.1
+                && (total != 0 || stats.cpu_time == 0)
+            {
                 continue;
             }
             let row = CategoryRow { stats, total };

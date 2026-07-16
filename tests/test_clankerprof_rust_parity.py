@@ -4240,6 +4240,10 @@ def test_clankerprof_regex_engine_edge_semantics_are_pinned(tmp_path: Path) -> N
         ("casefold", "/İ", "regex:(?i)i", "Matched", "Other"),
         ("wordclass", "/́", "regex:\\w", "Other", "Matched"),
         ("spaceclass", "/\x1f", "regex:\\s", "Matched", "Other"),
+        # Conditional groups evaluate per-engine: fancy-regex diverges from
+        # Python on group-participation tests (documented, avoid in portable
+        # configs).
+        ("conditional", "/app/a", "regex:(?P<x>/app)/a(?(x)|x)", "Matched", "Other"),
     ]
     for label, filename, pattern, python_expected, rust_expected in cases:
         builder = PprofFixtureBuilder.create()
@@ -4706,3 +4710,196 @@ def test_clankerprof_rust_round6_cluster_u_matches_python(tmp_path: Path) -> Non
         "2",
     ]
     _assert_identical_success(repeated_threshold, "repeated-threshold")
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_round7_cluster_v_matches_python(tmp_path: Path) -> None:
+    # R7-01/R7-07: reserved pseudo-slice attribute targets and empty
+    # attribute predicates fail closed identically.
+    builder = PprofFixtureBuilder.create()
+    builder.sample((builder.location(builder.function("Leaf", "/app/leaf.py")),), 10)
+    profile_path = tmp_path / "attr.pb"
+    profile_path.write_bytes(builder.encode())
+    slices_path = tmp_path / "attr-slices.yml"
+    slices_path.write_text(
+        "slices:\n  - name: App\n    paths: [/app/*]\n", encoding="utf-8"
+    )
+    slices_base = [
+        "slices",
+        "--profile",
+        str(profile_path),
+        "--slices",
+        str(slices_path),
+    ]
+    envelope = _assert_identical_envelope(
+        [
+            *slices_base,
+            "--attribute",
+            "name:Leaf,to:(gc)",
+            "--allow-virtual-attribute-slices",
+        ],
+        "attr-reserved-target",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": (
+            "Attribute target names reserved pseudo-slice name: (gc). The names "
+            "(gc) and (uncollapsible) are reserved for analyzer pseudo-outputs."
+        ),
+    }
+    envelope = _assert_identical_envelope(
+        [*slices_base, "--attribute", "name:,to:App"], "attr-empty-value"
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Attribute rule filter must be '<key>:<value>': name:,to:App",
+    }
+
+    # R7-02: out-of-range primary_value_index rejected identically.
+    typed = PprofFixtureBuilder.create(
+        sample_types=(("samples", "count"), ("cpu", "nanoseconds")),
+        default_sample_type="cpu",
+    )
+    typed.sample((typed.location(typed.function("Leaf", "/app/leaf.py")),), (1, 100))
+    typed_profile = tmp_path / "typed.pb"
+    typed_profile.write_bytes(typed.encode())
+    facts_path = tmp_path / "typed-facts.json"
+    export = _run_python_cli_raw(
+        ["facts", "--profile", str(typed_profile), "--output", str(facts_path)]
+    )
+    assert export.returncode == 0, export.stderr
+    payload = cast(dict[str, Any], json.loads(facts_path.read_text(encoding="utf-8")))
+    cast(dict[str, Any], payload["profile"])["primary_value_index"] = 99
+    del payload["summary"]
+    bad_facts = tmp_path / "typed-facts-bad.json"
+    bad_facts.write_text(json.dumps(payload), encoding="utf-8")
+    envelope = _assert_identical_envelope(
+        ["targets", "--facts", str(bad_facts), "--target", "Leaf"],
+        "facts-index-out-of-range",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": (
+            "Sample facts primary_value_index 99 is out of range for 2 declared "
+            "value types."
+        ),
+    }
+
+    # R7-03: numeric backrefs to named groups now compile and match in both
+    # languages (the conditional-group divergence stays pinned in the
+    # engine-edge test).
+    backref = PprofFixtureBuilder.create()
+    leaf = backref.location(backref.function("Leaf", "/app/app"))
+    parent = backref.location(backref.function("T", "/srv/app/t.py"))
+    backref.sample((leaf, parent), 7)
+    backref_profile = tmp_path / "backref.pb"
+    backref_profile.write_bytes(backref.encode())
+    backref_config = tmp_path / "backref.json"
+    backref_config.write_text(
+        json.dumps({"T": {"Hit": "regex:(?P<x>/app)\\1"}}), encoding="utf-8"
+    )
+    output = _assert_identical_success(
+        ["targets", "--profile", str(backref_profile), "--config", str(backref_config)],
+        "regex-named-numeric-backref",
+    )
+    assert '"Hit"' in output
+
+    # R7-04/R7-05: zero signed totals — %-threshold selection uses the
+    # rendered zero percentages and simple-csv keeps every nonzero row.
+    cancel = PprofFixtureBuilder.create()
+    cancel_parent = cancel.function("T", "/app/t.py")
+    cancel.sample(
+        (
+            cancel.location(cancel.function("PosLeaf", "/app/pos.py")),
+            cancel.location(cancel_parent),
+        ),
+        10,
+    )
+    cancel.sample(
+        (
+            cancel.location(cancel.function("NegLeaf", "/app/neg.py")),
+            cancel.location(cancel_parent),
+        ),
+        -10,
+    )
+    cancel_profile = tmp_path / "cancel.pb"
+    cancel_profile.write_bytes(cancel.encode())
+    cancel_slices = tmp_path / "cancel-slices.yml"
+    cancel_slices.write_text(
+        "slices:\n"
+        "  - name: A\n    paths: [/app/pos*]\n"
+        "  - name: B\n    paths: [/app/neg*]\n",
+        encoding="utf-8",
+    )
+    for threshold in ("0%", "-1%"):
+        output = _assert_identical_success(
+            [
+                "slices",
+                "--profile",
+                str(cancel_profile),
+                "--slices",
+                str(cancel_slices),
+                f"--by-slice={threshold}",
+            ],
+            f"by-slice-zero-total-{threshold}",
+        )
+        names = [
+            cast(str, item["name"])
+            for item in cast(
+                list[dict[str, Any]],
+                cast(dict[str, Any], json.loads(output))["slices"],
+            )
+        ]
+        assert names == ["A", "B"], threshold
+    cancel_targets = tmp_path / "cancel-targets.json"
+    cancel_targets.write_text(
+        json.dumps({"T": {"Pos": "pos.py", "Neg": "neg.py"}}), encoding="utf-8"
+    )
+    output = _assert_identical_success(
+        [
+            "targets",
+            "--profile",
+            str(cancel_profile),
+            "--config",
+            str(cancel_targets),
+            "--format",
+            "simple-csv",
+        ],
+        "simple-csv-zero-total",
+    )
+    categories = {line.split(",")[1] for line in output.splitlines()[1:]}
+    assert {"Pos", "Neg"} <= categories
+
+    # R7-06: unknown scope entry keys rejected identically.
+    scope_config = tmp_path / "scope-typo.yml"
+    scope_config.write_text(
+        'cost_kind:\n  AppWork: "path:app/**"\n'
+        "scope:\n"
+        "  - label: Audited\n"
+        "    function: T\n"
+        '    exclude_descendents: "name_eq:Leaf"\n',
+        encoding="utf-8",
+    )
+    envelope = _assert_identical_envelope(
+        ["scopes", "--profile", str(cancel_profile), "--config", str(scope_config)],
+        "scope-unknown-key",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Unknown scope field: exclude_descendents.",
+    }
+
+    # R7-08: zero-padded gzip decodes identically; non-zero trailing garbage
+    # falls back to raw-protobuf parsing with the identical envelope.
+    raw_profile = profile_path.read_bytes()
+    padded = tmp_path / "padded.pb.gz"
+    padded.write_bytes(gzip.compress(raw_profile) + b"\x00" * 16)
+    _assert_identical_success(
+        ["facts", "--profile", str(padded)], "facts-zero-padded-gzip"
+    )
+    garbage = tmp_path / "garbage.pb.gz"
+    garbage.write_bytes(gzip.compress(raw_profile) + b"\x01\x02\x03")
+    envelope = _assert_identical_envelope(
+        ["facts", "--profile", str(garbage)], "facts-gzip-trailing-garbage"
+    )
+    assert "ok" in json.loads(envelope)

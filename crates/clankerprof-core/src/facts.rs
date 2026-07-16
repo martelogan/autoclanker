@@ -264,6 +264,20 @@ fn sample_facts_from_v2(payload: &Value) -> Result<ProfileFacts, String> {
     if primary_value_index < 0 {
         return Err("Sample facts primary_value_index must be non-negative.".to_string());
     }
+    // Selection rules can only yield a declared type's position (or 0 when no
+    // types are declared); anything else silently selects the wrong metric
+    // through the per-sample values[0] fallback.
+    let index_in_range = if value_types.is_empty() {
+        primary_value_index == 0
+    } else {
+        (primary_value_index as usize) < value_types.len()
+    };
+    if !index_in_range {
+        return Err(format!(
+            "Sample facts primary_value_index {primary_value_index} is out of range for {} declared value types.",
+            value_types.len()
+        ));
+    }
     let period = match profile.get("period") {
         None => 0,
         Some(value) => value

@@ -321,8 +321,16 @@ pub fn render_slice_json(
     if let Some(by_slice) = &options.by_slice {
         if let Some(raw_threshold) = by_slice.strip_suffix('%') {
             let threshold = parse_by_slice_threshold(raw_threshold)?;
+            // At a zero matching total every rendered percentage is 0, so
+            // threshold selection compares against 0 rather than deleting
+            // every signed row through a nonzero-total short-circuit.
             selected_slices.retain(|slice| {
-                total != 0 && slice.time_ns as f64 / total as f64 * 100.0 >= threshold
+                let pct = if total != 0 {
+                    slice.time_ns as f64 / total as f64 * 100.0
+                } else {
+                    0.0
+                };
+                pct >= threshold
             });
         } else {
             let limit = by_slice

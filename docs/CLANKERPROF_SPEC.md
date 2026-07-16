@@ -21,7 +21,10 @@ compatibility target.
 `clankerprof` accepts raw `.pb` and gzipped `.pb.gz` pprof profiles. Gzip
 streams may contain multiple RFC 1952 members (producers that append emit
 them); every member must be decoded — silently truncating to the first member
-is a defect. The decoder must preserve:
+is a defect. Zero padding after any member is consumed (gzip FAQ #8, matching
+CPython's gzip module), including between members; non-zero trailing bytes
+make the stream not-gzip, and both implementations then parse the original
+bytes as raw protobuf, identically. The decoder must preserve:
 
 - sparse pprof function IDs and location IDs;
 - sample order and stable zero-based `sample_index`;
@@ -141,8 +144,11 @@ type must be a string.`), matching the numeric-domain rule below.
 Per-sample primary values and emptiness are derived on import:
 `primary_value = values[profile.primary_value_index]` (with the fallbacks from
 primary-value selection) and `is_empty = stack == []`. Importers must validate
-frame and string indexes, reject non-integer stack entries, and reject
-summaries that disagree with the reconstructed samples.
+frame and string indexes, reject non-integer stack entries, reject a
+`primary_value_index` outside the declared `value_types` (no selection rule
+can produce one — with no declared types the index must be `0`; the
+per-sample `values[0]` fallback covers only ragged samples under a valid
+index), and reject summaries that disagree with the reconstructed samples.
 
 Numeric domains are strict and shared by both implementations. Location and
 function IDs (in `location_ids` and frame rows) are unsigned 64-bit integers;
@@ -345,9 +351,11 @@ Rendering rules shared by both implementations:
   renders every dependent percentage as `0` — never a division error, `inf`,
   or `NaN` — and the text report's TOTAL row reports `0.00%`, not `100.00%`.
 - The simplified (`simple-csv` and compat simplified) noise gate is
-  magnitude-aware: categories with `|share| < 0.1%` other than `Other` may be
-  omitted; rows with negative shares of any magnitude must be rendered —
-  sample values are signed, and dropping them breaks additivity.
+  magnitude-aware and time-aware: only categories other than `Other` with
+  nonnegative time and `|share| < 0.1%` may be omitted; rows with negative
+  time must be rendered at any magnitude — sample values are signed, and
+  dropping them breaks additivity — and under a zero parent total (where
+  every share renders as `0`) only exactly-zero rows may be omitted.
 - Caller-to-leaf attribution picks the first non-pseudo, non-runtime-stdlib
   frame above the leaf, scanning to the root — never a fixed-depth window.
   The leaf's immediate caller is the last-resort fallback only when no
@@ -408,7 +416,11 @@ sorted-map reordering of these tables is a correctness bug. A scope's
 `label` and `name` values must be strings (`scope.label must be a string.`),
 and `function` must be a string or an array of strings; other shapes are
 validation errors in both implementations, because Python `str()` and Rust
-`Display` spell non-string scalars differently. A scope config's top-level
+`Display` spell non-string scalars differently. Scope/boundary entries are
+fixed-shape: an unknown entry key is a validation error naming the key
+(`Unknown scope field: <key>.`) in both implementations — a typo such as
+`exclude_descendents` must never silently disable its rule, mirroring the
+rule-pack unknown-key principle. A scope config's top-level
 `slices` value must be a string path
 (`Boundary config slices must be a string path.`); other shapes are
 validation errors in both implementations, never a silent no-slices default
@@ -505,18 +517,24 @@ identically for every supported glob form. Explicit `regex:` patterns (and
 rule-pack `name_patterns` and `library_path_patterns` regexes) follow
 Python's regular-expression dialect, including lookaround and
 backreferences; the Rust implementation compiles them with an engine
-(fancy-regex) that accepts that dialect. Patterns that compile in both
-engines agree on the overwhelmingly common constructs, but MATCHING
-semantics follow each engine's own rules at these known edges, which are
-outside the parity guarantee (pinned by an engine-drift test rather than
-unified): the end anchor `$` matches before a trailing newline in Python
-but only at end-of-input in Rust (portable configs should anchor with an
-explicit `\n?$`-free form or avoid trailing-newline-sensitive paths);
-`(?i)` case-folds special pairs such as `İ`/`i` (U+0130) in Python but not
-in Rust's simple case folding; and the Unicode class membership of
-`\w`/`\s`/`\b` differs at the edges (Rust `\w` includes combining marks per
-UTS#18, Python `\s` includes the U+001C–U+001F separators) — use explicit
-character classes where exactness matters. An explicit pattern that fails to compile
+(fancy-regex) that accepts the overwhelming majority of that dialect —
+numeric backreferences to named groups are rewritten to named backrefs so
+Python's mixed spelling (`(?P<x>…)\1`) compiles identically, and any
+residual pattern fancy-regex cannot compile fails closed with exit `2`.
+Patterns that compile in both engines agree on the overwhelmingly common
+constructs, but MATCHING semantics follow each engine's own rules at these
+known edges, which are outside the parity guarantee (pinned by an
+engine-drift test rather than unified): the end anchor `$` matches before a
+trailing newline in Python but only at end-of-input in Rust (portable
+configs should anchor with an explicit `\n?$`-free form or avoid
+trailing-newline-sensitive paths); `(?i)` case-folds special pairs such as
+`İ`/`i` (U+0130) in Python but not in Rust's simple case folding; the
+Unicode class membership of `\w`/`\s`/`\b` differs at the edges (Rust `\w`
+includes combining marks per UTS#18, Python `\s` includes the U+001C–U+001F
+separators) — use explicit character classes where exactness matters; and
+conditional groups `(?(group)yes|no)` evaluate per-engine (fancy-regex
+diverges from Python on group-participation tests) — avoid conditionals in
+portable configs. An explicit pattern that fails to compile
 is a validation error — exit `2` with an envelope whose message starts with
 `Invalid regex pattern '<pattern>':` (library patterns:
 `Invalid library regex pattern '<pattern>':`); engine-specific detail may
@@ -609,7 +627,10 @@ Slice, frame, library, and pseudo-output `pct` fields are shares of
 `matching_time_ns` — the filtered, attributed total; the whole-profile
 `total_time_ns` is reported in the summary only. A zero matching total
 (valid signed samples can cancel to exactly zero) renders every dependent
-percentage as `0` — never a silent fallback to the whole-profile total.
+percentage as `0` — never a silent fallback to the whole-profile total —
+and `--by-slice` `%`-threshold selection compares against those rendered
+`0` percentages (thresholds `<= 0` keep every row; positive thresholds drop
+them all), never against the unrelated whole-profile total.
 
 At most one slice may set `default: true`; declaring several is a validation
 error (previously attribution silently used the last while tracking used the
@@ -620,7 +641,12 @@ definition's metadata while Rust kept the first. The pseudo-output names
 `(gc)` and `(uncollapsible)` are reserved: a user slice under either name
 is a validation error in both languages, because such a slice would be
 attributed and then stripped at render, reporting matched time with no
-owning row. The `default` value must be a YAML boolean — absent and `null` read
+owning row. The reservation applies equally to `--attribute` targets,
+including virtual targets under `--allow-virtual-attribute-slices` — the
+opt-in waives only the must-name-a-configured-slice rule, never the
+reservation. Attribute rule predicates require both a key and a non-empty
+value (`<key>:<value>`); an empty value would substring-match every frame
+and silently reassign all ownership. The `default` value must be a YAML boolean — absent and `null` read
 as false, and any other type is a validation error in both languages
 (`Slice default must be a boolean.`); truthiness coercion is forbidden
 because it silently diverged between implementations.

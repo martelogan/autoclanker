@@ -1177,6 +1177,13 @@ fn parse_attribute(raw: &str) -> Result<clankerprof_core::slices::AttributionRul
             "Attribute rule filter must be '<key>:<value>': {raw}"
         ));
     };
+    // An empty value would substring-match every frame and silently
+    // reassign all ownership; filters already reject the same shape.
+    if key.is_empty() || value.is_empty() {
+        return Err(format!(
+            "Attribute rule filter must be '<key>:<value>': {raw}"
+        ));
+    }
     if key == "slice" {
         return Err(format!(
             "Attribute rules do not support slice: filters: {raw}"
@@ -1255,6 +1262,17 @@ fn validate_slice_options(
             return Err(format!(
                 "Unsupported attribute filter key: {}",
                 attribute.key
+            ));
+        }
+        // The virtual-slice opt-in waives only the must-name-a-configured-
+        // slice rule; a pseudo-slice target would be attributed and then
+        // stripped at render, leaving matched time with no owning row.
+        if attribute.target_slice == clankerprof_core::slices::GC_PSEUDO_SLICE
+            || attribute.target_slice == clankerprof_core::slices::UNCOLLAPSIBLE_PSEUDO_SLICE
+        {
+            return Err(format!(
+                "Attribute target names reserved pseudo-slice name: {}. The names (gc) and (uncollapsible) are reserved for analyzer pseudo-outputs.",
+                attribute.target_slice
             ));
         }
         if !names.contains(attribute.target_slice.as_str()) && !allow_virtual_attribute_slices {

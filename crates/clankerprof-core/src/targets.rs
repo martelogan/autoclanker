@@ -452,11 +452,119 @@ pub(crate) fn raw_compiled_regex(pattern: &str) -> Result<Arc<Regex>, String> {
     if let Some(entry) = guard.get(pattern) {
         return entry.clone();
     }
-    let compiled = Regex::new(pattern)
-        .map(Arc::new)
-        .map_err(|error| error.to_string());
+    let compiled = match Regex::new(pattern) {
+        Ok(regex) => Ok(Arc::new(regex)),
+        Err(error) => {
+            // Python allows numeric backreferences to named groups; fancy-regex
+            // demands named backrefs whenever any named group exists. Retry
+            // with `\N` rewritten to `\k<name>` for named group N so those
+            // Python-dialect patterns compile; the original error is kept when
+            // the rewrite does not apply or still fails.
+            let retried = if error
+                .to_string()
+                .contains("Numbered backref/call not allowed")
+            {
+                rewrite_numeric_backrefs_to_named(pattern)
+                    .and_then(|rewritten| Regex::new(&rewritten).ok())
+            } else {
+                None
+            };
+            match retried {
+                Some(regex) => Ok(Arc::new(regex)),
+                None => Err(error.to_string()),
+            }
+        }
+    };
     guard.insert(pattern.to_string(), compiled.clone());
     compiled
+}
+
+/// Rewrite `\N` backreferences that target a NAMED capture group into
+/// `\k<name>`, tracking capture-group numbering the way Python does (named
+/// and unnamed groups share one numbering; `(?:`/lookaround/`(?P=` do not
+/// count). Returns None when no rewrite applies. Character classes are left
+/// untouched (`\1` inside a class is an octal escape, not a backref).
+fn rewrite_numeric_backrefs_to_named(pattern: &str) -> Option<String> {
+    let mut names: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut group = 0usize;
+    let mut in_class = false;
+    let mut i = 0usize;
+    while i < chars.len() {
+        match chars[i] {
+            '\\' => {
+                i += 2;
+                continue;
+            }
+            '[' if !in_class => in_class = true,
+            ']' if in_class => in_class = false,
+            '(' if !in_class => {
+                if chars.get(i + 1) == Some(&'?') {
+                    if chars.get(i + 2) == Some(&'P') && chars.get(i + 3) == Some(&'<') {
+                        group += 1;
+                        let mut name = String::new();
+                        let mut j = i + 4;
+                        while j < chars.len() && chars[j] != '>' {
+                            name.push(chars[j]);
+                            j += 1;
+                        }
+                        if j >= chars.len() {
+                            return None;
+                        }
+                        names.insert(group, name);
+                    }
+                } else {
+                    group += 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if names.is_empty() {
+        return None;
+    }
+    let mut out = String::with_capacity(pattern.len());
+    let mut changed = false;
+    let mut in_class = false;
+    let mut i = 0usize;
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch == '\\' && !in_class && i + 1 < chars.len() {
+            let next = chars[i + 1];
+            if next.is_ascii_digit() && next != '0' {
+                let mut j = i + 1;
+                let mut digits = String::new();
+                while j < chars.len() && chars[j].is_ascii_digit() {
+                    digits.push(chars[j]);
+                    j += 1;
+                }
+                if let Some(name) = digits.parse::<usize>().ok().and_then(|n| names.get(&n)) {
+                    out.push_str("\\k<");
+                    out.push_str(name);
+                    out.push('>');
+                    changed = true;
+                } else {
+                    out.push('\\');
+                    out.push_str(&digits);
+                }
+                i = j;
+                continue;
+            }
+            out.push(ch);
+            out.push(next);
+            i += 2;
+            continue;
+        }
+        if ch == '[' && !in_class {
+            in_class = true;
+        } else if ch == ']' && in_class {
+            in_class = false;
+        }
+        out.push(ch);
+        i += 1;
+    }
+    changed.then_some(out)
 }
 
 /// Non-recording compile with the shared contract message; auto-mode needs
@@ -670,6 +778,31 @@ pub fn is_runtime_stdlib_path(path: &str, rules: &RuntimeRuleSet) -> bool {
             .stdlib_path_markers
             .iter()
             .any(|marker| path.contains(marker))
+}
+
+#[cfg(test)]
+mod backref_tests {
+    use super::{rewrite_numeric_backrefs_to_named, try_match_regex};
+
+    #[test]
+    fn numeric_backrefs_to_named_groups_compile_and_match() {
+        // Python allows `(?P<x>…)\1`; fancy-regex requires `\k<x>` once any
+        // named group exists. The compile path rewrites and retries.
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named(r"(?P<x>/app)\1").as_deref(),
+            Some(r"(?P<x>/app)\k<x>")
+        );
+        // Numbering counts unnamed groups too; classes and escapes are inert.
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named(r"(a)(?P<x>b)[\1]\\\1\2").as_deref(),
+            Some(r"(a)(?P<x>b)[\1]\\\1\k<x>")
+        );
+        // No named groups (or no applicable backref): nothing to rewrite.
+        assert_eq!(rewrite_numeric_backrefs_to_named(r"(a)\1"), None);
+        assert_eq!(rewrite_numeric_backrefs_to_named(r"(?P<x>a)b"), None);
+        assert_eq!(try_match_regex(r"(?P<x>/app)\1", "/app/app"), Ok(true));
+        assert_eq!(try_match_regex(r"(?P<x>/app)\1", "/app/x"), Ok(false));
+    }
 }
 
 #[cfg(test)]

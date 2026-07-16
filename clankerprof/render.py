@@ -572,7 +572,16 @@ def render_target_csv(
             categories.items(), key=lambda item: item[1].cpu_time, reverse=True
         ):
             pct = (_f64_ratio(stats.cpu_time, total) * 100) if total else 0
-            if simplified and abs(pct) < 0.1 and category != "Other":
+            if (
+                simplified
+                and category != "Other"
+                and stats.cpu_time >= 0
+                and abs(pct) < 0.1
+                and (total != 0 or stats.cpu_time == 0)
+            ):
+                # The noise gate only hides small nonnegative shares: negative
+                # rows are signed data that must render at any magnitude, and
+                # a zero parent total may omit only exactly-zero rows.
                 continue
             top_functions = sorted(
                 stats.functions.items(),
@@ -679,7 +688,16 @@ def _render_legacy_target_csv(
             categories.items(), key=lambda item: item[1].cpu_time, reverse=True
         ):
             pct = (_f64_ratio(stats.cpu_time, total) * 100) if total else 0
-            if simplified and abs(pct) < 0.1 and category != "Other":
+            if (
+                simplified
+                and category != "Other"
+                and stats.cpu_time >= 0
+                and abs(pct) < 0.1
+                and (total != 0 or stats.cpu_time == 0)
+            ):
+                # The noise gate only hides small nonnegative shares: negative
+                # rows are signed data that must render at any magnitude, and
+                # a zero parent total may omit only exactly-zero rows.
                 continue
 
             top_functions = sorted(
@@ -931,10 +949,14 @@ def render_slice_json(
         by_slice = resolved_options.by_slice
         if by_slice.endswith("%"):
             threshold = _by_slice_threshold(by_slice.removesuffix("%"))
+            # At a zero matching total every rendered percentage is 0, so
+            # threshold selection compares against 0 rather than deleting
+            # every signed row through a nonzero-total short-circuit.
             selected_slices = [
                 item
                 for item in selected_slices
-                if total and _f64_ratio(item.time_ns, total) * 100 >= threshold
+                if (_f64_ratio(item.time_ns, total) * 100 if total else 0.0)
+                >= threshold
             ]
         else:
             selected_slices = selected_slices[: _by_slice_limit(by_slice)]
