@@ -400,6 +400,17 @@ null, and sequence keys are validation errors on every YAML surface, because
 Python `str()` and serde's `Display` have no shared spelling for them. The
 YAML 1.1 timestamp resolver is not applied — date-like scalars such as
 `2026-01-01` stay plain strings, matching serde_yaml's YAML 1.2 core schema.
+Explicit YAML tags follow serde_yaml's semantics in both implementations:
+the typed core tags (`!!int`, `!!float`, `!!bool`, `!!null`) apply the same
+strict scalar grammars as the implicit resolvers (a mismatched spelling like
+`!!int 1_0` is a validation error whose message contains serde's
+`invalid value: string "<scalar>", expected …` core); every other global tag
+(`!!binary`, `!!set`, `!!timestamp`, `tag:` URIs) is ignored in favor of the
+underlying node — `!!binary SGVsbG8=` is the string, `!!set {a: null}` is
+the mapping, deterministically, never a constructed native object with
+engine-specific (or hash-randomized) rendering; and local `!name` tags are
+rejected on every YAML surface with the shared message
+`YAML local tags are not supported in clankerprof inputs.`.
 
 Plain-scalar resolution follows serde_yaml's dialect in both implementations
 (the shared table is pinned empirically by
@@ -464,8 +475,18 @@ identically for every supported glob form. Explicit `regex:` patterns (and
 rule-pack `name_patterns` and `library_path_patterns` regexes) follow
 Python's regular-expression dialect, including lookaround and
 backreferences; the Rust implementation compiles them with an engine
-(fancy-regex) that accepts that dialect, and configs must stay within the
-common subset both engines accept. An explicit pattern that fails to compile
+(fancy-regex) that accepts that dialect. Patterns that compile in both
+engines agree on the overwhelmingly common constructs, but MATCHING
+semantics follow each engine's own rules at these known edges, which are
+outside the parity guarantee (pinned by an engine-drift test rather than
+unified): the end anchor `$` matches before a trailing newline in Python
+but only at end-of-input in Rust (portable configs should anchor with an
+explicit `\n?$`-free form or avoid trailing-newline-sensitive paths);
+`(?i)` case-folds special pairs such as `İ`/`i` (U+0130) in Python but not
+in Rust's simple case folding; and the Unicode class membership of
+`\w`/`\s`/`\b` differs at the edges (Rust `\w` includes combining marks per
+UTS#18, Python `\s` includes the U+001C–U+001F separators) — use explicit
+character classes where exactness matters. An explicit pattern that fails to compile
 is a validation error — exit `2` with an envelope whose message starts with
 `Invalid regex pattern '<pattern>':` (library patterns:
 `Invalid library regex pattern '<pattern>':`); engine-specific detail may
@@ -581,7 +602,13 @@ present `null` is a wrong shape and a validation error, not an absent array
 (conflating them would let a nulled-out array turn a real regression into an
 apparent removal). Numeric report fields must be JSON numbers: malformed
 values are a validation error in both implementations, never coerced to
-zero. Derived compare values (frame-percentage sums and absolute deltas)
+zero. Compare gates on the supplied percentage fields; per-row `time_ns` is
+evidence for human readers, is not read by the gate, and is not
+cross-validated against the percentages — compare inputs are trusted
+projection artifacts, and compare is not a tamper-detection boundary
+(coherently edited reports are undetectable by construction; the facts
+summary redundancy check exists at import instead, where the decoded
+samples provide an independent source of truth). Derived compare values (frame-percentage sums and absolute deltas)
 must also stay finite: overflow of finite inputs fails closed with
 `Compare values for '<name>' are not finite.` in both languages, never a
 silent `null`. Each report must carry

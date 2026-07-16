@@ -918,6 +918,8 @@ fn yaml_to_json(value: serde_yaml::Value) -> serde_json::Value {
                 })
                 .collect(),
         ),
+        // Unreachable from user input: require_string_keys rejects local
+        // tags (the only Tagged producer) before any conversion runs.
         serde_yaml::Value::Tagged(tagged) => yaml_to_json(tagged.value),
     }
 }

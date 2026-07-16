@@ -4219,3 +4219,133 @@ def test_clankerprof_rust_round5_cluster_q_matches_python(tmp_path: Path) -> Non
         "core-cr-record-break",
     )
     assert "Ruby Core (Native)" in output
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_regex_engine_edge_semantics_are_pinned(tmp_path: Path) -> None:
+    # DOCUMENTED engine-native divergences, not bug pins (spec: regex dialect
+    # passage): these patterns compile in BOTH engines but match per each
+    # engine's own anchor/case-fold/Unicode-class semantics, outside the
+    # parity guarantee. The pins exist to catch engine drift on either side.
+    cases = [
+        ("anchor", "/app/x\n", "regex:x$", "Matched", "Other"),
+        ("casefold", "/İ", "regex:(?i)i", "Matched", "Other"),
+        ("wordclass", "/́", "regex:\\w", "Other", "Matched"),
+        ("spaceclass", "/\x1f", "regex:\\s", "Matched", "Other"),
+    ]
+    for label, filename, pattern, python_expected, rust_expected in cases:
+        builder = PprofFixtureBuilder.create()
+        leaf = builder.location(builder.function("Leaf", filename))
+        parent = builder.location(builder.function("T", "/srv/app/t.py"))
+        builder.sample((leaf, parent), 7)
+        profile_path = tmp_path / f"regex-{label}.pb"
+        profile_path.write_bytes(builder.encode())
+        config_path = tmp_path / f"regex-{label}.json"
+        config_path.write_text(
+            json.dumps({"T": {"Matched": pattern}}), encoding="utf-8"
+        )
+        argv = [
+            "targets",
+            "--profile",
+            str(profile_path),
+            "--config",
+            str(config_path),
+        ]
+        python_run = _run_python_cli_raw(argv)
+        rust_run = _run_rust_cli_raw(argv)
+        assert python_run.returncode == 0, (label, python_run.stderr)
+        assert rust_run.returncode == 0, (label, rust_run.stderr)
+
+        def category_names(stdout: str) -> list[str]:
+            payload = cast(dict[str, Any], json.loads(stdout))
+            parents = cast(dict[str, Any], payload["parents"])
+            parent_payload = cast(dict[str, Any], parents["T"])
+            categories = cast(list[dict[str, Any]], parent_payload["categories"])
+            return [cast(str, item["name"]) for item in categories]
+
+        assert category_names(python_run.stdout) == [python_expected], label
+        assert category_names(rust_run.stdout) == [rust_expected], label
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_yaml_tags_match_python(tmp_path: Path) -> None:
+    facts_path = _order_scope_facts(tmp_path)
+
+    # Global tags are ignored per serde_yaml semantics in BOTH languages:
+    # !!binary stays the base64 string, !!set stays the mapping — a
+    # deterministic structure, never a hash-randomized Python set repr.
+    global_slices = tmp_path / "tagged-global.yml"
+    global_slices.write_text(
+        "slices:\n"
+        '  - name: app\n'
+        '    paths: ["/srv/**"]\n'
+        "    metadata:\n"
+        "      blob: !!binary SGVsbG8=\n"
+        "      members: !!set {alpha: null, beta: null, gamma: null, delta: null}\n",
+        encoding="utf-8",
+    )
+    output = _assert_identical_success(
+        ["slices", "--facts", str(facts_path), "--slices", str(global_slices)],
+        "yaml-tags-global",
+    )
+    assert '"SGVsbG8="' in output
+    assert '"alpha"' in output and '"delta"' in output
+
+    # Local tags are rejected on every YAML surface with the shared message.
+    local_tag_error = {
+        "ok": False,
+        "error": "YAML local tags are not supported in clankerprof inputs.",
+    }
+    local_slices = tmp_path / "tagged-local-slices.yml"
+    local_slices.write_text(
+        "slices:\n  - name: app\n    metadata:\n      x: !foo bar\n",
+        encoding="utf-8",
+    )
+    envelope = _assert_identical_envelope(
+        ["slices", "--facts", str(facts_path), "--slices", str(local_slices)],
+        "yaml-tags-local-slices",
+    )
+    assert json.loads(envelope) == local_tag_error
+
+    local_scope = tmp_path / "tagged-local-scope.yml"
+    local_scope.write_text(
+        'cost_kind:\n  AppWork: !foo "name:Leaf"\nscope:\n  - function: T\n',
+        encoding="utf-8",
+    )
+    envelope = _assert_identical_envelope(
+        ["scopes", "--facts", str(facts_path), "--config", str(local_scope)],
+        "yaml-tags-local-scope",
+    )
+    assert json.loads(envelope) == local_tag_error
+
+    local_pack = tmp_path / "tagged-local-pack.yml"
+    local_pack.write_text(
+        "semantic_rules:\n  - category: !x Hit\n    name_contains: [Leaf]\n",
+        encoding="utf-8",
+    )
+    envelope = _assert_identical_envelope(
+        [
+            "targets",
+            "--facts",
+            str(facts_path),
+            "--target",
+            "T",
+            "--runtime-rules",
+            str(local_pack),
+        ],
+        "yaml-tags-local-pack",
+    )
+    assert json.loads(envelope) == local_tag_error
+
+    # Typed core tags apply the strict scalar grammars with serde's message
+    # core (location suffix engine-specific).
+    typed_config = tmp_path / "tagged-typed.yml"
+    typed_config.write_text("profile: /dev/null\ntop: !!int 1_0\n", encoding="utf-8")
+    argv = ["slices", "--config", str(typed_config)]
+    python_run = _run_python_cli_raw(argv)
+    rust_run = _run_rust_cli_raw(argv)
+    core = 'invalid value: string "1_0", expected an integer'
+    assert python_run.returncode == 2, python_run.stderr
+    assert rust_run.returncode == 2, rust_run.stderr
+    assert core in cast(str, json.loads(python_run.stderr)["error"])
+    assert core in cast(str, json.loads(rust_run.stderr)["error"])

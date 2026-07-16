@@ -437,7 +437,13 @@ pub fn runtime_rules_from_mapping(
 /// between str() and serde's Display, so neither implementation coerces).
 pub const YAML_KEY_MESSAGE: &str = "YAML mapping keys must be strings.";
 
-/// Walk a parsed YAML tree and reject any non-string mapping key.
+/// serde_yaml represents only local (`!name`) tags as `Value::Tagged` —
+/// global tags are resolved or ignored at parse. Python's strict loader
+/// mirrors that split and rejects local tags with this same message.
+pub const YAML_LOCAL_TAG_MESSAGE: &str = "YAML local tags are not supported in clankerprof inputs.";
+
+/// Walk a parsed YAML tree and reject any non-string mapping key or
+/// local-tagged value.
 pub fn require_string_keys(value: &Value) -> Result<(), String> {
     match value {
         Value::Mapping(mapping) => {
@@ -455,7 +461,7 @@ pub fn require_string_keys(value: &Value) -> Result<(), String> {
             }
             Ok(())
         }
-        Value::Tagged(tagged) => require_string_keys(&tagged.value),
+        Value::Tagged(_) => Err(YAML_LOCAL_TAG_MESSAGE.to_string()),
         _ => Ok(()),
     }
 }

@@ -565,6 +565,12 @@ fn metadata_value(raw: &serde_yaml::Value) -> Result<Value, String> {
             }
             Ok(Value::Object(object))
         }
+        serde_yaml::Value::Tagged(_) => {
+            // The strict walk rejects local tags before metadata conversion;
+            // kept fail-closed here so this path can never silently wrap a
+            // tagged value the way serde_json's serialization would.
+            Err(crate::rules::YAML_LOCAL_TAG_MESSAGE.to_string())
+        }
         _ => serde_json::to_value(raw).map_err(|error| error.to_string()),
     }
 }

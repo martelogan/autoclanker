@@ -135,7 +135,14 @@ class _StrictYamlLoader(yaml.SafeLoader):
       rather than infinity; ``.inf``/``.nan`` spellings keep working, with
       the NaN forms unsigned-only;
     - the 1.1 timestamp resolver is removed (`2026-01-01` stays a string)
-      and so is the ``=`` value special.
+      and so is the ``=`` value special;
+    - explicit tags follow serde_yaml: typed core tags (``!!int``,
+      ``!!float``, ``!!bool``, ``!!null``) apply the strict scalar grammars
+      above (mismatches error with serde's "invalid value" core), every
+      other global tag is ignored in favor of the underlying node
+      (``!!binary`` stays the base64 string; ``!!set`` stays the mapping —
+      deterministic, unlike a constructed Python set), and local ``!name``
+      tags are rejected with the shared message both engines emit.
     """
 
     def construct_mapping(
@@ -180,20 +187,18 @@ _add_implicit_resolver = cast(
     _StrictYamlLoader.add_implicit_resolver,  # pyright: ignore[reportUnknownMemberType]
 )
 
-_add_implicit_resolver(
-    "tag:yaml.org,2002:bool",
-    re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"),
-    list("tTfF"),
-)
+_BOOL_SCALAR_RE = re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$")
+
+_add_implicit_resolver("tag:yaml.org,2002:bool", _BOOL_SCALAR_RE, list("tTfF"))
 
 _INT_MIN = -(2**63)
 _UINT_MAX = 2**64 - 1
 
-_add_implicit_resolver(
-    "tag:yaml.org,2002:int",
-    re.compile(r"^[-+]?(?:0x[0-9a-fA-F]+|0o[0-7]+|0b[01]+|0|[1-9][0-9]*)$", re.ASCII),
-    list("-+0123456789"),
+_INT_SCALAR_RE = re.compile(
+    r"^[-+]?(?:0x[0-9a-fA-F]+|0o[0-7]+|0b[01]+|0|[1-9][0-9]*)$", re.ASCII
 )
+
+_add_implicit_resolver("tag:yaml.org,2002:int", _INT_SCALAR_RE, list("-+0123456789"))
 
 _FLOAT_PATTERN = re.compile(
     r"""^[-+]?(?:
@@ -204,18 +209,47 @@ _FLOAT_PATTERN = re.compile(
     re.ASCII | re.VERBOSE,
 )
 
+_FLOAT_SCALAR_RE = re.compile(
+    _FLOAT_PATTERN.pattern + r"|^[-+]?\.(?:inf|Inf|INF)$|^\.(?:nan|NaN|NAN)$",
+    re.ASCII | re.VERBOSE,
+)
+
+# Explicit `!!float` accepts serde_yaml's wider grammar: a plain integer
+# spelling is a legal explicit float even though the implicit resolver
+# requires a dot or exponent.
+_EXPLICIT_FLOAT_RE = re.compile(r"^[-+]?[0-9]+$", re.ASCII)
+
 _add_implicit_resolver(
-    "tag:yaml.org,2002:float",
-    re.compile(
-        _FLOAT_PATTERN.pattern + r"|^[-+]?\.(?:inf|Inf|INF)$|^\.(?:nan|NaN|NAN)$",
-        re.ASCII | re.VERBOSE,
-    ),
-    list("-+0123456789."),
+    "tag:yaml.org,2002:float", _FLOAT_SCALAR_RE, list("-+0123456789.")
 )
 
 
-def _construct_serde_int(loader: yaml.SafeLoader, node: yaml.ScalarNode) -> int:
+YAML_LOCAL_TAG_MESSAGE = "YAML local tags are not supported in clankerprof inputs."
+
+
+def _construct_ignoring_global_tag(loader: yaml.SafeLoader, node: yaml.Node) -> Any:
+    """Mirror serde_yaml: a global (URI) tag it does not type-check is
+    ignored in favor of the underlying node — `!!binary SGVsbG8=` is the
+    string "SGVsbG8=", `!!set {a: null}` is the mapping (deterministic,
+    unlike a Python set), `!!str [1, 2]` is the sequence. The strict mapping
+    checks (string keys, duplicates) still apply.
+    """
+    if isinstance(node, yaml.ScalarNode):
+        return str(loader.construct_scalar(node))
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node, deep=True)
+    return loader.construct_mapping(cast(yaml.MappingNode, node), deep=True)
+
+
+def _construct_serde_int(loader: yaml.SafeLoader, node: yaml.Node) -> int | Any:
+    if not isinstance(node, yaml.ScalarNode):
+        # serde_yaml ignores typed tags on non-scalar nodes.
+        return _construct_ignoring_global_tag(loader, node)
     scalar = str(loader.construct_scalar(node))
+    if _INT_SCALAR_RE.fullmatch(scalar) is None:
+        # Explicit `!!int` spellings outside the implicit grammar (e.g.
+        # `!!int 1_0`) fail in serde_yaml with this message core.
+        raise ValueError(f'invalid value: string "{scalar}", expected an integer')
     text = scalar
     sign = 1
     if text and text[0] in "+-":
@@ -239,8 +273,19 @@ def _construct_serde_int(loader: yaml.SafeLoader, node: yaml.ScalarNode) -> int:
     return value
 
 
-def _construct_serde_float(loader: yaml.SafeLoader, node: yaml.ScalarNode) -> Any:
+def _construct_serde_float(loader: yaml.SafeLoader, node: yaml.Node) -> Any | Any:
+    if not isinstance(node, yaml.ScalarNode):
+        # serde_yaml ignores typed tags on non-scalar nodes.
+        return _construct_ignoring_global_tag(loader, node)
     scalar = str(loader.construct_scalar(node))
+    if (
+        _FLOAT_SCALAR_RE.fullmatch(scalar) is None
+        and _EXPLICIT_FLOAT_RE.fullmatch(scalar) is None
+    ):
+        # Explicit `!!float` spellings outside serde_yaml's float grammar
+        # (e.g. `!!float 1_0`, `!!float inf`) fail with this message core;
+        # plain integers (`!!float 5`) are legal explicit floats there.
+        raise ValueError(f'invalid value: string "{scalar}", expected a float')
     lowered = scalar.lstrip("+-").lower()
     if lowered == ".inf":
         return math.inf if not scalar.startswith("-") else -math.inf
@@ -254,8 +299,70 @@ def _construct_serde_float(loader: yaml.SafeLoader, node: yaml.ScalarNode) -> An
     return value
 
 
+def _construct_serde_bool(loader: yaml.SafeLoader, node: yaml.Node) -> bool | Any:
+    if not isinstance(node, yaml.ScalarNode):
+        # serde_yaml ignores typed tags on non-scalar nodes.
+        return _construct_ignoring_global_tag(loader, node)
+    scalar = str(loader.construct_scalar(node))
+    if _BOOL_SCALAR_RE.fullmatch(scalar) is None:
+        # Explicit `!!bool yes` etc. fail in serde_yaml (its boolean grammar
+        # is true/True/TRUE/false/False/FALSE only).
+        raise ValueError(f'invalid value: string "{scalar}", expected a boolean')
+    return scalar[0] in "tT"
+
+
+def _construct_serde_null(loader: yaml.SafeLoader, node: yaml.Node) -> None | Any:
+    if not isinstance(node, yaml.ScalarNode):
+        # serde_yaml ignores typed tags on non-scalar nodes.
+        return _construct_ignoring_global_tag(loader, node)
+    scalar = str(loader.construct_scalar(node))
+    if scalar not in ("", "~", "null", "Null", "NULL"):
+        raise ValueError(f'invalid value: string "{scalar}", expected null')
+    return None
+
+
+def _construct_multi_global_tag(
+    loader: yaml.SafeLoader, tag_suffix: str, node: yaml.Node
+) -> Any:
+    return _construct_ignoring_global_tag(loader, node)
+
+
+def _reject_local_tag(loader: yaml.SafeLoader, node: yaml.Node) -> Any:
+    # serde_yaml represents only local (`!name`) tags as Value::Tagged; the
+    # Rust strict walk rejects those with this same message.
+    raise ValueError(YAML_LOCAL_TAG_MESSAGE)
+
+
 _StrictYamlLoader.add_constructor("tag:yaml.org,2002:int", _construct_serde_int)
 _StrictYamlLoader.add_constructor("tag:yaml.org,2002:float", _construct_serde_float)
+_StrictYamlLoader.add_constructor("tag:yaml.org,2002:bool", _construct_serde_bool)
+_StrictYamlLoader.add_constructor("tag:yaml.org,2002:null", _construct_serde_null)
+# NOT map/seq: their default constructors already match serde for their own
+# node kinds and are two-phase generators, which alias cycles need to reach
+# the aligned recursion-limit guard instead of PyYAML's own
+# "unconstructable recursive node" error.
+for _generic_tag_name in (
+    "binary", "set", "omap", "pairs", "timestamp", "value", "str"
+):
+    _StrictYamlLoader.add_constructor(
+        f"tag:yaml.org,2002:{_generic_tag_name}", _construct_ignoring_global_tag
+    )
+# PyYAML ships no complete type stubs for the multi-constructor API.
+_add_multi_constructor = cast(
+    "Callable[..., None]",
+    _StrictYamlLoader.add_multi_constructor,  # pyright: ignore[reportUnknownMemberType]
+)
+# Every other global URI tag (tag:yaml.org,2002:python/..., tag:example.com,...)
+# is ignored like serde_yaml ignores it; exact registrations above win first.
+_add_multi_constructor("tag:", _construct_multi_global_tag)
+# Anything left is a local tag; both engines reject with the shared message.
+# PyYAML's stubs type the fallback-constructor tag as str, but the runtime
+# API accepts None for the catch-all slot.
+_add_constructor_untyped = cast(
+    "Callable[..., None]",
+    _StrictYamlLoader.add_constructor,  # pyright: ignore[reportUnknownMemberType]
+)
+_add_constructor_untyped(None, _reject_local_tag)
 
 
 def parse_strict_yaml(text: str) -> Any:

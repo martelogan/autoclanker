@@ -1,0 +1,5 @@
+slices:
+  - name: app
+    paths: ["/srv/**"]
+    metadata:
+      members: !!set {alpha: null, beta: null, gamma: null, delta: null}

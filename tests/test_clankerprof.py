@@ -6729,3 +6729,43 @@ def test_clankerprof_core_class_csv_bare_cr_is_a_record_break(
     csv_path = tmp_path / "core.csv"
     csv_path.write_bytes(b"Array\rExtra\nOther\n")
     assert load_ruby_core_classes(csv_path) == frozenset({"Array", "Extra", "Other"})
+
+
+def test_clankerprof_yaml_explicit_tags_follow_serde_semantics() -> None:
+    import re
+
+    from clankerprof.jsonio import parse_strict_yaml
+
+    # Global tags are ignored in favor of the underlying node, exactly as
+    # serde_yaml parses them (pinned against the engine by the Rust
+    # yaml_scalar_semantics tests and the cross-language parity suite).
+    assert parse_strict_yaml("x: !!binary SGVsbG8=") == {"x": "SGVsbG8="}
+    assert parse_strict_yaml("x: !!set {a: null, b: null}") == {
+        "x": {"a": None, "b": None}
+    }
+    assert parse_strict_yaml("x: !!timestamp 2026-01-01") == {"x": "2026-01-01"}
+    assert parse_strict_yaml("x: !!omap [{a: 1}]") == {"x": [{"a": 1}]}
+    assert parse_strict_yaml("x: !!str [1, 2]") == {"x": [1, 2]}
+    assert parse_strict_yaml("x: !!python/name:os.system ''") == {"x": ""}
+    assert parse_strict_yaml("x: !<tag:example.com,2000:foo> bar") == {"x": "bar"}
+
+    # Typed core tags apply the strict scalar grammars (serde message core).
+    for doc, expected_error in (
+        ("x: !!int 1_0", 'invalid value: string "1_0", expected an integer'),
+        ("x: !!float inf", 'invalid value: string "inf", expected a float'),
+        ("x: !!bool yes", 'invalid value: string "yes", expected a boolean'),
+        ("x: !!null x", 'invalid value: string "x", expected null'),
+    ):
+        with pytest.raises(ValueError, match=re.escape(expected_error)):
+            parse_strict_yaml(doc)
+    assert parse_strict_yaml("x: !!float 5") == {"x": 5.0}
+    assert parse_strict_yaml("x: !!int 0x1F") == {"x": 31}
+
+    # Local tags are rejected with the message shared with Rust's walk;
+    # strict mapping rules still apply inside tag-ignored collections.
+    with pytest.raises(
+        ValueError, match="YAML local tags are not supported in clankerprof inputs."
+    ):
+        parse_strict_yaml("x: !foo bar")
+    with pytest.raises(ValueError, match='duplicate entry with key "a"'):
+        parse_strict_yaml("x: !!set {a: null, a: null}")
