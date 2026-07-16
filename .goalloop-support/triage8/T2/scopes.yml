@@ -1,0 +1,5 @@
+slices: slices.yml
+owner:
+  BOwner: "slice:B"
+scope:
+  - function: T

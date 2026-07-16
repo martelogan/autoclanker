@@ -1,0 +1,5 @@
+slices: ../../triage5/P7/slices.yml
+cost_kind:
+  Work: "name:Leaf"
+scope:
+  - function: T

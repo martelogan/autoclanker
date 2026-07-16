@@ -1,0 +1,5 @@
+slices:
+  - name: A
+    paths: [/srv/app/**]
+  - name: B
+    paths: [/srv/app/**]

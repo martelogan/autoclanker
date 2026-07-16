@@ -1,0 +1,54 @@
+{
+  "boundaries": [
+    {
+      "attributable_estimates": {},
+      "buckets": [
+        {
+          "attributable_estimates": {},
+          "categories": [
+            {
+              "attributable_estimates": {},
+              "caller_leaf_pairs": [
+                {
+                  "attributable_estimates": {},
+                  "pair": "Leaf -> Leaf",
+                  "pct": 100.0,
+                  "samples": 1,
+                  "time_ns": 7
+                }
+              ],
+              "files": [
+                "/srv/app/leaf.py"
+              ],
+              "folded_from": {},
+              "leaf_functions": {
+                "Leaf": {
+                  "count": 1,
+                  "cpu_time": 7
+                }
+              },
+              "name": "Other",
+              "pct": 100.0,
+              "samples": 1,
+              "time_ns": 7
+            }
+          ],
+          "name": "Other",
+          "pct": 100.0,
+          "samples": 1,
+          "time_ns": 7
+        }
+      ],
+      "domains": [],
+      "name": "T",
+      "pct_of_profile": 100.0,
+      "samples": 1,
+      "total_time_ns": 7
+    }
+  ],
+  "summary": {
+    "total_time_ns": 7,
+    "unique_frame_count": 2
+  },
+  "tool": "clankerprof_boundaries"
+}

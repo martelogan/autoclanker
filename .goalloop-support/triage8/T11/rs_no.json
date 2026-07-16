@@ -1,0 +1,27 @@
+{
+  "slices": [
+    {
+      "frames": [
+        {
+          "filename": "/srv/app/leaf.py",
+          "function": "Leaf",
+          "line": 1,
+          "pct": 100.0,
+          "time_ns": 7
+        }
+      ],
+      "is_default": true,
+      "name": "(all)",
+      "pct": 100.0,
+      "time_ns": 7,
+      "unattributed_gems": [],
+      "unattributed_libraries": []
+    }
+  ],
+  "summary": {
+    "matching_pct": 100.0,
+    "matching_time_ns": 7,
+    "total_time_ns": 7
+  },
+  "tool": "clankerprof_slices"
+}

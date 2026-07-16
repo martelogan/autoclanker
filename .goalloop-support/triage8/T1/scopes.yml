@@ -1,0 +1,6 @@
+cost_kind:
+  Work: ["name:Pos", "name:Neg"]
+scope:
+  - function: S
+    rollup:
+      All: ["Work"]

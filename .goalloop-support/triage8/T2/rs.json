@@ -1,0 +1,105 @@
+{
+  "boundaries": [
+    {
+      "attributable_estimates": {},
+      "buckets": [
+        {
+          "attributable_estimates": {},
+          "categories": [
+            {
+              "attributable_estimates": {},
+              "caller_leaf_pairs": [
+                {
+                  "attributable_estimates": {},
+                  "pair": "Leaf -> Leaf",
+                  "pct": 100.0,
+                  "samples": 1,
+                  "time_ns": 7
+                }
+              ],
+              "files": [
+                "/srv/app/leaf.py"
+              ],
+              "folded_from": {},
+              "leaf_functions": {
+                "Leaf": {
+                  "count": 1,
+                  "cpu_time": 7
+                }
+              },
+              "name": "Other",
+              "pct": 100.0,
+              "samples": 1,
+              "time_ns": 7
+            }
+          ],
+          "name": "Other",
+          "pct": 100.0,
+          "samples": 1,
+          "time_ns": 7
+        }
+      ],
+      "domains": [
+        {
+          "attributable_estimates": {},
+          "cost_kinds": [
+            {
+              "attributable_estimates": {},
+              "name": "Other",
+              "pct_of_boundary": 100.0,
+              "pct_of_domain": 100.0,
+              "samples": 1,
+              "time_ns": 7
+            }
+          ],
+          "files": [
+            {
+              "attributable_estimates": {},
+              "caller_leaf_pairs": [
+                {
+                  "caller": "Leaf",
+                  "leaf": "Leaf",
+                  "pct_of_file": 100.0,
+                  "samples": 1,
+                  "time_ns": 7
+                }
+              ],
+              "cost_kinds": [
+                {
+                  "name": "Other",
+                  "pct_of_file": 100.0,
+                  "samples": 1,
+                  "time_ns": 7
+                }
+              ],
+              "filename": "/srv/app/leaf.py",
+              "functions": {
+                "Leaf": {
+                  "count": 1,
+                  "cpu_time": 7
+                }
+              },
+              "pct_of_boundary": 100.0,
+              "pct_of_domain": 100.0,
+              "samples": 1,
+              "time_ns": 7
+            }
+          ],
+          "name": "BOwner",
+          "pct": 100.0,
+          "samples": 1,
+          "time_ns": 7
+        }
+      ],
+      "name": "T",
+      "pct_of_profile": 100.0,
+      "samples": 1,
+      "total_time_ns": 7
+    }
+  ],
+  "summary": {
+    "total_time_ns": 7,
+    "unique_frame_count": 2
+  },
+  "tool": "clankerprof_boundaries"
+}
