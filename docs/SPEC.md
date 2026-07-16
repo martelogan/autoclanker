@@ -239,7 +239,7 @@ validate_adapter_config(payload: dict) -> ValidAdapterConfig
 
 Requirements:
 - validate against `schemas/adapter_config.schema.json`;
-- support fixture, autoresearch, cevolve, and generic external modes;
+- support fixture, autoresearch, cevolve, goalloop, and generic external modes;
 - support local-path or import-based configuration;
 - expose clean errors for missing paths or unsupported modes.
 

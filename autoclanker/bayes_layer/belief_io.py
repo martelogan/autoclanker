@@ -1456,6 +1456,11 @@ def validate_adapter_config(
         raise ValidationFailure(
             "auto mode is only supported by the first-party autoresearch and cevolve adapters."
         )
+    if kind == "goalloop" and mode != "local_repo_path":
+        raise ValidationFailure(
+            "The goalloop adapter requires mode='local_repo_path' with repo_path "
+            "set to the goal loop root."
+        )
     if mode == "local_repo_path" and repo_path is None:
         raise ValidationFailure("local_repo_path mode requires repo_path.")
     if mode == "installed_module" and python_module is None:

@@ -4,11 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A uv-managed Python monorepo (Python 3.11+, pyright strict) shipping three console scripts plus a Rust crate:
+A uv-managed Python monorepo (Python 3.11+, pyright strict) shipping four console scripts plus a Rust crate:
 
 - `autoclanker` — Bayesian guidance layer over agent eval loops (core in `autoclanker/bayes_layer/`)
 - `bigbets` — portfolio compiler: one registry file → many rendered views (`bigbets/`)
 - `clankerprof` — pprof CPU-profile analyzer (`clankerprof/`, Rust parity port in `crates/clankerprof-core/`)
+- `goalloop` — deterministic goal loops for agent harnesses (`goalloop/`, contract in `docs/GOALLOOP.md`)
 
 Library-first, CLI-first: every CLI is non-interactive, emits JSON to stdout by default, and uses stable nonzero exit codes (2 validation, 3 session, 4 adapter). `AGENTS.md`, `docs/SPEC.md` (normative), and `docs/STYLE.md` are the binding contributor contracts; keep `docs/` and `README.md` synchronized with behavior changes.
 
@@ -30,7 +31,7 @@ Library-first, CLI-first: every CLI is non-interactive, emits JSON to stdout by 
 
 Test lanes (pytest markers in `pyproject.toml`):
 
-- Default lane `addopts` bakes in `-m 'not integration and not upstream_live and not live'` and `--cov=autoclanker --cov=bigbets` (clankerprof is not a coverage target). It is self-contained: no upstreams or API keys (though with `cargo` installed, the Rust parity tests build `clankerprof-core`, which fetches crates on a cold cargo cache).
+- Default lane `addopts` bakes in `-m 'not integration and not upstream_live and not live'` and `--cov=autoclanker --cov=bigbets --cov=goalloop` (clankerprof is not a coverage target). It is self-contained: no upstreams or API keys (though with `cargo` installed, the Rust parity tests build `clankerprof-core`, which fetches crates on a cold cargo cache).
 - `./bin/dev test-integration` — tests marked `integration` (only `tests/test_cli_integration.py`).
 - `./bin/dev test-upstream-live` — non-billed; shallow-clones real autoresearch/cevolve into `.local/real-upstreams` and runs `-m upstream_live`.
 - `AUTOCLANKER_ENABLE_LLM_LIVE=1 ./bin/dev test-live` — billed LLM lane; also needs `ANTHROPIC_API_KEY` (or `AUTOCLANKER_ANTHROPIC_API_KEY`). Never make the required gate billing-dependent or nondeterministic.
@@ -57,9 +58,9 @@ Python↔Rust parity tests (`tests/test_clankerprof_rust_parity.py`) run in the 
 
 ## Architecture
 
-### One umbrella CLI, three packages
+### One umbrella CLI, four packages
 
-`autoclanker/cli.py` is a thin argparse dispatcher: each subcommand family self-registers via a `register_*_commands(subparsers)` function that installs a `handler` returning a JSON-able dict. `bigbets` and `clankerprof` register their subcommands into it too (`autoclanker bigbets …`, `autoclanker pprof …`) while also shipping standalone entry points. Dependency direction is one-way: `bigbets` and `clankerprof` never import from `autoclanker`.
+`autoclanker/cli.py` is a thin argparse dispatcher: each subcommand family self-registers via a `register_*_commands(subparsers)` function that installs a `handler` returning a JSON-able dict. `bigbets`, `clankerprof`, and `goalloop` register their subcommands into it too (`autoclanker bigbets …`, `autoclanker pprof …`, `autoclanker goalloop …`) while also shipping standalone entry points. Dependency direction is one-way: the sibling packages never import from `autoclanker`. Exception to the dict-handler protocol: `goalloop` handlers print their own JSON and return exit codes, so the umbrella wraps them to raise `SystemExit` (see `_register_goalloop_family`).
 
 Gotcha: the global `--output` flag is repositioned by `_normalize_global_output_position`; commands that define their own local `--output` must be listed in `_LOCAL_OUTPUT_COMMAND_PREFIXES` in `autoclanker/cli.py`.
 
@@ -79,7 +80,7 @@ with deterministic optimistic fallback) → query_policy → commit_policy
 
 Invariants from `docs/SPEC.md`: preview-then-apply is mandatory; canonicalization must work without any model provider; fallbacks are recorded in artifacts, never silent; eval results with a mismatched contract are rejected.
 
-Adapters (`bayes_layer/adapters/`): `EvalLoopAdapter` protocol dispatched by `config.kind` — `fixture` (deterministic, keeps the repo self-contained), `autoresearch`/`cevolve` (real upstreams via `live_upstreams.py`, falling back to fixtures), `python_module`/`subprocess` (external). Upstream loops are adapters, never vendored source.
+Adapters (`bayes_layer/adapters/`): `EvalLoopAdapter` protocol dispatched by `config.kind` — `fixture` (deterministic, keeps the repo self-contained), `autoresearch`/`cevolve` (real upstreams via `live_upstreams.py`, falling back to fixtures), `python_module`/`subprocess` (external), `goalloop` (a goal loop's charter gates as the eval surface; genotypes via `GOALLOOP_GENE_*` env vars, refuses drifted loop contracts). Upstream loops are adapters, never vendored source.
 
 `schemas/*.schema.json` are the payload contracts, loaded and enforced at runtime with jsonschema (Draft 2020-12) via `validate_payload_against_schema` in `bayes_layer/belief_io.py`, layered with additional hand-written semantic validation (clankergraph validation alone is fully hand-rolled in `autoclanker/clankergraph.py`; keep it in sync with `schemas/clankergraph.schema.json`). `bayes_layer/config.py` locates defaults by requiring both `configs/` and `schemas/` dirs to exist.
 
@@ -89,6 +90,10 @@ One durable fact layer; projections never walk raw profiles ad hoc:
 `proto.py` (hand-rolled pprof protobuf decoder; strict about malformed input, signed int64s, value types) → `model.py` (`Profile.to_sample_facts()` with per-profile frame interning and memoized facts) → `facts.py` (versioned `clankerprof.sample_facts.v2` compact interned export/replay contract with strict import validation; legacy v1 imports still accepted) → projections in `targets.py`, `slices.py` (typed filter DSL with frame-identity memoization), and `scopes.py` (boundary decomposition), all built on `patterns.py` (path/regex/library matching), `categorize.py` (the shared categorization engine), and `stats.py` (projection accumulators); `analysis.py` is a compatibility shim re-exporting the historical surface → `render.py` / `compare.py` (strict-JSON regression gates dispatching on the report `tool` field). Runtime semantics (Ruby, generic) live in strict, versioned YAML rule packs under `clankerprof/runtime_rules/` (`clankerprof.runtime_rules.v1`), never hardcoded; Ruby is opt-in via `--runtime ruby`. The projection commands (targets/slices/scopes/boundaries) accept `--profile` or previously exported facts JSON (mutually exclusive) with identical output guaranteed by tests; `facts` requires `--profile` (compact by default, `--pretty` opt-in), and `compare` consumes two slice or scope reports.
 
 The Rust crate (`crates/clankerprof-core`, binary `clankerprof-rs`) is capabilities-complete: facts export/replay, targets (all formats incl. the compat CSV pair), slices, scopes/boundaries with TOML/YAML configs, compare gates, and a single-pass `report` mode. It loads the same packaged rule packs via `include_str!` (drift is impossible by construction) and supports `--runtime ruby`, external packs, and core-class overrides. Python remains the reference implementation; the parity suite pins artifacts byte-for-byte across a per-subcommand flag matrix, and a test enforces `SAMPLE_FACTS_SCHEMA_VERSION` symmetry between `facts.py` and `facts.rs`. Any clankerprof behavior change must land in Python and Rust together and update the capability matrix in `docs/CLANKERPROF_PARITY.md`.
+
+### goalloop
+
+Host-neutral goal loops: `goalloop/model.py` holds the file-backed state contract (charter with YAML frontmatter gates/audit policy, wave-grouped tracker rows as the single source of execution state, append-only audit log and history JSONL); `goalloop/cli.py` exposes init/status/assert/gate/goal/lock/handoff/audit. `goalloop goal` exits 0 only when all rows are `done`/`dropped`-with-reason, gates pass (exit codes propagate verbatim), and any configured adversarial audit has converged (a round confirming nothing new). Confirmed audit findings are appended to the tracker as `R<N>` waves. Everything is documented in `docs/GOALLOOP.md`; the operator workflow ships as `skills/goal-loop`.
 
 ### bigbets
 

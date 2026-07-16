@@ -4,9 +4,9 @@ import argparse
 import json
 import sys
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from autoclanker import __version__
 from autoclanker.bayes_layer.cli_adapter import register_adapter_commands
@@ -23,6 +23,7 @@ from autoclanker.cli_graph import register_graph_commands
 from autoclanker.issue_seeder import register_issue_seed_commands
 from bigbets.cli import register_bigbets_commands
 from clankerprof.cli import register_pprof_commands
+from goalloop.cli import register_goalloop_commands
 
 EXIT_VALIDATION_ERROR = 2
 EXIT_SESSION_ERROR = 3
@@ -96,6 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_issue_seed_commands(subparsers)
     register_bigbets_commands(subparsers)
     register_pprof_commands(subparsers)
+    _register_goalloop_family(subparsers)
     return parser
 
 
@@ -112,6 +114,31 @@ def _emit_json(payload: dict[str, JsonValue], output_path: str | None) -> None:
 
 def _emit_error(message: str) -> None:
     print(json.dumps({"ok": False, "error": message}, sort_keys=True), file=sys.stderr)
+
+
+def _register_goalloop_family(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "goalloop",
+        help="Deterministic goal loops for agent harnesses.",
+    )
+
+    def _exit_with_code(
+        handler: Callable[[argparse.Namespace], int],
+    ) -> Callable[[argparse.Namespace], int]:
+        def wrapped(args: argparse.Namespace) -> int:
+            if getattr(args, "output", None):
+                raise ValueError(
+                    "goalloop commands write JSON directly to stdout and do not "
+                    "support the global --output flag; use shell redirection."
+                )
+            raise SystemExit(handler(args))
+
+        return wrapped
+
+    register_goalloop_commands(
+        parser.add_subparsers(dest="goalloop_command", required=True),
+        wrap=_exit_with_code,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:

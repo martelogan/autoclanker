@@ -13,7 +13,7 @@
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["fixture", "autoresearch", "cevolve", "python_module", "subprocess"]
+          "enum": ["fixture", "autoresearch", "cevolve", "python_module", "subprocess", "goalloop"]
         },
         "mode": {
           "type": "string",
