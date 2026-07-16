@@ -273,7 +273,9 @@ representative caller -> hot leaf pairs. Owner rows answer a different
 question from slices: they say which observed frame below this specific
 scope drove each cost kind. If authoritative ownership matters, load a slice
 file with `slices = "./slices.yml"` and use `slice:<name>` predicates in
-`[owner]`.
+`[owner]`. The predicate matches a frame only when `<name>` is the frame's
+effective first-match owner under that slice file (declaration order, default
+slice as fallback), exactly as the slices projection would attribute it.
 
 Predicate values can be a plain string, an array of strings with OR semantics,
 or a table with `any`, `all`, and `not`. Supported predicate keys include

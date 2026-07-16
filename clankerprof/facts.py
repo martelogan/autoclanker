@@ -16,6 +16,7 @@ from clankerprof.model import (
     TimeNs,
     ValueType,
     check_aggregate_bounds,
+    select_primary_value_index,
 )
 
 JsonValue: TypeAlias = (
@@ -394,11 +395,23 @@ def _validated_profile_meta(raw: object) -> _ProfileMeta:
     period = _strict_int(raw_period)
     if period is None or period < _I64_MIN or period > _I64_MAX:
         raise ValueError("Sample facts profile period must be an integer.")
+    default_sample_type = _meta_string(payload, "default_sample_type", "profile")
+    # The index is not free-form metadata: exporters derive it from the
+    # documented selection rule, so an artifact whose index contradicts its
+    # own default_sample_type/value_types is malformed and would silently
+    # select the wrong metric.
+    expected_index = select_primary_value_index(value_types, default_sample_type)
+    if primary_value_index != expected_index:
+        raise ValueError(
+            f"Sample facts primary_value_index {primary_value_index} contradicts "
+            f"the declared default sample type selection (expected "
+            f"{expected_index})."
+        )
     return _ProfileMeta(
         value_types=value_types,
         period_type=period_type,
         period=period,
-        default_sample_type=_meta_string(payload, "default_sample_type", "profile"),
+        default_sample_type=default_sample_type,
         primary_value_index=primary_value_index,
     )
 
@@ -503,29 +516,29 @@ def _validate_summary(
         raise ValueError("Sample facts summary must be an object.")
     summary_payload = cast(JsonObject, raw)
 
-    def summary_int(key: str) -> int | None:
+    def summary_int(key: str) -> int:
+        # A present summary is redundant data to be cross-validated; letting
+        # individual members go missing (or null) would make `summary: {}`
+        # indistinguishable from no summary at all.
         value = summary_payload.get(key)
         if value is None:
-            return None
+            raise ValueError(
+                "Sample facts summary must contain sample_count, "
+                "total_primary_value, empty_sample_count, and "
+                "non_empty_sample_count."
+            )
         parsed = _strict_int(value)
         if parsed is None or parsed < _I64_MIN or parsed > _U64_MAX:
             raise ValueError(f"Sample facts summary {key} must be an integer.")
         return parsed
 
-    expected_count = summary_int("sample_count")
-    if expected_count is not None and expected_count != sample_count:
+    if summary_int("sample_count") != sample_count:
         raise ValueError("Sample facts summary sample count does not match samples.")
-    expected_total = summary_int("total_primary_value")
-    if expected_total is not None and expected_total != total_primary_value:
+    if summary_int("total_primary_value") != total_primary_value:
         raise ValueError("Sample facts summary total does not match samples.")
-    expected_empty = summary_int("empty_sample_count")
-    if expected_empty is not None and expected_empty != empty_sample_count:
+    if summary_int("empty_sample_count") != empty_sample_count:
         raise ValueError("Sample facts empty count does not match samples.")
-    expected_non_empty = summary_int("non_empty_sample_count")
-    if (
-        expected_non_empty is not None
-        and expected_non_empty != sample_count - empty_sample_count
-    ):
+    if summary_int("non_empty_sample_count") != sample_count - empty_sample_count:
         raise ValueError("Sample facts non-empty count does not match samples.")
 
 

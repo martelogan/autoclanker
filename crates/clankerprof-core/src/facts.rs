@@ -285,6 +285,18 @@ fn sample_facts_from_v2(payload: &Value) -> Result<ProfileFacts, String> {
             .ok_or("Sample facts profile period must be an integer.")?,
     };
     let default_sample_type = meta_string(profile, "default_sample_type", "profile")?;
+    // The index is not free-form metadata: exporters derive it from the
+    // documented selection rule, so an artifact whose index contradicts its
+    // own default_sample_type/value_types is malformed and would silently
+    // select the wrong metric.
+    let expected_index =
+        crate::model::select_primary_value_index(&value_types, &default_sample_type);
+    if primary_value_index as usize != expected_index {
+        return Err(format!(
+            "Sample facts primary_value_index {primary_value_index} contradicts the declared \
+             default sample type selection (expected {expected_index})."
+        ));
+    }
 
     let strings: Vec<String> = match payload.get("strings") {
         Some(Value::Array(items)) => items
@@ -436,22 +448,28 @@ fn validate_summary(
         Some(Value::Object(map)) => map,
         Some(_) => return Err("Sample facts summary must be an object.".to_string()),
     };
-    let summary_int = |key: &str| -> Result<Option<i128>, String> {
+    let summary_int = |key: &str| -> Result<i128, String> {
         match summary.get(key) {
-            None | Some(Value::Null) => Ok(None),
+            // A present summary is redundant data to be cross-validated;
+            // letting individual members go missing (or null) would make
+            // `summary: {}` indistinguishable from no summary at all.
+            None | Some(Value::Null) => Err(
+                "Sample facts summary must contain sample_count, total_primary_value, \
+                 empty_sample_count, and non_empty_sample_count."
+                    .to_string(),
+            ),
             Some(value) => value
                 .as_i64()
                 .map(i128::from)
                 .or_else(|| value.as_u64().map(i128::from))
-                .map(Some)
                 .ok_or_else(|| format!("Sample facts summary {key} must be an integer.")),
         }
     };
     let check = |key: &str, expected: i128, message: &str| -> Result<(), String> {
-        match summary_int(key)? {
-            Some(found) if found != expected => Err(message.to_string()),
-            _ => Ok(()),
+        if summary_int(key)? != expected {
+            return Err(message.to_string());
         }
+        Ok(())
     };
     check(
         "sample_count",

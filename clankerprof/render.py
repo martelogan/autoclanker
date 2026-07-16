@@ -181,7 +181,7 @@ def _render_boundary(
             key=lambda item: item[1].cpu_time,
             reverse=True,
         )
-        if category not in bucketed_categories and stats.cpu_time != 0
+        if category not in bucketed_categories and _category_renderable(stats)
     )
     if leftover:
         buckets.append(_render_boundary_bucket(boundary, "Other", leftover))
@@ -212,8 +212,22 @@ def _render_boundary(
             )
             if stats.cpu_time != 0
             or any(metrics.cpu_time != 0 for metrics in stats.cost_kinds.values())
+            or any(
+                metrics.cpu_time != 0
+                for file_stats in stats.files.values()
+                for metrics in file_stats.functions.values()
+            )
         ][:top],
     }
+
+
+def _category_renderable(stats: CategoryStats) -> bool:
+    # A category may be omitted only when its aggregate AND its entire
+    # rendered subtree are zero: signed leaf functions can cancel to a zero
+    # category total without being omittable zero rows.
+    return stats.cpu_time != 0 or any(
+        metrics.cpu_time != 0 for metrics in stats.functions.values()
+    )
 
 
 def _render_boundary_bucket(
@@ -226,7 +240,7 @@ def _render_boundary_bucket(
         _render_boundary_category(boundary, category, stats)
         for category in categories
         if (stats := boundary.categories.get(category)) is not None
-        and stats.cpu_time != 0
+        and _category_renderable(stats)
     ]
     cpu_time = sum(cast(int, row["time_ns"]) for row in category_rows)
     return {

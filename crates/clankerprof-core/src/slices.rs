@@ -192,15 +192,12 @@ pub fn load_slices_file(path: impl AsRef<Path>) -> Result<Vec<SliceDefinition>, 
     Ok(slices)
 }
 
-pub fn analyze_slice_facts(
-    facts: &ProfileFacts,
-    options: &SliceAnalysisOptions,
-) -> Result<SliceAnalysisResult, String> {
-    // Definition validation lives in the analysis layer, mirroring Python
-    // `analyze_slice_facts`, so file, config, and programmatic paths all
-    // share it with identical error ordering.
-    let default_names: Vec<&str> = options
-        .slices
+/// Shared definition validation for every slice-loading surface.
+///
+/// Scope configs load slice files without ever running slice analysis, so
+/// the checks must not live only inside `analyze_slice_facts`.
+pub fn validate_slice_definitions(slices: &[SliceDefinition]) -> Result<(), String> {
+    let default_names: Vec<&str> = slices
         .iter()
         .filter(|slice| slice.is_default)
         .map(|slice| slice.name.as_str())
@@ -212,7 +209,7 @@ pub fn analyze_slice_facts(
         ));
     }
     let mut seen_names: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    for definition in &options.slices {
+    for definition in slices {
         if !seen_names.insert(definition.name.as_str()) {
             return Err(format!(
                 "Slice config declares duplicate slice name: {}. Each slice name may be defined once.",
@@ -229,6 +226,23 @@ pub fn analyze_slice_facts(
             ));
         }
     }
+    Ok(())
+}
+
+pub fn analyze_slice_facts(
+    facts: &ProfileFacts,
+    options: &SliceAnalysisOptions,
+) -> Result<SliceAnalysisResult, String> {
+    // Definition validation lives in the analysis layer, mirroring Python
+    // `analyze_slice_facts`, so file, config, and programmatic paths all
+    // share it with identical error ordering.
+    validate_slice_definitions(&options.slices)?;
+    let default_names: Vec<&str> = options
+        .slices
+        .iter()
+        .filter(|slice| slice.is_default)
+        .map(|slice| slice.name.as_str())
+        .collect();
     let mut total_time = 0;
     let mut matching_time = 0;
     let mut gc_time = 0;
@@ -616,27 +630,6 @@ fn filters_match_sample(
                 .any(|raw_filter| filter_matches_stack(raw_filter, stack, options, bottom)))
 }
 
-// Mirror of Python's `_sample_has_descendant_attribute_for_slice`: a sample
-// is rescued into a slice when any descendant attribute rule targeting that
-// slice matches any frame in the stack.
-fn sample_has_descendant_attribute_for_slice(
-    stack: &[Frame],
-    slice_name: &str,
-    options: &SliceAnalysisOptions,
-) -> bool {
-    options.attributes.iter().any(|rule| {
-        rule.descendant
-            && rule.target_slice == slice_name
-            && stack.iter().any(|frame| {
-                matches_frame_filter(
-                    frame,
-                    &format!("{}:{}", rule.key, rule.value),
-                    &options.runtime_rules,
-                )
-            })
-    })
-}
-
 fn filter_matches_stack(
     raw_filter: &str,
     stack: &[Frame],
@@ -649,11 +642,13 @@ fn filter_matches_stack(
         // Bottom slice: filters evaluate the sample's EFFECTIVE attribution
         // in both polarities: a sample rescued into a slice by a descendant
         // attribute rule matches slice:<name> and is excluded by
-        // !slice:<name>. (Collapse slice: rules deliberately skip the
+        // !slice:<name>. The rescue resolves the first-match WINNING rule's
+        // target — the mere existence of a losing rule targeting the slice
+        // never matches. (Collapse slice: rules deliberately skip the
         // rescue — the documented carve-out.)
         let mut matched = slice_for_frame(bottom, stack, options, false) == value;
         if !matched {
-            matched = sample_has_descendant_attribute_for_slice(stack, value, options);
+            matched = slice_for_frame(bottom, stack, options, true) == value;
         }
         return if inverted { !matched } else { matched };
     }

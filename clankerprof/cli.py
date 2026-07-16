@@ -45,6 +45,7 @@ from clankerprof.analysis import (
     parse_frame_predicates,
     ruby_rules,
     runtime_rules_from_file,
+    validate_slice_definitions,
 )
 from clankerprof.compare import CompareOptions, compare_json
 from clankerprof.facts import (
@@ -1052,6 +1053,9 @@ def _load_boundary_options(
         if not raw_slices_path.is_absolute():
             raw_slices_path = Path(path).parent / raw_slices_path
         slices = _load_slices(str(raw_slices_path))
+        # Scope configs never run slice analysis, so duplicate/multi-default/
+        # reserved-name validation must happen at this loading surface too.
+        validate_slice_definitions(slices)
     category_name, raw_categories = _aliased_config_value(
         payload,
         "cost_kind",

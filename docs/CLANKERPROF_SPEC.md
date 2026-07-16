@@ -103,7 +103,11 @@ importers cross-validate a present summary against the decoded samples
 skips the cross-check identically in both implementations; it never affects
 the imported facts. A present summary of any other type is a validation
 error (`Sample facts summary must be an object.`) — wrong-typed is
-malformed, never "absent".
+malformed, never "absent". A present summary object must contain all four
+members (`sample_count`, `total_primary_value`, `empty_sample_count`,
+`non_empty_sample_count`); a missing or `null` member is a validation error
+in both languages — otherwise `summary: {}` would be indistinguishable from
+no summary at all, evading the cross-check while looking validated.
 
 Each `frames` row is a six-element array:
 
@@ -148,7 +152,12 @@ frame and string indexes, reject non-integer stack entries, reject a
 `primary_value_index` outside the declared `value_types` (no selection rule
 can produce one — with no declared types the index must be `0`; the
 per-sample `values[0]` fallback covers only ragged samples under a valid
-index), and reject summaries that disagree with the reconstructed samples.
+index), reject a `primary_value_index` that contradicts the index the
+documented selection rule derives from `default_sample_type` and
+`value_types` (the index is not free-form metadata: exporters derive it, so
+a self-consistent artifact whose index disagrees with its own declared
+default is malformed and would silently select the wrong metric), and
+reject summaries that disagree with the reconstructed samples.
 
 Numeric domains are strict and shared by both implementations. Location and
 function IDs (in `location_ids` and frame rows) are unsigned 64-bit integers;
@@ -400,7 +409,7 @@ compatibility, but the preferred authoring terminology is:
 | Cost kind | Atomic taxonomy used for sampled or folded work. |
 | Rollup | Scope-specific display grouping of cost-kind rows. |
 | Owner | Observed owner taxonomy below the scope; each owner preserves cost-kind sub-buckets. |
-| Slice | Optional ownership source that `owner` predicates can reference via `slice:<name>`. |
+| Slice | Optional ownership source that `owner` predicates can reference via `slice:<name>`. A `slice:<name>` predicate matches a frame only when `<name>` is the frame's **effective first-match owner** under the loaded slice config (declaration order, default slice as fallback) — a later definition whose rules also match never owns the frame. Slice files loaded through scope configs run the same definition validation (unique names, at most one default, reserved pseudo-names) as the slices projection. |
 
 Scope, cost-kind, owner, and exclusion selectors accept a plain selector,
 an OR list of selectors, or an expression table with `any`, `all`, and `not`.
@@ -579,7 +588,10 @@ are signed, and dropping negative rows breaks additivity. A row may be
 omitted only when its aggregate AND its entire rendered subtree are zero:
 signed children can cancel to a zero parent total (a `+10`/`-10` bucket, a
 zero-sum domain), and such a parent renders with its nonzero rows rather
-than erasing them.
+than erasing them. The rule applies at every level, including cost-kind
+category rows: a zero-sum category whose leaf functions are nonzero renders
+(with its signed `leaf_functions`) rather than vanishing and taking its
+bucket with it.
 Rendering appends an implicit `Other` bucket collecting unbucketed nonzero
 cost kinds, so the rollup name `Other` is reserved: a configured `Other`
 rollup is a validation error in both implementations (otherwise projections
@@ -620,8 +632,12 @@ For each sample:
 
 Bottom `slice:<name>` filters evaluate the sample's **effective** attribution
 in both polarities: a sample rescued into a slice by a descendant attribute
-rule matches `slice:<name>` and is excluded by `!slice:<name>`. Collapse
-`slice:` rules intentionally do not use the descendant-attribute rescue.
+rule matches `slice:<name>` and is excluded by `!slice:<name>`. The rescue
+resolves the first-match **winning** rule for the sample — the mere
+existence of a later, losing rule targeting the slice never matches (a
+sample whose winner targets `A` does not match `slice:B` even when a losing
+rule targets `B`). Collapse `slice:` rules intentionally do not use the
+descendant-attribute rescue.
 
 Slice, frame, library, and pseudo-output `pct` fields are shares of
 `matching_time_ns` — the filtered, attributed total; the whole-profile

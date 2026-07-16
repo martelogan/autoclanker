@@ -253,21 +253,6 @@ class _SliceMatcher:
                 return definition.name
         return self._default_slice
 
-    def _sample_has_descendant_attribute_for_slice(
-        self,
-        stack: Sequence[Frame],
-        slice_name: str,
-    ) -> bool:
-        for rule in self._options.attributes:
-            if not rule.descendant or rule.target_slice != slice_name:
-                continue
-            if any(
-                self.matches_predicate(candidate, rule.key, rule.value)
-                for candidate in stack
-            ):
-                return True
-        return False
-
     def _filter_matches(
         self,
         item: _SliceFilter,
@@ -280,10 +265,10 @@ class _SliceMatcher:
                 self.slice_without_descendant_attributes(frame) == item.value
                 for frame in frames
             )
-            if not matched and self._sample_has_descendant_attribute_for_slice(
-                stack,
-                item.value,
-            ):
+            # Rescue via the sample's EFFECTIVE attribution: the first-match
+            # winning rule's target, not the mere existence of any losing
+            # descendant rule targeting the slice.
+            if not matched and self.slice_for_sample(bottom, stack) == item.value:
                 matched = True
             return not matched if item.inverted else matched
         if item.key == "slice":
@@ -331,23 +316,20 @@ def analyze_slices(
     return analyze_slice_facts(profile.sample_facts(), options)
 
 
-def analyze_slice_facts(
-    sample_facts: SampleFactsInput,
-    options: SliceAnalysisOptions,
-) -> SliceAnalysisResult:
-    total_time = 0
-    matching_time = 0
-    gc_time = 0
-    stats_by_slice: dict[str, SliceStats] = {}
-    uncollapsible_stats = SliceStats(name=UNCOLLAPSIBLE_PSEUDO_SLICE)
-    default_names = [item.name for item in options.slices if item.is_default]
+def validate_slice_definitions(slices: Sequence[SliceDefinition]) -> None:
+    """Shared definition validation for every slice-loading surface.
+
+    Scope configs load slice files without ever running slice analysis, so
+    the checks must not live only inside `analyze_slice_facts`.
+    """
+    default_names = [item.name for item in slices if item.is_default]
     if len(default_names) > 1:
         raise ValueError(
             "Slice config declares multiple default slices: "
             f"{', '.join(default_names)}. Exactly one slice may set default."
         )
     seen_names: set[str] = set()
-    for item in options.slices:
+    for item in slices:
         # Duplicate names silently merged with first/last-wins metadata that
         # diverged across implementations; fail closed like multiple defaults.
         if item.name in seen_names:
@@ -365,6 +347,19 @@ def analyze_slice_facts(
                 "The names (gc) and (uncollapsible) are reserved for analyzer "
                 "pseudo-outputs."
             )
+
+
+def analyze_slice_facts(
+    sample_facts: SampleFactsInput,
+    options: SliceAnalysisOptions,
+) -> SliceAnalysisResult:
+    total_time = 0
+    matching_time = 0
+    gc_time = 0
+    stats_by_slice: dict[str, SliceStats] = {}
+    uncollapsible_stats = SliceStats(name=UNCOLLAPSIBLE_PSEUDO_SLICE)
+    validate_slice_definitions(options.slices)
+    default_names = [item.name for item in options.slices if item.is_default]
     default_slice = default_names[0] if default_names else "(all)"
     matcher = _SliceMatcher(options)
     index = ProfileFactIndex.from_input(sample_facts)

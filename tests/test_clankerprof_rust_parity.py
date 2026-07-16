@@ -4903,3 +4903,178 @@ def test_clankerprof_rust_round7_cluster_v_matches_python(tmp_path: Path) -> Non
         ["facts", "--profile", str(garbage)], "facts-gzip-trailing-garbage"
     )
     assert "ok" in json.loads(envelope)
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_round8_cluster_w_matches_python(tmp_path: Path) -> None:
+    # R8-01: a zero-sum category with nonzero signed leaf rows renders inside
+    # its bucket in both languages instead of erasing the bucket wholesale.
+    builder = PprofFixtureBuilder.create()
+    scope = builder.location(builder.function("S", "/srv/app/s.py"))
+    pos = builder.location(builder.function("Pos", "/srv/app/pos.py"))
+    neg = builder.location(builder.function("Neg", "/srv/app/neg.py"))
+    other = builder.location(builder.function("Unrelated", "/srv/app/u.py"))
+    builder.sample((pos, scope), 10)
+    builder.sample((neg, scope), -10)
+    builder.sample((other,), 5)
+    zero_sum_profile = tmp_path / "zero-sum.pb"
+    zero_sum_profile.write_bytes(builder.encode())
+    zero_sum_config = tmp_path / "zero-sum.yml"
+    zero_sum_config.write_text(
+        'cost_kind:\n  Work: ["name:Pos", "name:Neg"]\n'
+        'scope:\n  - function: S\n    rollup:\n      All: ["Work"]\n',
+        encoding="utf-8",
+    )
+    output = _assert_identical_success(
+        ["scopes", "--profile", str(zero_sum_profile), "--config", str(zero_sum_config)],
+        "zero-sum-category",
+    )
+    boundary = json.loads(output)["boundaries"][0]
+    assert [bucket["name"] for bucket in boundary["buckets"]] == ["All"]
+    categories = boundary["buckets"][0]["categories"]
+    assert [(row["name"], row["time_ns"]) for row in categories] == [("Work", 0)]
+
+    # R8-02: scope slice: predicates use effective first-match ownership.
+    leaf_builder = PprofFixtureBuilder.create()
+    leaf = leaf_builder.location(leaf_builder.function("Leaf", "/srv/app/leaf.py"))
+    parent = leaf_builder.location(leaf_builder.function("T", "/srv/app/t.py"))
+    leaf_builder.sample((leaf, parent), 7)
+    leaf_profile = tmp_path / "leaf.pb"
+    leaf_profile.write_bytes(leaf_builder.encode())
+    overlap_slices = tmp_path / "overlap-slices.yml"
+    overlap_slices.write_text(
+        "slices:\n  - name: A\n    paths: [/srv/app/**]\n"
+        "  - name: B\n    paths: [/srv/app/**]\n",
+        encoding="utf-8",
+    )
+    for owner, predicate, expected in (
+        ("BOwner", "slice:B", ["Uncategorized"]),
+        ("AOwner", "slice:A", ["AOwner"]),
+    ):
+        owner_config = tmp_path / f"owner-{owner}.yml"
+        owner_config.write_text(
+            f'slices: {overlap_slices}\nowner:\n  {owner}: "{predicate}"\n'
+            "scope:\n  - function: T\n",
+            encoding="utf-8",
+        )
+        output = _assert_identical_success(
+            ["scopes", "--profile", str(leaf_profile), "--config", str(owner_config)],
+            f"owner-{owner}",
+        )
+        domains = json.loads(output)["boundaries"][0]["domains"]
+        assert [domain["name"] for domain in domains] == expected
+
+    # R8-04: a present summary requires all four members.
+    facts_path = tmp_path / "leaf-facts.json"
+    export = _run_python_cli_raw(
+        ["facts", "--profile", str(leaf_profile), "--output", str(facts_path)]
+    )
+    assert export.returncode == 0, export.stderr
+    payload = cast(dict[str, Any], json.loads(facts_path.read_text(encoding="utf-8")))
+    summary_message = (
+        "Sample facts summary must contain sample_count, total_primary_value, "
+        "empty_sample_count, and non_empty_sample_count."
+    )
+    for label, summary in (("empty", {}), ("null-member", {"sample_count": None})):
+        mutated = dict(payload)
+        mutated["summary"] = summary
+        bad_summary = tmp_path / f"facts-summary-{label}.json"
+        bad_summary.write_text(json.dumps(mutated), encoding="utf-8")
+        envelope = _assert_identical_envelope(
+            ["slices", "--facts", str(bad_summary)], f"summary-{label}"
+        )
+        assert json.loads(envelope) == {"ok": False, "error": summary_message}
+
+    # R8-07: scope-config slice loading runs the shared definition validation.
+    for label, slices_text, message in (
+        (
+            "duplicate",
+            "slices:\n  - name: App\n    paths: [/srv/app/**]\n"
+            "  - name: App\n    paths: [/other/**]\n",
+            "Slice config declares duplicate slice name: App. "
+            "Each slice name may be defined once.",
+        ),
+        (
+            "multi-default",
+            "slices:\n  - name: A\n    default: true\n"
+            "  - name: B\n    default: true\n",
+            "Slice config declares multiple default slices: A, B. "
+            "Exactly one slice may set default.",
+        ),
+        (
+            "reserved",
+            'slices:\n  - name: "(gc)"\n    paths: [/srv/app/**]\n',
+            "Slice config declares reserved pseudo-slice name: (gc). "
+            "The names (gc) and (uncollapsible) are reserved for analyzer "
+            "pseudo-outputs.",
+        ),
+    ):
+        invalid_slices = tmp_path / f"invalid-{label}.yml"
+        invalid_slices.write_text(slices_text, encoding="utf-8")
+        invalid_config = tmp_path / f"invalid-{label}-scopes.yml"
+        invalid_config.write_text(
+            f'slices: {invalid_slices}\ncost_kind:\n  Work: "name:Leaf"\n'
+            "scope:\n  - function: T\n",
+            encoding="utf-8",
+        )
+        envelope = _assert_identical_envelope(
+            ["scopes", "--profile", str(leaf_profile), "--config", str(invalid_config)],
+            f"scope-slices-{label}",
+        )
+        assert json.loads(envelope) == {"ok": False, "error": message}
+
+    # R8-09: the bottom slice-filter rescue resolves the winning rule.
+    empty_slices = tmp_path / "empty-slices.yml"
+    empty_slices.write_text(
+        "slices:\n  - name: A\n    paths: []\n  - name: B\n    paths: []\n",
+        encoding="utf-8",
+    )
+    rescue_base = [
+        "slices",
+        "--profile",
+        str(leaf_profile),
+        "--slices",
+        str(empty_slices),
+        "--attribute",
+        "<name:Leaf,to:A",
+        "--attribute",
+        "<name:T,to:B",
+    ]
+    for filter_value, expected in (
+        ("slice:B", 0),
+        ("slice:A", 7),
+        ("!slice:B", 7),
+        ("!slice:A", 0),
+    ):
+        output = _assert_identical_success(
+            [*rescue_base, "--filter", filter_value], f"rescue-{filter_value}"
+        )
+        assert json.loads(output)["summary"]["matching_time_ns"] == expected
+
+    # R8-14: primary_value_index must match the documented selection.
+    typed = PprofFixtureBuilder.create(
+        sample_types=(("samples", "count"), ("cpu", "nanoseconds")),
+        default_sample_type="cpu",
+    )
+    typed.sample((typed.location(typed.function("Leaf", "/app/leaf.py")),), (1, 100))
+    typed_profile = tmp_path / "typed.pb"
+    typed_profile.write_bytes(typed.encode())
+    typed_facts = tmp_path / "typed-facts.json"
+    export = _run_python_cli_raw(
+        ["facts", "--profile", str(typed_profile), "--output", str(typed_facts)]
+    )
+    assert export.returncode == 0, export.stderr
+    payload = cast(dict[str, Any], json.loads(typed_facts.read_text(encoding="utf-8")))
+    cast(dict[str, Any], payload["profile"])["primary_value_index"] = 0
+    contradictory = tmp_path / "typed-facts-contradictory.json"
+    contradictory.write_text(json.dumps(payload), encoding="utf-8")
+    envelope = _assert_identical_envelope(
+        ["slices", "--facts", str(contradictory)], "index-contradicts-selection"
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": (
+            "Sample facts primary_value_index 0 contradicts the declared default "
+            "sample type selection (expected 1)."
+        ),
+    }

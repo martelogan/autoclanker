@@ -7376,3 +7376,216 @@ def test_clankerprof_scope_config_slices_must_be_string(
         assert exit_code == 2
         envelope = _error_envelope(capsys)
         assert envelope["error"] == "Boundary config slices must be a string path."
+
+
+def _cluster_w_zero_sum_profile() -> bytes:
+    builder = PprofFixtureBuilder.create()
+    scope = builder.location(builder.function("S", "/srv/app/s.py"))
+    pos = builder.location(builder.function("Pos", "/srv/app/pos.py"))
+    neg = builder.location(builder.function("Neg", "/srv/app/neg.py"))
+    other = builder.location(builder.function("Unrelated", "/srv/app/u.py"))
+    builder.sample((pos, scope), 10)
+    builder.sample((neg, scope), -10)
+    builder.sample((other,), 5)
+    return builder.encode()
+
+
+def test_clankerprof_scope_zero_sum_categories_render_with_signed_children(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(_cluster_w_zero_sum_profile())
+    config_path = tmp_path / "scopes.yml"
+    config_path.write_text(
+        'cost_kind:\n  Work: ["name:Pos", "name:Neg"]\n'
+        'scope:\n  - function: S\n    rollup:\n      All: ["Work"]\n',
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+    )
+    assert exit_code == 0
+    boundary = json.loads(capsys.readouterr().out)["boundaries"][0]
+    # The zero-sum Work category keeps its nonzero signed leaf subtree, so
+    # neither the category nor its bucket is erased.
+    assert [bucket["name"] for bucket in boundary["buckets"]] == ["All"]
+    categories = boundary["buckets"][0]["categories"]
+    assert [(row["name"], row["time_ns"]) for row in categories] == [("Work", 0)]
+    leaf_functions = categories[0]["leaf_functions"]
+    assert leaf_functions["Pos"]["cpu_time"] == 10
+    assert leaf_functions["Neg"]["cpu_time"] == -10
+
+
+def _cluster_w_leaf_profile() -> bytes:
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    parent = builder.location(builder.function("T", "/srv/app/t.py"))
+    builder.sample((leaf, parent), 7)
+    return builder.encode()
+
+
+def test_clankerprof_scope_slice_predicates_use_effective_ownership(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(_cluster_w_leaf_profile())
+    slices_path = tmp_path / "slices.yml"
+    slices_path.write_text(
+        "slices:\n  - name: A\n    paths: [/srv/app/**]\n"
+        "  - name: B\n    paths: [/srv/app/**]\n",
+        encoding="utf-8",
+    )
+    for owner, predicate, expected_domains in (
+        ("BOwner", "slice:B", ["Uncategorized"]),
+        ("AOwner", "slice:A", ["AOwner"]),
+    ):
+        config_path = tmp_path / f"scopes-{owner}.yml"
+        config_path.write_text(
+            f"slices: {slices_path}\nowner:\n  {owner}: \"{predicate}\"\n"
+            "scope:\n  - function: T\n",
+            encoding="utf-8",
+        )
+        exit_code = clankerprof_main(
+            ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+        )
+        assert exit_code == 0
+        boundary = json.loads(capsys.readouterr().out)["boundaries"][0]
+        # First-match ownership: definition A owns every /srv/app frame, so
+        # slice:B matches nothing and slice:A matches everything.
+        assert [domain["name"] for domain in boundary["domains"]] == expected_domains
+
+
+def test_clankerprof_facts_summary_requires_all_members(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(_cluster_w_leaf_profile())
+    facts_path = tmp_path / "facts.json"
+    assert (
+        clankerprof_main(
+            ["facts", "--profile", str(profile_path), "--output", str(facts_path)]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    payload = cast(dict[str, Any], json.loads(facts_path.read_text(encoding="utf-8")))
+    message = (
+        "Sample facts summary must contain sample_count, total_primary_value, "
+        "empty_sample_count, and non_empty_sample_count."
+    )
+    for label, summary in (("empty", {}), ("null-member", {"sample_count": None})):
+        mutated = dict(payload)
+        mutated["summary"] = summary
+        bad_path = tmp_path / f"facts-{label}.json"
+        bad_path.write_text(json.dumps(mutated), encoding="utf-8")
+        exit_code = clankerprof_main(["slices", "--facts", str(bad_path)])
+        assert exit_code == 2
+        assert _error_envelope(capsys)["error"] == message
+
+
+def test_clankerprof_scope_config_validates_loaded_slice_definitions(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(_cluster_w_leaf_profile())
+    cases = (
+        (
+            "slices:\n  - name: App\n    paths: [/srv/app/**]\n"
+            "  - name: App\n    paths: [/other/**]\n",
+            "Slice config declares duplicate slice name: App. "
+            "Each slice name may be defined once.",
+        ),
+        (
+            "slices:\n  - name: A\n    default: true\n  - name: B\n    default: true\n",
+            "Slice config declares multiple default slices: A, B. "
+            "Exactly one slice may set default.",
+        ),
+        (
+            'slices:\n  - name: "(gc)"\n    paths: [/srv/app/**]\n',
+            "Slice config declares reserved pseudo-slice name: (gc). "
+            "The names (gc) and (uncollapsible) are reserved for analyzer "
+            "pseudo-outputs.",
+        ),
+    )
+    for index, (slices_text, message) in enumerate(cases):
+        slices_path = tmp_path / f"slices-{index}.yml"
+        slices_path.write_text(slices_text, encoding="utf-8")
+        config_path = tmp_path / f"scopes-{index}.yml"
+        config_path.write_text(
+            f'slices: {slices_path}\ncost_kind:\n  Work: "name:Leaf"\n'
+            "scope:\n  - function: T\n",
+            encoding="utf-8",
+        )
+        exit_code = clankerprof_main(
+            ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+        )
+        assert exit_code == 2
+        assert _error_envelope(capsys)["error"] == message
+
+
+def test_clankerprof_slice_filter_rescue_uses_winning_attribute_rule(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(_cluster_w_leaf_profile())
+    slices_path = tmp_path / "slices.yml"
+    slices_path.write_text(
+        "slices:\n  - name: A\n    paths: []\n  - name: B\n    paths: []\n",
+        encoding="utf-8",
+    )
+    base = ["slices", "--profile", str(profile_path), "--slices", str(slices_path)]
+    rules = ["--attribute", "<name:Leaf,to:A", "--attribute", "<name:T,to:B"]
+    # The first-match winner targets A: filtering for the losing rule's
+    # target must reject the sample in both polarities.
+    for filter_value, expected in (
+        ("slice:B", 0),
+        ("slice:A", 7),
+        ("!slice:B", 7),
+        ("!slice:A", 0),
+    ):
+        exit_code = clankerprof_main([*base, *rules, "--filter", filter_value])
+        assert exit_code == 0
+        summary = json.loads(capsys.readouterr().out)["summary"]
+        assert summary["matching_time_ns"] == expected, filter_value
+    # Swapping rule order flips the winner.
+    swapped = ["--attribute", "<name:T,to:B", "--attribute", "<name:Leaf,to:A"]
+    exit_code = clankerprof_main([*base, *swapped, "--filter", "slice:B"])
+    assert exit_code == 0
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert summary["matching_time_ns"] == 7
+
+
+def test_clankerprof_facts_primary_index_must_match_selection(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create(
+        sample_types=(("samples", "count"), ("cpu", "nanoseconds")),
+        default_sample_type="cpu",
+    )
+    builder.sample((builder.location(builder.function("Leaf", "/app/leaf.py")),), (1, 100))
+    profile_path = tmp_path / "typed.pb"
+    profile_path.write_bytes(builder.encode())
+    facts_path = tmp_path / "facts.json"
+    assert (
+        clankerprof_main(
+            ["facts", "--profile", str(profile_path), "--output", str(facts_path)]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    payload = cast(dict[str, Any], json.loads(facts_path.read_text(encoding="utf-8")))
+    cast(dict[str, Any], payload["profile"])["primary_value_index"] = 0
+    bad_path = tmp_path / "facts-contradictory.json"
+    bad_path.write_text(json.dumps(payload), encoding="utf-8")
+    exit_code = clankerprof_main(["slices", "--facts", str(bad_path)])
+    assert exit_code == 2
+    assert _error_envelope(capsys)["error"] == (
+        "Sample facts primary_value_index 0 contradicts the declared default "
+        "sample type selection (expected 1)."
+    )

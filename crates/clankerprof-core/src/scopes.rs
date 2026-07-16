@@ -186,6 +186,7 @@ struct PredicateMatcher<'a> {
     runtime_cache: RuntimeCategoryCache,
     category_matcher: Option<CategoryMatcher>,
     cache: HashMap<(FramePredicate, (u64, String, String)), bool>,
+    slice_owner_cache: HashMap<(u64, String, String), String>,
 }
 
 fn frame_cache_key(frame: &Frame) -> (u64, String, String) {
@@ -204,7 +205,34 @@ impl<'a> PredicateMatcher<'a> {
             runtime_cache: RuntimeCategoryCache::default(),
             category_matcher: None,
             cache: HashMap::new(),
+            slice_owner_cache: HashMap::new(),
         }
+    }
+
+    fn resolve_slice_owner(&mut self, frame: &Frame) -> String {
+        let cache_key = frame_cache_key(frame);
+        if let Some(cached) = self.slice_owner_cache.get(&cache_key) {
+            return cached.clone();
+        }
+        // Declaration-order first-match over the loaded slice definitions,
+        // mirroring the slices projection's per-frame resolution (scope
+        // configs load no attribute rules); unmatched frames fall back to
+        // the default slice.
+        let mut default = "(all)";
+        let mut resolved: Option<&str> = None;
+        for definition in self.slices {
+            if definition.is_default {
+                default = &definition.name;
+                continue;
+            }
+            if definition.matches_frame(frame, self.rules) {
+                resolved = Some(&definition.name);
+                break;
+            }
+        }
+        let owner = resolved.unwrap_or(default).to_string();
+        self.slice_owner_cache.insert(cache_key, owner.clone());
+        owner
     }
 
     fn unique_frame_count(&self) -> usize {
@@ -306,9 +334,11 @@ impl<'a> PredicateMatcher<'a> {
                     })
                     .unwrap_or(false))
             }
-            "slice" => Ok(self.slices.iter().any(|definition| {
-                definition.name == value && definition.matches_frame(frame, self.rules)
-            })),
+            // Effective ownership, not raw rule matching: overlapping slice
+            // definitions resolve first-match in declaration order (with the
+            // default slice as fallback), so a later definition whose rules
+            // also match never owns the frame.
+            "slice" => Ok(self.resolve_slice_owner(frame) == value),
             _ if DEFAULT_LIBRARY_SELECTORS.contains(&key)
                 || self.rules.library_selector_path_patterns.contains_key(key) =>
             {
@@ -690,7 +720,9 @@ fn render_boundary(boundary: &BoundaryStats, profile_total: TimeNs, top: Option<
     leftover_sorted.sort_by(|left, right| right.1.cpu_time.cmp(&left.1.cpu_time));
     let leftover: Vec<String> = leftover_sorted
         .into_iter()
-        .filter(|(category, stats)| !bucketed.contains(category.as_str()) && stats.cpu_time != 0)
+        .filter(|(category, stats)| {
+            !bucketed.contains(category.as_str()) && category_renderable(stats)
+        })
         .map(|(category, _)| category.clone())
         .collect();
     if !leftover.is_empty() {
@@ -719,6 +751,12 @@ fn render_boundary(boundary: &BoundaryStats, profile_total: TimeNs, top: Option<
                         .cost_kinds
                         .values()
                         .any(|metrics| metrics.cpu_time != 0)
+                    || stats.files.values().any(|file_stats| {
+                        file_stats
+                            .functions
+                            .values()
+                            .any(|metrics| metrics.cpu_time != 0)
+                    })
             })
             .map(|(name, stats)| render_domain(boundary, name, stats, top))
             .collect(),
@@ -742,6 +780,17 @@ fn render_boundary(boundary: &BoundaryStats, profile_total: TimeNs, top: Option<
     })
 }
 
+// A category may be omitted only when its aggregate AND its entire rendered
+// subtree are zero: signed leaf functions can cancel to a zero category
+// total without being omittable zero rows.
+fn category_renderable(stats: &CategoryStats) -> bool {
+    stats.cpu_time != 0
+        || stats
+            .functions
+            .values()
+            .any(|metrics| metrics.cpu_time != 0)
+}
+
 fn render_bucket(boundary: &BoundaryStats, label: &str, categories: &[String]) -> Value {
     let total = boundary.total_time;
     let category_rows: Vec<Value> = categories
@@ -750,7 +799,7 @@ fn render_bucket(boundary: &BoundaryStats, label: &str, categories: &[String]) -
             boundary
                 .categories
                 .get(category)
-                .filter(|stats| stats.cpu_time != 0)
+                .filter(|stats| category_renderable(stats))
                 .map(|stats| render_category(boundary, category, stats))
         })
         .collect();
@@ -1407,6 +1456,9 @@ pub fn load_boundary_options(
             }
         }
         slices = crate::slices::load_slices_file(resolved)?;
+        // Scope configs never run slice analysis, so duplicate/multi-default/
+        // reserved-name validation must happen at this loading surface too.
+        crate::slices::validate_slice_definitions(&slices)?;
     }
     let (category_name, raw_categories) = aliased_config_value(
         &payload,

@@ -67,6 +67,7 @@ from clankerprof.slices import (
     SliceStats,
     analyze_slice_facts,
     analyze_slices,
+    validate_slice_definitions,
 )
 from clankerprof.targets import (
     OutputMode,
@@ -107,6 +108,7 @@ __all__ = [
     "analyze_boundaries",
     "analyze_boundary_facts",
     "analyze_slice_facts",
+    "validate_slice_definitions",
     "analyze_slices",
     "analyze_target_facts",
     "analyze_targets",
