@@ -10,3 +10,5 @@
 {"confirmed": 14, "event": "audit_ingest", "refuted": 0, "round": 8}
 {"confirmed": 5, "event": "audit_ingest", "refuted": 0, "round": 9}
 {"confirmed": 5, "event": "audit_ingest", "refuted": 0, "round": 10}
+{"contract_digest": "f33dce985d431124761f71bf0fb143635ea89ff7269563f3482655136d45d5a9", "event": "lock"}
+{"contract_digest": "f33dce985d431124761f71bf0fb143635ea89ff7269563f3482655136d45d5a9", "event": "goal", "ok": true, "pending": 0, "rounds": 10}

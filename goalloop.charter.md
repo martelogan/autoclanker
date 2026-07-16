@@ -3,10 +3,6 @@ name: clankerprof-v2-adversarial-review
 gates:
 - ./bin/dev check
 - cargo test --workspace
-audit:
-  auditor: codex exec --sandbox read-only --cd /Users/logan_martel/Projects/autoclanker_bootstrap_v5/clankerprof-v2-audit
-    -
-  max_rounds: 10
 ---
 
 # Charter: clankerprof-v2-adversarial-review
@@ -87,3 +83,21 @@ proof, and an audit round completes with zero new confirmed findings.
   never weaken a gate to pass.
 - Usage-limit interruption is NOT a stop condition: all state lives in the
   goalloop files and the worktree; resume from the tracker.
+
+## Audit resolution (accepted 2026-07-17)
+
+Ten adversarial rounds ran to the raised cap: 101 findings confirmed by
+independent reproduction and fixed in both languages behind green gates,
+1 refuted with recorded proof, 2 auditor-adjacent false alarms pinned as
+verified non-divergences. A zero-confirmation round never occurred; the
+finding curve (10, 14, 8, 14, 11, 12, 8, 14, 5, 5) and severity migration
+(critical gate bypasses in round 1; input-grammar edges by round 10) show
+material convergence: nothing since round 4 threatened gate semantics or
+data integrity for tool-produced artifacts.
+
+Logan accepted the loop as materially converged and directed closeout.
+The audit block is removed from this charter as the explicit,
+history-recorded act (goalloop treats a loop without an auditor as
+vacuously converged); the complete 10-round record remains in
+goalloop.audit.md and goalloop.history.jsonl, and every ingested finding
+remains a done tracker row above.
