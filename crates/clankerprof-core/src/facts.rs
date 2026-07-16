@@ -322,7 +322,7 @@ fn sample_facts_from_v2(payload: &Value) -> Result<ProfileFacts, String> {
         return Err("Sample facts payload must contain a samples array.".to_string());
     };
     let mut samples = Vec::with_capacity(raw_samples.len());
-    for entry in raw_samples {
+    for (position, entry) in raw_samples.iter().enumerate() {
         if !entry.is_object() {
             return Err("Each sample facts entry must be an object.".to_string());
         }
@@ -351,8 +351,18 @@ fn sample_facts_from_v2(payload: &Value) -> Result<ProfileFacts, String> {
             };
             stack.push(frames[index].clone());
         }
+        let parsed_index = sample_index_field(entry)?;
+        if parsed_index != position {
+            // v2 sample_index is the stable zero-based profile order; the
+            // exporter can only ever emit enumerate-derived indexes, so a
+            // mismatch (duplicate, gap, or non-zero start) is malformed.
+            return Err(format!(
+                "Sample fact sample_index {parsed_index} does not match \
+                 its profile-order position {position}."
+            ));
+        }
         samples.push(SampleFact {
-            sample_index: sample_index_field(entry)?,
+            sample_index: parsed_index,
             sample: Sample {
                 location_ids: u64_items(
                     required_sample_key(entry, "location_ids")?,

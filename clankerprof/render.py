@@ -22,7 +22,7 @@ from clankerprof.analysis import (
     format_time,
 )
 from clankerprof.model import TimeNs
-from clankerprof.stats import CategoryStats
+from clankerprof.stats import CategoryStats, DomainStats
 
 
 def render_target_json(
@@ -210,23 +210,48 @@ def _render_boundary(
                 key=lambda item: item[1].cpu_time,
                 reverse=True,
             )
-            if stats.cpu_time != 0
-            or any(metrics.cpu_time != 0 for metrics in stats.cost_kinds.values())
-            or any(
-                metrics.cpu_time != 0
-                for file_stats in stats.files.values()
-                for metrics in file_stats.functions.values()
-            )
+            if _domain_renderable(stats)
         ][:top],
     }
 
 
 def _category_renderable(stats: CategoryStats) -> bool:
     # A category may be omitted only when its aggregate AND its entire
-    # rendered subtree are zero: signed leaf functions can cancel to a zero
-    # category total without being omittable zero rows.
-    return stats.cpu_time != 0 or any(
-        metrics.cpu_time != 0 for metrics in stats.functions.values()
+    # rendered subtree are zero: signed leaf functions, folded-from rows, and
+    # caller-to-leaf pairs can each cancel to a zero category total without
+    # being omittable zero rows. Every map the category renderer emits
+    # participates here.
+    return (
+        stats.cpu_time != 0
+        or any(metrics.cpu_time != 0 for metrics in stats.functions.values())
+        or any(time_ns != 0 for time_ns in stats.folded_from.values())
+        or any(
+            metrics.cpu_time != 0 for metrics in stats.caller_leaf_pairs.values()
+        )
+    )
+
+
+def _domain_renderable(stats: DomainStats) -> bool:
+    # Same every-level subtree rule as _category_renderable: every map the
+    # domain renderer emits (cost kinds plus per-file functions, cost kinds,
+    # and caller-to-leaf pairs) participates in the keep decision.
+    return (
+        stats.cpu_time != 0
+        or any(metrics.cpu_time != 0 for metrics in stats.cost_kinds.values())
+        or any(
+            file_stats.cpu_time != 0
+            or any(
+                metrics.cpu_time != 0 for metrics in file_stats.functions.values()
+            )
+            or any(
+                metrics.cpu_time != 0 for metrics in file_stats.cost_kinds.values()
+            )
+            or any(
+                metrics.cpu_time != 0
+                for metrics in file_stats.caller_leaf_pairs.values()
+            )
+            for file_stats in stats.files.values()
+        )
     )
 
 

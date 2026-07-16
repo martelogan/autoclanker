@@ -1272,14 +1272,15 @@ fn validate_slice_options(
             ));
         }
         // The virtual-slice opt-in waives only the must-name-a-configured-
-        // slice rule; a pseudo-slice target would be attributed and then
-        // stripped at render, leaving matched time with no owning row.
-        if attribute.target_slice == clankerprof_core::slices::GC_PSEUDO_SLICE
-            || attribute.target_slice == clankerprof_core::slices::UNCOLLAPSIBLE_PSEUDO_SLICE
+        // slice rule; a (gc)/(uncollapsible) target would be attributed and
+        // then stripped at render, and an (all) target would merge with the
+        // implicit fallback row.
+        if clankerprof_core::slices::RESERVED_SLICE_NAMES.contains(&attribute.target_slice.as_str())
         {
             return Err(format!(
-                "Attribute target names reserved pseudo-slice name: {}. The names (gc) and (uncollapsible) are reserved for analyzer pseudo-outputs.",
-                attribute.target_slice
+                "Attribute target names reserved pseudo-slice name: {}. {}",
+                attribute.target_slice,
+                clankerprof_core::slices::RESERVED_SLICE_NAMES_MESSAGE
             ));
         }
         if !names.contains(attribute.target_slice.as_str()) && !allow_virtual_attribute_slices {

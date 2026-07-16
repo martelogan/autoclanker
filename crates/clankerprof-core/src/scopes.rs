@@ -745,19 +745,7 @@ fn render_boundary(boundary: &BoundaryStats, profile_total: TimeNs, top: Option<
     let domains: Vec<Value> = truncated(
         domains_sorted
             .into_iter()
-            .filter(|(_, stats)| {
-                stats.cpu_time != 0
-                    || stats
-                        .cost_kinds
-                        .values()
-                        .any(|metrics| metrics.cpu_time != 0)
-                    || stats.files.values().any(|file_stats| {
-                        file_stats
-                            .functions
-                            .values()
-                            .any(|metrics| metrics.cpu_time != 0)
-                    })
-            })
+            .filter(|(_, stats)| domain_renderable(stats))
             .map(|(name, stats)| render_domain(boundary, name, stats, top))
             .collect(),
         top,
@@ -781,14 +769,47 @@ fn render_boundary(boundary: &BoundaryStats, profile_total: TimeNs, top: Option<
 }
 
 // A category may be omitted only when its aggregate AND its entire rendered
-// subtree are zero: signed leaf functions can cancel to a zero category
-// total without being omittable zero rows.
+// subtree are zero: signed leaf functions, folded-from rows, and
+// caller-to-leaf pairs can each cancel to a zero category total without
+// being omittable zero rows. Every map the category renderer emits
+// participates here.
 fn category_renderable(stats: &CategoryStats) -> bool {
     stats.cpu_time != 0
         || stats
             .functions
             .values()
             .any(|metrics| metrics.cpu_time != 0)
+        || stats.folded_from.values().any(|time_ns| *time_ns != 0)
+        || stats
+            .caller_leaf_pairs
+            .values()
+            .any(|metrics| metrics.cpu_time != 0)
+}
+
+// Same every-level subtree rule as category_renderable: every map the
+// domain renderer emits (cost kinds plus per-file functions, cost kinds,
+// and caller-to-leaf pairs) participates in the keep decision.
+fn domain_renderable(stats: &DomainStats) -> bool {
+    stats.cpu_time != 0
+        || stats
+            .cost_kinds
+            .values()
+            .any(|metrics| metrics.cpu_time != 0)
+        || stats.files.values().any(|file_stats| {
+            file_stats.cpu_time != 0
+                || file_stats
+                    .functions
+                    .values()
+                    .any(|metrics| metrics.cpu_time != 0)
+                || file_stats
+                    .cost_kinds
+                    .values()
+                    .any(|metrics| metrics.cpu_time != 0)
+                || file_stats
+                    .caller_leaf_pairs
+                    .values()
+                    .any(|metrics| metrics.cpu_time != 0)
+        })
 }
 
 fn render_bucket(boundary: &BoundaryStats, label: &str, categories: &[String]) -> Value {

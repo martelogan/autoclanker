@@ -4373,7 +4373,7 @@ def test_clankerprof_rust_round6_cluster_s_matches_python(tmp_path: Path) -> Non
     )
     pseudo_profile = tmp_path / "pseudo.pb"
     pseudo_profile.write_bytes(facts_builder.encode())
-    for reserved in ("(gc)", "(uncollapsible)"):
+    for reserved in ("(all)", "(gc)", "(uncollapsible)"):
         pseudo_slices = tmp_path / "pseudo-slices.yml"
         pseudo_slices.write_text(
             f'slices:\n  - name: "{reserved}"\n    paths: [/app]\n',
@@ -4393,8 +4393,8 @@ def test_clankerprof_rust_round6_cluster_s_matches_python(tmp_path: Path) -> Non
             "ok": False,
             "error": (
                 f"Slice config declares reserved pseudo-slice name: {reserved}. "
-                "The names (gc) and (uncollapsible) are reserved for analyzer "
-                "pseudo-outputs."
+                "The names (all), (gc) and (uncollapsible) are reserved for "
+                "analyzer pseudo-outputs."
             ),
         }
 
@@ -4744,7 +4744,7 @@ def test_clankerprof_rust_round7_cluster_v_matches_python(tmp_path: Path) -> Non
         "ok": False,
         "error": (
             "Attribute target names reserved pseudo-slice name: (gc). The names "
-            "(gc) and (uncollapsible) are reserved for analyzer pseudo-outputs."
+            "(all), (gc) and (uncollapsible) are reserved for analyzer pseudo-outputs."
         ),
     }
     envelope = _assert_identical_envelope(
@@ -5010,8 +5010,8 @@ def test_clankerprof_rust_round8_cluster_w_matches_python(tmp_path: Path) -> Non
             "reserved",
             'slices:\n  - name: "(gc)"\n    paths: [/srv/app/**]\n',
             "Slice config declares reserved pseudo-slice name: (gc). "
-            "The names (gc) and (uncollapsible) are reserved for analyzer "
-            "pseudo-outputs.",
+            "The names (all), (gc) and (uncollapsible) are reserved for "
+            "analyzer pseudo-outputs.",
         ),
     ):
         invalid_slices = tmp_path / f"invalid-{label}.yml"
@@ -5228,3 +5228,193 @@ def test_clankerprof_rust_round8_cluster_x_matches_python(tmp_path: Path) -> Non
     )
     payload = json.loads(facts_output)
     assert payload["profile"]["period_type"] == {"type": "cpu", "unit": "nanoseconds"}
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_round9_cluster_y_matches_python(tmp_path: Path) -> None:
+    from clankerprof.facts import dumps_sample_facts
+
+    # R9-01: the numeric-backref rewrite understands (?x) extended-mode `#`
+    # line comments — the comment's parenthesis must not shift group
+    # numbering (Python treats it as text; the Rust rewrite must too).
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("T", "abb"))
+    builder.sample((leaf,), 1)
+    xmode_facts = tmp_path / "xmode-facts.json"
+    xmode_facts.write_text(
+        dumps_sample_facts(decode_profile_bytes(builder.encode()).to_sample_facts()),
+        encoding="utf-8",
+    )
+    xmode_config = tmp_path / "xmode-config.json"
+    xmode_config.write_text(
+        json.dumps({"T": {"Hit": "regex:(?x)# (\n(?P<a>a)(?P<b>b)\\2"}}),
+        encoding="utf-8",
+    )
+    output = _assert_identical_success(
+        [
+            "targets",
+            "--facts",
+            str(xmode_facts),
+            "--config",
+            str(xmode_config),
+            "--format",
+            "json",
+        ],
+        "xmode-backref",
+    )
+    assert json.loads(output)["parents"]["T"]["categories"][0]["name"] == "Hit"
+
+    # R9-02: zero-sum categories with signed caller pairs render (bucket
+    # level), and zero-sum domains with per-file pair evidence render.
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/x/leaf.rb"))
+    caller_a = builder.location(builder.function("CallerA", "/x/ca.rb"))
+    caller_b = builder.location(builder.function("CallerB", "/x/cb.rb"))
+    boundary = builder.location(builder.function("Boundary", "/x/b.rb"))
+    builder.sample((leaf, caller_a, boundary), 10)
+    builder.sample((leaf, caller_b, boundary), -10)
+    pairs_profile = tmp_path / "pairs.pb"
+    pairs_profile.write_bytes(builder.encode())
+    pairs_config = tmp_path / "pairs.yml"
+    pairs_config.write_text(
+        'cost_kind:\n  Work: "name:Leaf"\nscope:\n  - function: Boundary\n',
+        encoding="utf-8",
+    )
+    output = _assert_identical_success(
+        ["scopes", "--profile", str(pairs_profile), "--config", str(pairs_config)],
+        "zero-sum-pairs",
+    )
+    categories = json.loads(output)["boundaries"][0]["buckets"][0]["categories"]
+    assert {r["pair"]: r["time_ns"] for r in categories[0]["caller_leaf_pairs"]} == {
+        "CallerA -> Leaf": 10,
+        "CallerB -> Leaf": -10,
+    }
+    builder = PprofFixtureBuilder.create()
+    owner = builder.function("Owner", "/own/o.rb")
+    leaf_a = builder.location(builder.function("LeafA", "/x/a.rb"))
+    leaf_b = builder.location(builder.function("LeafB", "/x/b.rb"))
+    owner_loc = builder.location(owner)
+    boundary = builder.location(builder.function("Boundary", "/x/bd.rb"))
+    builder.sample((leaf_a, owner_loc, boundary), 10)
+    builder.sample((leaf_b, owner_loc, boundary), -10)
+    domain_profile = tmp_path / "domains.pb"
+    domain_profile.write_bytes(builder.encode())
+    domain_config = tmp_path / "domains.yml"
+    domain_config.write_text(
+        'cost_kind:\n  Work: "path:/x/**"\nowner:\n  D: "path:/own/**"\n'
+        "scope:\n  - function: Boundary\n",
+        encoding="utf-8",
+    )
+    output = _assert_identical_success(
+        ["scopes", "--profile", str(domain_profile), "--config", str(domain_config)],
+        "zero-sum-domains",
+    )
+    domains = json.loads(output)["boundaries"][0]["domains"]
+    assert [(d["name"], d["time_ns"]) for d in domains] == [("D", 0)]
+
+    # R9-03: exclusion-aware core-class marker routing; patterns feed the
+    # general native detection and deliberately do not core-route.
+    builder = PprofFixtureBuilder.create()
+    for path in ("/native/object.rb", "/native/app/object.rb", "/native/ext.so"):
+        b = PprofFixtureBuilder.create()
+        loc = b.location(b.function("Object#new", path))
+        parent = b.location(b.function("T", "/x/t.rb"))
+        b.sample((loc, parent), 10)
+        (tmp_path / f"core-{path.replace('/', '_')}.pb").write_bytes(b.encode())
+    marker_pack = tmp_path / "marker-pack.yml"
+    marker_pack.write_text(
+        "schema_version: clankerprof.runtime_rules.v1\n"
+        "core_native_default_category: Native Core\n"
+        "native_path_markers:\n  - /native/\n"
+        "native_path_exclude_markers:\n  - /native/app/\n",
+        encoding="utf-8",
+    )
+    pattern_pack = tmp_path / "pattern-pack.yml"
+    pattern_pack.write_text(
+        "schema_version: clankerprof.runtime_rules.v1\n"
+        "core_native_default_category: Native Core\n"
+        "native_path_patterns:\n  - regex:/native/\n",
+        encoding="utf-8",
+    )
+    core_csv = tmp_path / "core.csv"
+    core_csv.write_text("Object\n", encoding="utf-8")
+    core_config = tmp_path / "core-config.json"
+    core_config.write_text(json.dumps({"T": {}}), encoding="utf-8")
+    for path, pack, expected in (
+        ("/native/object.rb", marker_pack, "Native Core"),
+        ("/native/app/object.rb", marker_pack, "Other"),
+        ("/native/ext.so", pattern_pack, "Other"),
+    ):
+        output = _assert_identical_success(
+            [
+                "targets",
+                "--profile",
+                str(tmp_path / f"core-{path.replace('/', '_')}.pb"),
+                "--config",
+                str(core_config),
+                "--runtime-rules",
+                str(pack),
+                "--core-classes",
+                str(core_csv),
+                "--format",
+                "json",
+            ],
+            f"core-route-{expected}-{path}",
+        )
+        categories = json.loads(output)["parents"]["T"]["categories"]
+        assert categories[0]["name"] == expected, (path, categories)
+
+    # R9-04: an (all) attribute target is reserved even with the virtual
+    # opt-in (the configured-slice case is covered by the reserved-name
+    # loop above).
+    slices_path = tmp_path / "app-slices.yml"
+    slices_path.write_text(
+        'slices:\n  - name: App\n    paths: ["/x/**"]\n', encoding="utf-8"
+    )
+    envelope = _assert_identical_envelope(
+        [
+            "slices",
+            "--profile",
+            str(pairs_profile),
+            "--slices",
+            str(slices_path),
+            "--attribute",
+            "name:x,to:(all)",
+            "--allow-virtual-attribute-slices",
+        ],
+        "attribute-all-reserved",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": (
+            "Attribute target names reserved pseudo-slice name: (all). "
+            "The names (all), (gc) and (uncollapsible) are reserved for "
+            "analyzer pseudo-outputs."
+        ),
+    }
+
+    # R9-05: v2 sample_index must equal the sample's zero-based position.
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("T", "/x/t.rb"))
+    builder.sample((leaf,), 1)
+    builder.sample((leaf,), 1)
+    exported = json.loads(
+        dumps_sample_facts(decode_profile_bytes(builder.encode()).to_sample_facts())
+    )
+    for label, indexes in (("duplicate", [7, 7]), ("one-based", [1, 2])):
+        payload = json.loads(json.dumps(exported))
+        for entry, index in zip(payload["samples"], indexes, strict=True):
+            entry["sample_index"] = index
+        facts_path = tmp_path / f"index-{label}.json"
+        facts_path.write_text(json.dumps(payload), encoding="utf-8")
+        envelope = _assert_identical_envelope(
+            ["targets", "--facts", str(facts_path), "--target", "T"],
+            f"sample-index-{label}",
+        )
+        assert json.loads(envelope) == {
+            "ok": False,
+            "error": (
+                f"Sample fact sample_index {indexes[0]} does not match "
+                "its profile-order position 0."
+            ),
+        }

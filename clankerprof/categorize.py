@@ -15,6 +15,7 @@ from clankerprof.patterns import (
     extract_library_name,
     is_native_path,
     is_runtime_stdlib_path,
+    native_path_excluded,
 )
 from clankerprof.rules import (
     RuntimeRuleSet,
@@ -186,8 +187,20 @@ def categorize_runtime_frame(frame: Frame, rules: RuntimeRuleSet) -> str | None:
 
     core_class = _direct_core_class(name, rules)
     if core_class is not None:
+        # Core-class explicit-native routing keys on pseudo-paths and the
+        # pack's native_path_markers, now exclusion-aware (markers previously
+        # ignored the exclude keys — a /native/app/ exclusion could not veto
+        # a /native/ marker). native_path_patterns deliberately do NOT
+        # core-route: they feed the pack's general native detection
+        # (runtime-owned checks, native: predicates), where e.g. the ruby
+        # pack's version-dir pattern must not reclassify stdlib or vendored
+        # interpreter files away from stdlib/semantic routing. A pack that
+        # wants pattern-style core routing declares the substring as a
+        # marker. <internal:> keeps precedence (core_internal_categories
+        # below), and <cfunc> stays the fast path.
         explicit_native_path = path == "<cfunc>" or (
             not path.startswith("<internal:")
+            and not native_path_excluded(path, rules)
             and (
                 path.startswith("<")
                 or any(marker in path for marker in rules.native_path_markers)

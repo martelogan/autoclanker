@@ -484,9 +484,14 @@ pub(crate) fn raw_compiled_regex(pattern: &str) -> Result<Arc<Regex>, String> {
 /// and unnamed groups share one numbering; `(?:`/lookaround/`(?P=` do not
 /// count). Returns None when no rewrite applies. Character classes are left
 /// untouched (`\1` inside a class is an octal escape, not a backref).
+/// Under a leading `(?x)`-style global flag group, `#` line comments never
+/// count toward numbering and are never rewritten; scoped `(?x:...)` /
+/// `(?-x:...)` groups and mid-pattern global `x` flags bail out (None) so
+/// the engine's own error stands rather than risking miscounted groups.
 fn rewrite_numeric_backrefs_to_named(pattern: &str) -> Option<String> {
     let mut names: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
     let chars: Vec<char> = pattern.chars().collect();
+    let (leading_flags_end, x_mode) = leading_global_flags(&chars);
     let mut group = 0usize;
     let mut in_class = false;
     let mut i = 0usize;
@@ -494,6 +499,14 @@ fn rewrite_numeric_backrefs_to_named(pattern: &str) -> Option<String> {
         match chars[i] {
             '\\' => {
                 i += 2;
+                continue;
+            }
+            '#' if x_mode && !in_class => {
+                // (?x) line comment: runs to the end of the line or pattern;
+                // its contents never count toward group numbering.
+                while i < chars.len() && chars[i] != '\n' {
+                    i += 1;
+                }
                 continue;
             }
             '[' if !in_class => in_class = true,
@@ -521,6 +534,13 @@ fn rewrite_numeric_backrefs_to_named(pattern: &str) -> Option<String> {
                             return None;
                         }
                         names.insert(group, name);
+                    } else if regex_flag_group_enables_x(&chars, i) && i >= leading_flags_end {
+                        // A scoped `(?x:...)`/`(?-x:...)` group or a
+                        // mid-pattern global `x` flag changes comment
+                        // semantics partway through; numbering under partial
+                        // x-mode is not worth modeling — fail closed to the
+                        // engine's own error.
+                        return None;
                     }
                 } else {
                     group += 1;
@@ -539,6 +559,15 @@ fn rewrite_numeric_backrefs_to_named(pattern: &str) -> Option<String> {
     let mut i = 0usize;
     while i < chars.len() {
         let ch = chars[i];
+        if ch == '#' && x_mode && !in_class {
+            // Copy (?x) line comments verbatim so a literal \N inside a
+            // comment is never rewritten (numbering already skipped them).
+            while i < chars.len() && chars[i] != '\n' {
+                out.push(chars[i]);
+                i += 1;
+            }
+            continue;
+        }
         if ch == '\\' && !in_class && i + 1 < chars.len() {
             let next = chars[i + 1];
             if next.is_ascii_digit() && next != '0' {
@@ -588,6 +617,53 @@ fn rewrite_numeric_backrefs_to_named(pattern: &str) -> Option<String> {
         i += 1;
     }
     changed.then_some(out)
+}
+
+/// Scan the leading run of global inline-flag groups (`(?aiLmsux)` — flag
+/// letters then `)`, no `:`) the way CPython requires global flags at the
+/// pattern start. Returns (index just past the run, whether `x` was set).
+fn leading_global_flags(chars: &[char]) -> (usize, bool) {
+    let mut i = 0usize;
+    let mut has_x = false;
+    while chars.get(i) == Some(&'(') && chars.get(i + 1) == Some(&'?') {
+        let mut j = i + 2;
+        let mut saw_flag = false;
+        let mut group_x = false;
+        while let Some(&c) = chars.get(j) {
+            if "aiLmsux".contains(c) {
+                saw_flag = true;
+                group_x |= c == 'x';
+                j += 1;
+            } else {
+                break;
+            }
+        }
+        if !saw_flag || chars.get(j) != Some(&')') {
+            break;
+        }
+        has_x |= group_x;
+        i = j + 1;
+    }
+    (i, has_x)
+}
+
+/// True when the `(?...` group starting at `start` is an inline-flag group
+/// (global `(?...x...)` or scoped `(?...x...:` / `(?...-...x...:`) whose
+/// flags mention `x` on either side of a `-`.
+fn regex_flag_group_enables_x(chars: &[char], start: usize) -> bool {
+    let mut j = start + 2;
+    let mut saw_x = false;
+    let mut saw_flag_or_dash = false;
+    while let Some(&c) = chars.get(j) {
+        if "aiLmsux".contains(c) || c == '-' {
+            saw_flag_or_dash = true;
+            saw_x |= c == 'x';
+            j += 1;
+        } else {
+            break;
+        }
+    }
+    saw_flag_or_dash && saw_x && matches!(chars.get(j), Some(&')') | Some(&':'))
 }
 
 /// Index of the `)` closing a CPython `(?#...)` comment starting at `start`,
@@ -839,6 +915,64 @@ mod backref_tests {
         assert_eq!(rewrite_numeric_backrefs_to_named(r"(?P<x>a)b"), None);
         assert_eq!(try_match_regex(r"(?P<x>/app)\1", "/app/app"), Ok(true));
         assert_eq!(try_match_regex(r"(?P<x>/app)\1", "/app/x"), Ok(false));
+    }
+
+    #[test]
+    fn numeric_backref_rewrite_understands_extended_mode_comments() {
+        // Under a leading (?x), a `#` line comment's parentheses never count
+        // toward CPython group numbering and its digits are never rewritten.
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?x)# (\n(?P<a>a)(?P<b>b)\\2").as_deref(),
+            Some("(?x)# (\n(?P<a>a)(?P<b>b)\\k<b>")
+        );
+        // Comment text is copied verbatim, digits inside it untouched.
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?x)# \\1 (\n(?P<a>a)\\1").as_deref(),
+            Some("(?x)# \\1 (\n(?P<a>a)\\k<a>")
+        );
+        // `#` inside a character class is literal even under (?x).
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?x)[#(](?P<a>a)\\1").as_deref(),
+            Some("(?x)[#(](?P<a>a)\\k<a>")
+        );
+        // Combined leading flags enable x-mode too.
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?ix)# (\n(?P<a>a)\\1").as_deref(),
+            Some("(?ix)# (\n(?P<a>a)\\k<a>")
+        );
+        // Without x-mode, `#` is an ordinary literal and `(` counts.
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("# ((?P<a>a)\\2").as_deref(),
+            Some("# ((?P<a>a)\\k<a>")
+        );
+        // Scoped or mid-pattern x flags change comment semantics partway
+        // through: fail closed so the engine's own error stands.
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?x:# )(?P<a>a)\\1"),
+            None
+        );
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?-x:a)(?P<a>a)\\1"),
+            None
+        );
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("a(?x)# (\n(?P<a>a)\\1"),
+            None
+        );
+        // Non-x scoped flags do not bail and do not count as groups.
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?i:z)(?P<a>a)\\1").as_deref(),
+            Some("(?i:z)(?P<a>a)\\k<a>")
+        );
+        // End-to-end: the rewritten pattern compiles and matches like Python.
+        assert_eq!(
+            try_match_regex("(?x)# (\n(?P<a>a)(?P<b>b)\\2", "abb"),
+            Ok(true)
+        );
+        assert_eq!(
+            try_match_regex("(?x)# (\n(?P<a>a)(?P<b>b)\\2", "aba"),
+            Ok(false)
+        );
     }
 }
 

@@ -165,14 +165,21 @@ def is_runtime_stdlib_path(path: str, rules: RuntimeRuleSet) -> bool:
     return any(marker in path for marker in rules.stdlib_path_markers)
 
 
+def native_path_excluded(
+    path: str, rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES
+) -> bool:
+    """True when the pack's exclude keys veto native-path detection."""
+    if any(marker in path for marker in rules.native_path_exclude_markers):
+        return True
+    return any(
+        match_regex(pattern, path) for pattern in rules.native_path_exclude_patterns
+    )
+
+
 def is_native_path(path: str, rules: RuntimeRuleSet = DEFAULT_RUNTIME_RULES) -> bool:
     if not path or path.startswith("<"):
         return True
-    if any(marker in path for marker in rules.native_path_exclude_markers):
-        return False
-    if any(
-        match_regex(pattern, path) for pattern in rules.native_path_exclude_patterns
-    ):
+    if native_path_excluded(path, rules):
         return False
     if any(marker in path for marker in rules.native_path_markers):
         return True

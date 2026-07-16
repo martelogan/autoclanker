@@ -6840,7 +6840,7 @@ def test_clankerprof_reserved_pseudo_slice_names_rejected(
     # at render, reporting matched time with no owning row.
     facts_path = tmp_path / "facts.json"
     facts_path.write_text(json.dumps(_minimal_v2_facts()), encoding="utf-8")
-    for reserved in ("(gc)", "(uncollapsible)"):
+    for reserved in ("(all)", "(gc)", "(uncollapsible)"):
         slices_path = tmp_path / "slices.yml"
         slices_path.write_text(
             f'slices:\n  - name: "{reserved}"\n    paths: [/app]\n',
@@ -6853,8 +6853,8 @@ def test_clankerprof_reserved_pseudo_slice_names_rejected(
         envelope = _error_envelope(capsys)
         assert envelope["error"] == (
             f"Slice config declares reserved pseudo-slice name: {reserved}. "
-            "The names (gc) and (uncollapsible) are reserved for analyzer "
-            "pseudo-outputs."
+            "The names (all), (gc) and (uncollapsible) are reserved for "
+            "analyzer pseudo-outputs."
         )
 
 
@@ -7017,7 +7017,7 @@ def test_clankerprof_attribute_targets_cannot_use_reserved_pseudo_slices(
 
     # The virtual-slice opt-in waives only the must-name-a-configured-slice
     # rule; a pseudo-slice target would be attributed then stripped at render.
-    for name in ("(gc)", "(uncollapsible)"):
+    for name in ("(all)", "(gc)", "(uncollapsible)"):
         exit_code = clankerprof_main(
             [
                 *base,
@@ -7030,8 +7030,8 @@ def test_clankerprof_attribute_targets_cannot_use_reserved_pseudo_slices(
         envelope = _error_envelope(capsys)
         assert envelope["error"] == (
             f"Attribute target names reserved pseudo-slice name: {name}. "
-            "The names (gc) and (uncollapsible) are reserved for analyzer "
-            "pseudo-outputs."
+            "The names (all), (gc) and (uncollapsible) are reserved for "
+            "analyzer pseudo-outputs."
         )
 
     # Empty predicate keys/values would substring-match every frame.
@@ -7507,8 +7507,8 @@ def test_clankerprof_scope_config_validates_loaded_slice_definitions(
         (
             'slices:\n  - name: "(gc)"\n    paths: [/srv/app/**]\n',
             "Slice config declares reserved pseudo-slice name: (gc). "
-            "The names (gc) and (uncollapsible) are reserved for analyzer "
-            "pseudo-outputs.",
+            "The names (all), (gc) and (uncollapsible) are reserved for "
+            "analyzer pseudo-outputs.",
         ),
     )
     for index, (slices_text, message) in enumerate(cases):
@@ -7685,3 +7685,139 @@ def test_clankerprof_scope_config_rejects_unknown_top_level_keys(
     assert exit_code == 2
     envelope = _error_envelope(capsys)
     assert envelope["error"] == "Unknown scope config field: owenr."
+
+
+def test_clankerprof_zero_sum_rollups_keep_caller_pair_evidence(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Caller-to-leaf pairs are rendered subtree rows: a category (or domain)
+    # whose aggregate and leaf functions cancel must still render when its
+    # signed caller pairs are nonzero.
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/x/leaf.rb"))
+    caller_a = builder.location(builder.function("CallerA", "/x/ca.rb"))
+    caller_b = builder.location(builder.function("CallerB", "/x/cb.rb"))
+    boundary = builder.location(builder.function("Boundary", "/x/b.rb"))
+    builder.sample((leaf, caller_a, boundary), 10)
+    builder.sample((leaf, caller_b, boundary), -10)
+    profile_path = tmp_path / "pairs.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "pairs.yml"
+    config_path.write_text(
+        'cost_kind:\n  Work: "name:Leaf"\nscope:\n  - function: Boundary\n',
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    buckets = payload["boundaries"][0]["buckets"]
+    assert len(buckets) == 1
+    categories = buckets[0]["categories"]
+    assert [(c["name"], c["time_ns"]) for c in categories] == [("Work", 0)]
+    pairs = {row["pair"]: row["time_ns"] for row in categories[0]["caller_leaf_pairs"]}
+    assert pairs == {"CallerA -> Leaf": 10, "CallerB -> Leaf": -10}
+
+    # Domain flavor: per-file caller pairs keep a zero-sum domain rendered.
+    builder = PprofFixtureBuilder.create()
+    owner = builder.function("Owner", "/own/o.rb")
+    leaf_a = builder.location(builder.function("LeafA", "/x/a.rb"))
+    leaf_b = builder.location(builder.function("LeafB", "/x/b.rb"))
+    owner_loc = builder.location(owner)
+    boundary = builder.location(builder.function("Boundary", "/x/bd.rb"))
+    builder.sample((leaf_a, owner_loc, boundary), 10)
+    builder.sample((leaf_b, owner_loc, boundary), -10)
+    profile_path = tmp_path / "domains.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "domains.yml"
+    config_path.write_text(
+        'cost_kind:\n  Work: "path:/x/**"\nowner:\n  D: "path:/own/**"\n'
+        "scope:\n  - function: Boundary\n",
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    domains = payload["boundaries"][0]["domains"]
+    assert [(d["name"], d["time_ns"]) for d in domains] == [("D", 0)]
+
+
+def test_clankerprof_core_class_native_routing_is_exclusion_aware(
+    tmp_path: Path,
+) -> None:
+    from clankerprof.categorize import categorize_runtime_frame
+    from clankerprof.model import Frame
+
+    def frame(path: str) -> Frame:
+        return Frame(
+            location_id=1,
+            function_id=1,
+            name="Object#new",
+            filename=path,
+            line=1,
+            location_is_folded=False,
+        )
+
+    pack_path = tmp_path / "pack.yml"
+    pack_path.write_text(
+        "schema_version: clankerprof.runtime_rules.v1\n"
+        "core_native_default_category: Native Core\n"
+        "native_path_markers:\n  - /native/\n"
+        "native_path_exclude_markers:\n  - /native/app/\n",
+        encoding="utf-8",
+    )
+    rules = runtime_rules_from_file(pack_path, core_classes=["Object"])
+    # Markers route core classes natively...
+    assert categorize_runtime_frame(frame("/native/object.rb"), rules) == "Native Core"
+    # ...but exclusions veto them (previously markers ignored exclude keys).
+    assert categorize_runtime_frame(frame("/native/app/object.rb"), rules) is None
+
+    # native_path_patterns deliberately do NOT core-route (they feed the
+    # pack's general native detection); packs wanting pattern-style core
+    # routing declare the substring as a marker.
+    pattern_pack = tmp_path / "pattern-pack.yml"
+    pattern_pack.write_text(
+        "schema_version: clankerprof.runtime_rules.v1\n"
+        "core_native_default_category: Native Core\n"
+        "native_path_patterns:\n  - regex:/native/\n",
+        encoding="utf-8",
+    )
+    pattern_rules = runtime_rules_from_file(pattern_pack, core_classes=["Object"])
+    assert categorize_runtime_frame(frame("/native/ext.so"), pattern_rules) is None
+
+
+def test_clankerprof_facts_v2_sample_index_must_match_position(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from clankerprof.facts import dumps_sample_facts
+    from clankerprof.proto import decode_profile_bytes
+
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("T", "/x/t.rb"))
+    builder.sample((leaf,), 1)
+    builder.sample((leaf,), 1)
+    exported = json.loads(
+        dumps_sample_facts(decode_profile_bytes(builder.encode()).to_sample_facts())
+    )
+    for label, indexes in (("duplicate", [7, 7]), ("one-based", [1, 2])):
+        payload = json.loads(json.dumps(exported))
+        for entry, index in zip(payload["samples"], indexes, strict=True):
+            entry["sample_index"] = index
+        facts_path = tmp_path / f"{label}.json"
+        facts_path.write_text(json.dumps(payload), encoding="utf-8")
+        exit_code = clankerprof_main(
+            ["targets", "--facts", str(facts_path), "--target", "T"]
+        )
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        expected_index = indexes[0]
+        position = 0 if label == "duplicate" else 0
+        assert envelope["error"] == (
+            f"Sample fact sample_index {expected_index} does not match "
+            f"its profile-order position {position}."
+        )

@@ -8,6 +8,17 @@ use std::path::Path;
 
 pub const GC_PSEUDO_SLICE: &str = "(gc)";
 pub const UNCOLLAPSIBLE_PSEUDO_SLICE: &str = "(uncollapsible)";
+/// The implicit fallback row for unmatched samples: a configured slice under
+/// this name would silently merge with the fallback, absorbing samples its
+/// paths never matched under the configured metadata.
+pub const ALL_PSEUDO_SLICE: &str = "(all)";
+pub const RESERVED_SLICE_NAMES: [&str; 3] = [
+    ALL_PSEUDO_SLICE,
+    GC_PSEUDO_SLICE,
+    UNCOLLAPSIBLE_PSEUDO_SLICE,
+];
+pub const RESERVED_SLICE_NAMES_MESSAGE: &str =
+    "The names (all), (gc) and (uncollapsible) are reserved for analyzer pseudo-outputs.";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SliceDefinition {
@@ -216,13 +227,14 @@ pub fn validate_slice_definitions(slices: &[SliceDefinition]) -> Result<(), Stri
                 definition.name
             ));
         }
-        // A user slice under a pseudo name would be attributed and then
-        // unconditionally stripped at render, leaving matched time with no
-        // owning row.
-        if definition.name == GC_PSEUDO_SLICE || definition.name == UNCOLLAPSIBLE_PSEUDO_SLICE {
+        // A user slice under (gc)/(uncollapsible) would be attributed and
+        // then unconditionally stripped at render; one under (all) would
+        // silently merge with the implicit fallback row (R9-04 reversed the
+        // earlier judgment that the merge was benign).
+        if RESERVED_SLICE_NAMES.contains(&definition.name.as_str()) {
             return Err(format!(
-                "Slice config declares reserved pseudo-slice name: {}. The names (gc) and (uncollapsible) are reserved for analyzer pseudo-outputs.",
-                definition.name
+                "Slice config declares reserved pseudo-slice name: {}. {}",
+                definition.name, RESERVED_SLICE_NAMES_MESSAGE
             ));
         }
     }
@@ -773,7 +785,7 @@ mod limit_tests {
     use super::{
         analyze_slice_facts, apply_python_limit, filter_matches_stack, metadata_value,
         parse_by_slice_threshold, AttributionRule, Frame, ProfileFacts, SliceAnalysisOptions,
-        SliceDefinition, GC_PSEUDO_SLICE, UNCOLLAPSIBLE_PSEUDO_SLICE,
+        SliceDefinition, RESERVED_SLICE_NAMES,
     };
     use std::collections::BTreeMap;
 
@@ -955,7 +967,7 @@ mod limit_tests {
             default_sample_type: String::new(),
             primary_value_index: 0,
         };
-        for reserved in [GC_PSEUDO_SLICE, UNCOLLAPSIBLE_PSEUDO_SLICE] {
+        for reserved in RESERVED_SLICE_NAMES {
             let options = SliceAnalysisOptions {
                 slices: vec![SliceDefinition {
                     name: reserved.to_string(),
@@ -969,7 +981,7 @@ mod limit_tests {
                 analyze_slice_facts(&facts, &options).unwrap_err(),
                 format!(
                     "Slice config declares reserved pseudo-slice name: {reserved}. \
-                     The names (gc) and (uncollapsible) are reserved for analyzer pseudo-outputs."
+                     The names (all), (gc) and (uncollapsible) are reserved for analyzer pseudo-outputs."
                 )
             );
         }

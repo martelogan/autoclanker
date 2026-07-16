@@ -164,7 +164,11 @@ index), reject a `primary_value_index` that contradicts the index the
 documented selection rule derives from `default_sample_type` and
 `value_types` (the index is not free-form metadata: exporters derive it, so
 a self-consistent artifact whose index disagrees with its own declared
-default is malformed and would silently select the wrong metric), and
+default is malformed and would silently select the wrong metric), reject a
+v2 `sample_index` that differs from the sample's zero-based array position
+(the field is the stable profile order — exporters can only emit
+enumerate-derived indexes, so duplicates, gaps, and non-zero starts are
+malformed; legacy v1 payloads keep their historical leniency), and
 reject summaries that disagree with the reconstructed samples.
 
 Numeric domains are strict and shared by both implementations. Location and
@@ -331,6 +335,17 @@ native-name rules **before** the core-class table when they appear on native
 paths, so the core table's default category never swallows names the pack
 labels semantically; off native paths, the core category maps
 (`core_semantic_categories` and friends) keep their legacy claims.
+
+Core-class explicit-native routing keys on pseudo-paths (`<cfunc>` and
+other `<…>` markers except `<internal:`) plus the pack's
+`native_path_markers`, and is exclusion-aware: `native_path_exclude_markers`
+and `native_path_exclude_patterns` veto marker and pseudo-path routing.
+`native_path_patterns` deliberately do NOT participate in core-class
+routing — they feed the pack's general native detection (runtime-owned
+checks and `native:` predicates), where e.g. the ruby pack's version-dir
+pattern must not reclassify stdlib or vendored interpreter files away from
+stdlib/semantic routing. A pack that wants pattern-style core routing
+declares the substring as a marker.
 
 The `--no-enhanced` flag disables enhanced runtime categorization for the
 **active** runtime's rules; it never swaps rule packs. Under the generic
@@ -542,9 +557,12 @@ backreferences; the Rust implementation compiles them with an engine
 (fancy-regex) that accepts the overwhelming majority of that dialect —
 numeric backreferences to named groups are rewritten to named backrefs so
 Python's mixed spelling (`(?P<x>…)\1`) compiles identically (the rewrite
-understands CPython `(?#…)` comment groups: parentheses inside comments
-never count toward group numbering and comment bodies are never
-rewritten), and any
+understands CPython `(?#…)` comment groups and, under a leading
+`(?x)`-style global flag group, extended-mode `#` line comments:
+parentheses inside either never count toward group numbering and comment
+bodies are never rewritten; scoped `(?x:…)`/`(?-x:…)` groups and
+mid-pattern global `x` flags make the rewrite decline so the engine's own
+error stands), and any
 residual pattern fancy-regex cannot compile fails closed with exit `2`.
 Patterns that compile in both engines agree on the overwhelmingly common
 constructs, but MATCHING semantics follow each engine's own rules at these
@@ -604,10 +622,13 @@ are signed, and dropping negative rows breaks additivity. A row may be
 omitted only when its aggregate AND its entire rendered subtree are zero:
 signed children can cancel to a zero parent total (a `+10`/`-10` bucket, a
 zero-sum domain), and such a parent renders with its nonzero rows rather
-than erasing them. The rule applies at every level, including cost-kind
-category rows: a zero-sum category whose leaf functions are nonzero renders
-(with its signed `leaf_functions`) rather than vanishing and taking its
-bucket with it.
+than erasing them. The rule applies at every level, and every map a
+renderer emits participates in its level's keep decision: a zero-sum
+category renders when its leaf functions, folded-from rows, OR
+caller-to-leaf pairs are nonzero, and a zero-sum domain renders when its
+cost kinds or any per-file functions, cost kinds, or caller-to-leaf pairs
+are nonzero — signed evidence is never erased by a cancelled parent
+aggregate.
 Rendering appends an implicit `Other` bucket collecting unbucketed nonzero
 cost kinds, so the rollup name `Other` is reserved: a configured `Other`
 rollup is a validation error in both implementations (otherwise projections
@@ -676,10 +697,12 @@ first). Slice names must be unique: duplicates are a validation error in
 both languages ("Slice config declares duplicate slice name: <name>. Each
 slice name may be defined once.") — previously Python kept the last
 definition's metadata while Rust kept the first. The pseudo-output names
-`(gc)` and `(uncollapsible)` are reserved: a user slice under either name
-is a validation error in both languages, because such a slice would be
-attributed and then stripped at render, reporting matched time with no
-owning row. The reservation applies equally to `--attribute` targets,
+`(all)`, `(gc)` and `(uncollapsible)` are reserved: a user slice under any
+of these names is a validation error in both languages — a `(gc)`/
+`(uncollapsible)` slice would be attributed and then stripped at render,
+reporting matched time with no owning row, and an `(all)` slice would
+silently merge with the implicit unmatched-sample fallback row, absorbing
+samples its paths never matched under the configured metadata. The reservation applies equally to `--attribute` targets,
 including virtual targets under `--allow-virtual-attribute-slices` — the
 opt-in waives only the must-name-a-configured-slice rule, never the
 reservation. Attribute rule predicates require both a key and a non-empty

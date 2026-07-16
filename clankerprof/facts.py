@@ -288,7 +288,7 @@ def _sample_facts_from_v2(payload: JsonObject) -> ProfileFacts:
 
     primary_value_index = profile_meta.primary_value_index
     samples: list[SampleFact] = []
-    for item in cast(list[object], raw_samples):
+    for position, item in enumerate(cast(list[object], raw_samples)):
         if not isinstance(item, dict):
             raise ValueError("Each sample facts entry must be an object.")
         entry = cast(JsonObject, item)
@@ -304,9 +304,18 @@ def _sample_facts_from_v2(payload: JsonObject) -> ProfileFacts:
                     f"Sample fact frame index {frame_index} is out of range."
                 )
             stack.append(frames[frame_index])
+        parsed_index = _sample_index(entry)
+        if parsed_index != position:
+            # v2 sample_index is the stable zero-based profile order; the
+            # exporter can only ever emit enumerate-derived indexes, so a
+            # mismatch (duplicate, gap, or non-zero start) is malformed.
+            raise ValueError(
+                f"Sample fact sample_index {parsed_index} does not match "
+                f"its profile-order position {position}."
+            )
         samples.append(
             SampleFact(
-                sample_index=_sample_index(entry),
+                sample_index=parsed_index,
                 sample=Sample(
                     location_ids=_u64_tuple(
                         entry["location_ids"],

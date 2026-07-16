@@ -19,8 +19,8 @@ from clankerprof import __version__
 from clankerprof.analysis import (
     DEFAULT_LIBRARY_SELECTORS,
     DEFAULT_RUNTIME_RULES,
-    GC_PSEUDO_SLICE,
-    UNCOLLAPSIBLE_PSEUDO_SLICE,
+    RESERVED_SLICE_NAMES,
+    RESERVED_SLICE_NAMES_MESSAGE,
     AttributionRule,
     BoundaryAnalysisOptions,
     BoundaryCategoryDefinition,
@@ -362,14 +362,14 @@ def _validate_slice_options(options: SliceAnalysisOptions) -> None:
         key = (attribute.key, attribute.value)
         if attribute.key not in valid_attribute_keys:
             raise ValueError(f"Unsupported attribute filter key: {attribute.key}")
-        if attribute.target_slice in (GC_PSEUDO_SLICE, UNCOLLAPSIBLE_PSEUDO_SLICE):
+        if attribute.target_slice in RESERVED_SLICE_NAMES:
             # The virtual-slice opt-in waives only the must-name-a-configured-
-            # slice rule; a pseudo-slice target would be attributed and then
-            # stripped at render, leaving matched time with no owning row.
+            # slice rule; a (gc)/(uncollapsible) target would be attributed
+            # and then stripped at render, and an (all) target would merge
+            # with the implicit fallback row.
             raise ValueError(
                 f"Attribute target names reserved pseudo-slice name: "
-                f"{attribute.target_slice}. The names (gc) and (uncollapsible) "
-                "are reserved for analyzer pseudo-outputs."
+                f"{attribute.target_slice}. " + RESERVED_SLICE_NAMES_MESSAGE
             )
         if (
             attribute.target_slice not in names

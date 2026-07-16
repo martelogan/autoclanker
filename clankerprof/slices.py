@@ -112,6 +112,21 @@ GC_PSEUDO_SLICE = "(gc)"
 UNCOLLAPSIBLE_PSEUDO_SLICE = "(uncollapsible)"
 
 
+# The implicit fallback row for unmatched samples: a configured slice under
+# this name would silently merge with the fallback, absorbing samples its
+# paths never matched under the configured metadata.
+ALL_PSEUDO_SLICE = "(all)"
+
+
+RESERVED_SLICE_NAMES = (ALL_PSEUDO_SLICE, GC_PSEUDO_SLICE, UNCOLLAPSIBLE_PSEUDO_SLICE)
+
+
+RESERVED_SLICE_NAMES_MESSAGE = (
+    "The names (all), (gc) and (uncollapsible) are reserved for analyzer "
+    "pseudo-outputs."
+)
+
+
 def _match_frame_predicate(
     frame: Frame,
     key: str,
@@ -338,14 +353,15 @@ def validate_slice_definitions(slices: Sequence[SliceDefinition]) -> None:
                 "Each slice name may be defined once."
             )
         seen_names.add(item.name)
-        # A user slice under a pseudo name would be attributed and then
-        # unconditionally stripped at render, leaving matched time with no
-        # owning row.
-        if item.name in (GC_PSEUDO_SLICE, UNCOLLAPSIBLE_PSEUDO_SLICE):
+        # A user slice under (gc)/(uncollapsible) would be attributed and
+        # then unconditionally stripped at render; one under (all) would
+        # silently merge with the implicit fallback row (R9-04 reversed the
+        # earlier judgment that the merge was benign — it absorbs unmatched
+        # samples under the configured metadata).
+        if item.name in RESERVED_SLICE_NAMES:
             raise ValueError(
                 f"Slice config declares reserved pseudo-slice name: {item.name}. "
-                "The names (gc) and (uncollapsible) are reserved for analyzer "
-                "pseudo-outputs."
+                + RESERVED_SLICE_NAMES_MESSAGE
             )
 
 

@@ -57,7 +57,10 @@ from clankerprof.scopes import (
     parse_frame_predicates,
 )
 from clankerprof.slices import (
+    ALL_PSEUDO_SLICE,
     GC_PSEUDO_SLICE,
+    RESERVED_SLICE_NAMES,
+    RESERVED_SLICE_NAMES_MESSAGE,
     UNCOLLAPSIBLE_PSEUDO_SLICE,
     AttributionRule,
     SliceAnalysisOptions,
@@ -80,7 +83,10 @@ from clankerprof.targets import (
 __all__ = [
     "DEFAULT_LIBRARY_SELECTORS",
     "DEFAULT_RUNTIME_RULES",
+    "ALL_PSEUDO_SLICE",
     "GC_PSEUDO_SLICE",
+    "RESERVED_SLICE_NAMES",
+    "RESERVED_SLICE_NAMES_MESSAGE",
     "UNCOLLAPSIBLE_PSEUDO_SLICE",
     "AttributionRule",
     "BoundaryAnalysisOptions",
