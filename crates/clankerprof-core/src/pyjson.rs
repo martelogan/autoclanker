@@ -138,7 +138,8 @@ pub fn format_pyfloat(value: f64) -> String {
             "0.0".to_string()
         };
     }
-    // {:e} yields the same shortest round-trip digits CPython repr uses.
+    // {:e} yields shortest round-trip digits like CPython repr, but the two
+    // differ on exact decimal midpoints (see repair_midpoint_tie).
     let scientific = format!("{value:e}");
     let (mantissa, exponent) = scientific
         .split_once('e')
@@ -148,6 +149,7 @@ pub fn format_pyfloat(value: f64) -> String {
         None => ("", mantissa),
     };
     let digits: String = mantissa.chars().filter(|ch| *ch != '.').collect();
+    let digits = repair_midpoint_tie(value, digits);
     let exponent: i32 = exponent.parse().expect("{:e} exponent is an integer");
     if (-4..16).contains(&exponent) {
         let mut body = String::new();
@@ -182,6 +184,43 @@ pub fn format_pyfloat(value: f64) -> String {
     }
 }
 
+/// CPython (Gay dtoa mode 0) rounds an exact decimal midpoint between the two
+/// shortest round-trip candidates half-to-even, while Rust's flt2dec rounds it
+/// away from zero. When the upper candidate ends in an odd digit the spellings
+/// diverge (e.g. 1317225046594893.25: Python "…893.2", Rust "…893.3"), so
+/// detect the exact tie and step down to the even lower candidate.
+fn repair_midpoint_tie(value: f64, digits: String) -> String {
+    let last = *digits.as_bytes().last().expect("shortest digits non-empty");
+    if last == b'0' || (last - b'0') % 2 == 0 {
+        // Already even (half-to-even agrees), and a tie rounded up to a
+        // trailing zero would have a shorter spelling flt2dec would have
+        // chosen instead, so '0' never needs a borrow-decrement.
+        return digits;
+    }
+    // The midpoint between candidates D(q-1) and D(q) has significant digits
+    // D, then q-1, then a single 5. An f64's exact decimal expansion has at
+    // most 767 significant digits, so if the correctly rounded 781-digit
+    // expansion equals midpoint-then-zeros, the value IS the midpoint. A
+    // shortest spelling that rounded up across a power of ten cannot be an
+    // odd-digit tie (its upper candidate would end in 0), so positional
+    // comparison against the exact expansion is alignment-safe.
+    let exact = format!("{:.780e}", value.abs());
+    let (mantissa, _) = exact.split_once('e').expect("{:e} contains an exponent");
+    let expansion: Vec<u8> = mantissa.bytes().filter(|byte| *byte != b'.').collect();
+    let head = &digits.as_bytes()[..digits.len() - 1];
+    let is_tie = expansion.len() > head.len() + 2
+        && expansion.starts_with(head)
+        && expansion[head.len()] == last - 1
+        && expansion[head.len() + 1] == b'5'
+        && expansion[head.len() + 2..].iter().all(|byte| *byte == b'0');
+    if !is_tie {
+        return digits;
+    }
+    let mut bytes = digits.into_bytes();
+    *bytes.last_mut().expect("digits non-empty") -= 1;
+    String::from_utf8(bytes).expect("digits are ASCII")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{dumps_compact, dumps_pretty, format_pyfloat};
@@ -214,6 +253,15 @@ mod tests {
             (0.30000000000000004, "0.30000000000000004"),
             (33.333333333333336, "33.333333333333336"),
             (-1e-07, "-1e-07"),
+            // Exact decimal midpoints: CPython rounds half-to-even where
+            // flt2dec rounds away from zero (repair_midpoint_tie).
+            (1317225046594893.25, "1317225046594893.2"),
+            (-1317225046594793.25, "-1317225046594793.2"),
+            // Control: an even-rounding tie needs no repair.
+            (1317225046594893.75, "1317225046594893.8"),
+            // Controls: odd last digits that are NOT ties stay untouched.
+            (0.1, "0.1"),
+            (2.5e-09, "2.5e-09"),
         ];
         for (value, expected) in table {
             assert_eq!(&format_pyfloat(*value), expected, "repr({value:?})");

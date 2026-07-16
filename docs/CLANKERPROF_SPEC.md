@@ -188,9 +188,14 @@ Percentage fields divide with both integer operands rounded to `f64` first
 (Rust `as f64` casts; Python mirrors them operand-for-operand). Below `2^53`
 this is identical to exact integer division; above it, the f64-operand form
 is the shared contract, so percentage bytes and `--by-slice` threshold
-selection stay identical across implementations. Floats read from JSON
+selection stay identical across implementations. Elapsed-time formatting
+(`format_time` in CSV/text output) follows the same rule: the aggregate is
+rounded to `f64` before the millisecond division. Floats read from JSON
 re-emit exactly (serde_json's `float_roundtrip`; CPython parses correctly
-rounded natively).
+rounded natively). Float spelling follows CPython `repr` exactly, including
+its half-to-even rounding of exact decimal midpoints between the two
+shortest round-trip candidates (e.g. `1317225046594893.25` spells
+`1317225046594893.2`, not the away-from-zero `…893.3`).
 Implementations must read rendered totals back through both signed and
 unsigned integer views: a value in `(i64::MAX, u64::MAX]` is valid data, not
 zero.
@@ -698,7 +703,11 @@ A slice is a regression only when it exceeds both the configured absolute and
 relative thresholds and is within the focus set when one is provided. Focus
 sets come from `--focus-slices` for slice reports and `--focus-boundaries`
 (alias `--focus-scopes`) for scope reports; both take comma-delimited names
-and gate only the named rows while still reporting every row.
+and gate only the named rows while still reporting every row. Every supplied
+focus name must match a row present in at least one report (the union keeps
+focusing a row that was added or removed between reports legal); an unmatched
+name is a validation error in both implementations — a zero-match focus set
+would silently disable gating, exactly like a non-finite threshold.
 
 ## CLI stream and error contract
 
@@ -761,8 +770,11 @@ and command line merge with identical duplicate-scalar rejection, value
 coercion, and error ordering in both languages, and `compare` accepts
 `--focus-scopes` as an alias of `--focus-boundaries` in both.
 `--focus-slices` and `--focus-boundaries` each take a single comma-delimited
-value; repeating a focus flag keeps the last occurrence in both
-implementations rather than accumulating.
+value. Repeating any non-accumulating option — scalar or boolean, focus flags
+included — keeps the last occurrence in both implementations (argparse's
+native behavior; the Rust CLI mirrors it with self-`overrides_with`
+annotations). Only the documented accumulating options (`--target`,
+`--filter`, `--collapse`, `--attribute`) append across occurrences.
 
 ## Compatibility and validation
 

@@ -41,7 +41,11 @@ class LibraryPath:
 
 
 def format_time(nanoseconds: TimeNs) -> str:
-    milliseconds = nanoseconds / 1_000_000
+    # f64-operand contract shared with the Rust core (R3-04 precedent): round
+    # the aggregate to f64 BEFORE dividing so elapsed-time fields stay
+    # byte-identical above 2**53 (int/int true division would round the exact
+    # rational once and can differ in the last ulp).
+    milliseconds = float(nanoseconds) / 1_000_000.0
     if milliseconds >= 60_000:
         return f"{milliseconds / 60_000:.2f} min"
     if milliseconds >= 1_000:

@@ -184,6 +184,16 @@ def compare_slice_json(
     before_slices = _slice_map(before)
     after_slices = _slice_map(after)
     names = sorted(set(before_slices) | set(after_slices))
+    # A focus name matching zero rows would silently disable gating for it,
+    # exactly like a non-finite threshold; the union keeps focusing a row
+    # that was added or removed between reports legal.
+    unknown_focus = sorted(resolved.focus_slices - set(names))
+    if unknown_focus:
+        raise ValueError(
+            "Focus slices not present in either report: "
+            + ", ".join(f"'{name}'" for name in unknown_focus)
+            + "."
+        )
     slice_deltas: list[dict[str, Any]] = []
     frame_deltas_all: list[dict[str, Any]] = []
     has_regression = False
@@ -342,10 +352,19 @@ def compare_boundary_json(
     resolved = _validated_options(options)
     before_rows = _boundary_rows(before)
     after_rows = _boundary_rows(after)
+    row_keys = set(before_rows) | set(after_rows)
+    boundary_names = {boundary for (_, boundary, _) in row_keys}
+    unknown_focus = sorted(resolved.focus_boundaries - boundary_names)
+    if unknown_focus:
+        raise ValueError(
+            "Focus boundaries not present in either report: "
+            + ", ".join(f"'{name}'" for name in unknown_focus)
+            + "."
+        )
     row_deltas: list[dict[str, Any]] = []
     has_regression = False
 
-    for kind, boundary, name in sorted(set(before_rows) | set(after_rows)):
+    for kind, boundary, name in sorted(row_keys):
         before_pct = before_rows.get((kind, boundary, name), 0.0)
         after_pct = after_rows.get((kind, boundary, name), 0.0)
         delta_abs = _finite_value(after_pct - before_pct, name)

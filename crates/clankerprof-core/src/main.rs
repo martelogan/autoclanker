@@ -51,102 +51,126 @@ enum Command {
 #[derive(Args)]
 struct FactsArgs {
     /// Raw or gzipped pprof profile path.
-    #[arg(long)]
+    #[arg(long, overrides_with = "profile")]
     profile: PathBuf,
     /// Write the facts artifact to this path instead of stdout.
     #[arg(long, overrides_with = "output")]
     output: Option<PathBuf>,
     /// Indent the facts artifact for humans (default is compact JSON).
-    #[arg(long)]
+    #[arg(long, overrides_with = "pretty")]
     pretty: bool,
 }
 
 #[derive(Args)]
 struct TargetsArgs {
     /// Raw or gzipped pprof profile path.
-    #[arg(long)]
+    #[arg(long, overrides_with = "profile")]
     profile: Option<PathBuf>,
     /// Read versioned sample-facts JSON instead of a pprof profile.
-    #[arg(long)]
+    #[arg(long, overrides_with = "facts")]
     facts: Option<PathBuf>,
     /// JSON target config mapping parent functions to category patterns.
-    #[arg(long)]
+    #[arg(long, overrides_with = "config")]
     config: Option<PathBuf>,
     /// Minimal mode: add a parent function with no category patterns.
     #[arg(long = "target")]
     targets: Vec<String>,
     /// Runtime rule pack to apply (generic or ruby).
-    #[arg(long, default_value = "generic")]
+    #[arg(long, default_value = "generic", overrides_with = "runtime")]
     runtime: String,
     /// External runtime rule pack YAML (overrides --runtime).
-    #[arg(long)]
+    #[arg(long, overrides_with = "runtime_rules")]
     runtime_rules: Option<PathBuf>,
     /// Core classes CSV override for the ruby runtime.
-    #[arg(long, visible_alias = "ruby-core-classes")]
+    #[arg(
+        long,
+        visible_alias = "ruby-core-classes",
+        overrides_with = "core_classes"
+    )]
     core_classes: Option<PathBuf>,
     /// Disable enhanced runtime categorization (caller fallback engages).
-    #[arg(long)]
+    #[arg(long, overrides_with = "no_enhanced")]
     no_enhanced: bool,
     /// Fold runtime-internal leaves into the first meaningful caller.
-    #[arg(long, visible_alias = "fold-ruby-internals")]
+    #[arg(
+        long,
+        visible_alias = "fold-ruby-internals",
+        overrides_with = "fold_runtime_internals"
+    )]
     fold_runtime_internals: bool,
     /// Keep verbose-only foldable categories visible in runtime rule packs.
-    #[arg(long, visible_alias = "verbose-ruby-internals")]
+    #[arg(
+        long,
+        visible_alias = "verbose-ruby-internals",
+        overrides_with = "verbose_runtime_internals"
+    )]
     verbose_runtime_internals: bool,
     /// Track semantic callers for native leaves.
-    #[arg(long)]
+    #[arg(long, overrides_with = "track_semantic_callers")]
     track_semantic_callers: bool,
     /// Write the semantic-caller CSV to this path.
-    #[arg(long)]
+    #[arg(long, overrides_with = "semantic_callers_csv")]
     semantic_callers_csv: Option<PathBuf>,
     /// JSON file of attributable column -> parent function -> value.
-    #[arg(long, visible_alias = "attributables")]
+    #[arg(
+        long,
+        visible_alias = "attributables",
+        overrides_with = "cpu_attributables"
+    )]
     cpu_attributables: Option<PathBuf>,
     /// Write the report to this path instead of stdout.
     #[arg(long, overrides_with = "output")]
     output: Option<PathBuf>,
     /// Output format: json, csv, simple-csv, or text.
-    #[arg(long, default_value = "json")]
+    #[arg(long, default_value = "json", overrides_with = "format")]
     format: String,
     /// CSV artifact layout (standard, or compat for the two-file pair).
-    #[arg(long)]
+    #[arg(long, overrides_with = "target_csv_layout")]
     target_csv_layout: Option<String>,
     /// Compatibility alias for --target-csv-layout=compat.
-    #[arg(long)]
+    #[arg(long, overrides_with = "legacy_target_csv_layout")]
     legacy_target_csv_layout: bool,
 }
 
 #[derive(Args)]
 struct SlicesArgs {
     /// Raw or gzipped pprof profile path.
-    #[arg(long)]
+    #[arg(long, overrides_with = "profile")]
     profile: Option<PathBuf>,
     /// Read versioned sample-facts JSON instead of a pprof profile.
-    #[arg(long)]
+    #[arg(long, overrides_with = "facts")]
     facts: Option<PathBuf>,
     /// Slice options file (TOML or YAML) merged with CLI flags.
-    #[arg(long)]
+    #[arg(long, overrides_with = "config")]
     config: Option<PathBuf>,
     /// Slice definitions YAML file.
-    #[arg(long)]
+    #[arg(long, overrides_with = "slices")]
     slices: Option<PathBuf>,
     /// Attribution override rule '<key>:<value>,to:<slice>', repeatable.
     #[arg(long)]
     attribute: Vec<String>,
     /// Accept --attribute targets that are not declared slices.
-    #[arg(long)]
+    #[arg(long, overrides_with = "allow_virtual_attribute_slices")]
     allow_virtual_attribute_slices: bool,
     /// Runtime rule pack to apply (generic or ruby).
-    #[arg(long, default_value = "generic")]
+    #[arg(long, default_value = "generic", overrides_with = "runtime")]
     runtime: String,
     /// External runtime rule pack YAML (overrides --runtime).
-    #[arg(long)]
+    #[arg(long, overrides_with = "runtime_rules")]
     runtime_rules: Option<PathBuf>,
     /// Core classes CSV override for the ruby runtime.
-    #[arg(long, visible_alias = "ruby-core-classes")]
+    #[arg(
+        long,
+        visible_alias = "ruby-core-classes",
+        overrides_with = "core_classes"
+    )]
     core_classes: Option<PathBuf>,
     /// Keep verbose-only foldable categories visible in runtime rule packs.
-    #[arg(long, visible_alias = "verbose-ruby-internals")]
+    #[arg(
+        long,
+        visible_alias = "verbose-ruby-internals",
+        overrides_with = "verbose_runtime_internals"
+    )]
     verbose_runtime_internals: bool,
     /// Bottom-frame filter, repeatable.
     #[arg(long)]
@@ -155,21 +179,21 @@ struct SlicesArgs {
     #[arg(long)]
     collapse: Vec<String>,
     /// Limit frames per slice (negative drops from the tail, Python-style).
-    #[arg(long, allow_negative_numbers = true)]
+    #[arg(long, allow_negative_numbers = true, overrides_with = "top")]
     top: Option<String>,
     /// Slice count limit or percentage threshold (bare flag means 0.1%).
     /// Negative-number values must parse as values, mirroring argparse.
-    #[arg(long, num_args = 0..=1, default_missing_value = "0.1%", allow_negative_numbers = true)]
+    #[arg(long, num_args = 0..=1, default_missing_value = "0.1%", allow_negative_numbers = true, overrides_with = "by_slice")]
     by_slice: Option<String>,
     /// Include filename paths in frame output.
-    #[arg(long)]
+    #[arg(long, overrides_with = "show_paths")]
     show_paths: bool,
     /// Keep native frames eligible as bottom attribution frames.
-    #[arg(long)]
+    #[arg(long, overrides_with = "no_collapse_native")]
     no_collapse_native: bool,
     /// Report unattributed dependency libraries for the default slice
     /// (optionally limited to N entries).
-    #[arg(long, visible_alias = "unattributed-gems", num_args = 0..=1, default_missing_value = "9223372036854775807", allow_negative_numbers = true)]
+    #[arg(long, visible_alias = "unattributed-gems", num_args = 0..=1, default_missing_value = "9223372036854775807", allow_negative_numbers = true, overrides_with = "unattributed_libraries")]
     unattributed_libraries: Option<String>,
     /// Write the report to this path instead of stdout.
     #[arg(long, overrides_with = "output")]
@@ -179,34 +203,46 @@ struct SlicesArgs {
 #[derive(Args)]
 struct ScopesArgs {
     /// Raw or gzipped pprof profile path.
-    #[arg(long)]
+    #[arg(long, overrides_with = "profile")]
     profile: Option<PathBuf>,
     /// Read versioned sample-facts JSON instead of a pprof profile.
-    #[arg(long)]
+    #[arg(long, overrides_with = "facts")]
     facts: Option<PathBuf>,
     /// Scope config (TOML or YAML).
-    #[arg(long)]
+    #[arg(long, overrides_with = "config")]
     config: PathBuf,
     /// Limit ranked rows per section (negative drops from the tail, Python-style).
-    #[arg(long, allow_negative_numbers = true)]
+    #[arg(long, allow_negative_numbers = true, overrides_with = "top")]
     top: Option<String>,
     /// Runtime rule pack to apply (generic or ruby).
-    #[arg(long, default_value = "generic")]
+    #[arg(long, default_value = "generic", overrides_with = "runtime")]
     runtime: String,
     /// External runtime rule pack YAML (overrides --runtime).
-    #[arg(long)]
+    #[arg(long, overrides_with = "runtime_rules")]
     runtime_rules: Option<PathBuf>,
     /// Core classes CSV override for the ruby runtime.
-    #[arg(long, visible_alias = "ruby-core-classes")]
+    #[arg(
+        long,
+        visible_alias = "ruby-core-classes",
+        overrides_with = "core_classes"
+    )]
     core_classes: Option<PathBuf>,
     /// Disable enhanced runtime categorization (caller fallback engages).
-    #[arg(long)]
+    #[arg(long, overrides_with = "no_enhanced")]
     no_enhanced: bool,
     /// Fold runtime-internal leaves into the first meaningful caller.
-    #[arg(long, visible_alias = "fold-ruby-internals")]
+    #[arg(
+        long,
+        visible_alias = "fold-ruby-internals",
+        overrides_with = "fold_runtime_internals"
+    )]
     fold_runtime_internals: bool,
     /// Keep verbose-only foldable categories visible in runtime rule packs.
-    #[arg(long, visible_alias = "verbose-ruby-internals")]
+    #[arg(
+        long,
+        visible_alias = "verbose-ruby-internals",
+        overrides_with = "verbose_runtime_internals"
+    )]
     verbose_runtime_internals: bool,
     /// Write the report to this path instead of stdout.
     #[arg(long, overrides_with = "output")]
@@ -216,34 +252,34 @@ struct ScopesArgs {
 #[derive(Args)]
 struct ReportArgs {
     /// Raw or gzipped pprof profile path.
-    #[arg(long)]
+    #[arg(long, overrides_with = "profile")]
     profile: Option<PathBuf>,
     /// Read versioned sample-facts JSON instead of a pprof profile.
-    #[arg(long)]
+    #[arg(long, overrides_with = "facts")]
     facts: Option<PathBuf>,
     /// JSON target config; enables the targets section.
-    #[arg(long)]
+    #[arg(long, overrides_with = "config")]
     config: Option<PathBuf>,
     /// Slice definitions YAML; enables the slices section.
-    #[arg(long)]
+    #[arg(long, overrides_with = "slices")]
     slices: Option<PathBuf>,
     /// Scope config (TOML or YAML); enables the scopes section.
-    #[arg(long)]
+    #[arg(long, overrides_with = "scopes_config")]
     scopes_config: Option<PathBuf>,
     /// Include the sample-facts payload as a facts section.
-    #[arg(long)]
+    #[arg(long, overrides_with = "include_facts")]
     include_facts: bool,
     /// Limit ranked scope rows per section (negative drops from the tail, Python-style).
-    #[arg(long, allow_negative_numbers = true)]
+    #[arg(long, allow_negative_numbers = true, overrides_with = "top")]
     top: Option<String>,
     /// Runtime rule pack to apply (generic or ruby).
-    #[arg(long, default_value = "generic")]
+    #[arg(long, default_value = "generic", overrides_with = "runtime")]
     runtime: String,
     /// External runtime rule pack YAML (overrides --runtime).
-    #[arg(long)]
+    #[arg(long, overrides_with = "runtime_rules")]
     runtime_rules: Option<PathBuf>,
     /// Core classes CSV override for the ruby runtime.
-    #[arg(long)]
+    #[arg(long, overrides_with = "core_classes")]
     core_classes: Option<PathBuf>,
     /// Write the report to this path instead of stdout.
     #[arg(long, overrides_with = "output")]
@@ -253,18 +289,28 @@ struct ReportArgs {
 #[derive(Args)]
 struct CompareArgs {
     /// Baseline report JSON path.
-    #[arg(long)]
+    #[arg(long, overrides_with = "before")]
     before: PathBuf,
     /// Candidate report JSON path.
-    #[arg(long)]
+    #[arg(long, overrides_with = "after")]
     after: PathBuf,
     /// Absolute percentage-point regression threshold.
     // String, not f64: the strict shared grammar (f64::from_str + finiteness,
     // mirrored by Python's strict_float) owns the error message.
-    #[arg(long, default_value = "2", allow_negative_numbers = true)]
+    #[arg(
+        long,
+        default_value = "2",
+        allow_negative_numbers = true,
+        overrides_with = "threshold_abs"
+    )]
     threshold_abs: String,
     /// Relative percentage regression threshold.
-    #[arg(long, default_value = "15", allow_negative_numbers = true)]
+    #[arg(
+        long,
+        default_value = "15",
+        allow_negative_numbers = true,
+        overrides_with = "threshold_rel"
+    )]
     threshold_rel: String,
     /// Comma-delimited slice names to gate on.
     #[arg(long, overrides_with = "focus_slices")]

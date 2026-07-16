@@ -1661,7 +1661,9 @@ slices:
                 "--after",
                 str(boundary_report_path),
                 "--focus-scopes",
-                "x",
+                # Must name a real boundary: unknown focus names now fail
+                # closed instead of silently matching zero rows (R6-07).
+                "Request render",
             ],
             "json",
         ),
@@ -4600,3 +4602,107 @@ def test_clankerprof_rust_round6_cluster_t_matches_python(tmp_path: Path) -> Non
         "ok": False,
         "error": "Boundary config slices must be a string path.",
     }
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_round6_cluster_u_matches_python(tmp_path: Path) -> None:
+    # R6-07: unknown focus names fail closed with identical envelopes; a row
+    # present in only one report stays a legal focus target.
+    before_path = tmp_path / "focus-before.json"
+    before_path.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "hot", "pct": 10.0}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    after_path = tmp_path / "focus-after.json"
+    after_path.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "hot", "pct": 50.0}, {"name": "added", "pct": 1.0}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    compare_base = ["compare", "--before", str(before_path), "--after", str(after_path)]
+    envelope = _assert_identical_envelope(
+        [*compare_base, "--focus-slices", "zz,typo"], "focus-unknown"
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Focus slices not present in either report: 'typo', 'zz'.",
+    }
+    added_py = _run_python_cli_raw([*compare_base, "--focus-slices", "added"])
+    added_rs = _run_rust_cli_raw([*compare_base, "--focus-slices", "added"])
+    assert added_py.returncode == 0, added_py.stderr
+    assert added_rs.returncode == 0, added_rs.stderr
+    assert added_py.stdout == added_rs.stdout
+
+    # R6-09: elapsed-time formatting shares the f64-operand order above 2**53.
+    builder = PprofFixtureBuilder.create()
+    parent_loc = builder.location(builder.function("parent", "/srv/app/parent.py"))
+    leaf_a = builder.location(builder.function("leaf_a", "/srv/app/a.py"))
+    leaf_b = builder.location(builder.function("leaf_b", "/srv/app/b.py"))
+    builder.sample((leaf_a, parent_loc), 5000000000000000000)
+    builder.sample((leaf_b, parent_loc), 5717268054699998221)
+    elapsed_profile = tmp_path / "elapsed.pb"
+    elapsed_profile.write_bytes(builder.encode())
+    for fmt in ("csv", "text"):
+        output = _assert_identical_success(
+            [
+                "targets",
+                "--profile",
+                str(elapsed_profile),
+                "--target",
+                "parent",
+                "--format",
+                fmt,
+            ],
+            f"elapsed-{fmt}",
+        )
+        assert "178621134.25 min" in output
+
+    # R6-10: shortest-digit midpoint ties follow CPython repr (half-to-even).
+    builder = PprofFixtureBuilder.create()
+    pos = builder.location(builder.function("PosLeaf", "/srv/app/pos.py"))
+    neg = builder.location(builder.function("NegLeaf", "/srv/app/neg.py"))
+    builder.sample((pos,), 5268900186379573)
+    builder.sample((neg,), -5268900186379173)
+    tie_profile = tmp_path / "tie.pb"
+    tie_profile.write_bytes(builder.encode())
+    output = _assert_identical_success(
+        ["slices", "--profile", str(tie_profile)], "pyfloat-tie"
+    )
+    assert "1317225046594893.2" in output
+    assert "1317225046594893.3" not in output
+
+    # R6-11: repeated non-accumulating options keep the last occurrence in
+    # both languages instead of clap rejecting the duplicate.
+    empty = tmp_path / "empty.pb"
+    empty.write_bytes(b"")
+    repeated_facts = [
+        "facts",
+        "--profile",
+        str(tmp_path / "missing.pb"),
+        "--profile",
+        str(empty),
+    ]
+    _assert_identical_success(repeated_facts, "repeated-profile")
+    repeated_threshold = [
+        "compare",
+        "--before",
+        str(before_path),
+        "--after",
+        str(before_path),
+        "--threshold-abs",
+        "1",
+        "--threshold-abs",
+        "2",
+    ]
+    _assert_identical_success(repeated_threshold, "repeated-threshold")

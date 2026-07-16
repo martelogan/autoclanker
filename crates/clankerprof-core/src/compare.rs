@@ -99,6 +99,22 @@ pub fn compare_slice_json(
         .chain(after_slices.keys())
         .cloned()
         .collect();
+    // A focus name matching zero rows would silently disable gating for it,
+    // exactly like a non-finite threshold; the union keeps focusing a row
+    // that was added or removed between reports legal. BTreeSet iteration is
+    // byte-wise UTF-8 order, matching Python sorted() code points.
+    let unknown_focus: Vec<String> = options
+        .focus_slices
+        .iter()
+        .filter(|name| !names.contains(*name))
+        .map(|name| format!("'{name}'"))
+        .collect();
+    if !unknown_focus.is_empty() {
+        return Err(format!(
+            "Focus slices not present in either report: {}.",
+            unknown_focus.join(", ")
+        ));
+    }
     let mut slice_deltas = Vec::new();
     let mut frame_deltas_all = Vec::new();
     let mut has_regression = false;
@@ -413,6 +429,19 @@ pub fn compare_boundary_json(
     let before_rows = boundary_rows(before)?;
     let after_rows = boundary_rows(after)?;
     let keys: BTreeSet<_> = before_rows.keys().chain(after_rows.keys()).collect();
+    let boundary_names: BTreeSet<&String> = keys.iter().map(|(_, boundary, _)| boundary).collect();
+    let unknown_focus: Vec<String> = options
+        .focus_boundaries
+        .iter()
+        .filter(|name| !boundary_names.contains(name))
+        .map(|name| format!("'{name}'"))
+        .collect();
+    if !unknown_focus.is_empty() {
+        return Err(format!(
+            "Focus boundaries not present in either report: {}.",
+            unknown_focus.join(", ")
+        ));
+    }
     let mut row_deltas = Vec::new();
     let mut has_regression = false;
 

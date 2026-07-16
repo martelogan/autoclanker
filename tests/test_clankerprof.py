@@ -5894,6 +5894,126 @@ def test_clankerprof_compare_focus_flags_take_one_comma_delimited_value(
     assert last_wins["has_regression"] is True
 
 
+def test_clankerprof_compare_unknown_focus_names_fail_closed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # A zero-match focus name would silently disable gating (a typo or stale
+    # CI focus list), exactly like a non-finite threshold: fail closed. The
+    # union of before/after row names keeps focusing added/removed rows legal.
+    before_path = tmp_path / "focus-before.json"
+    before_path.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "hot", "pct": 10}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    after_path = tmp_path / "focus-after.json"
+    after_path.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "hot", "pct": 50}, {"name": "added", "pct": 1}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    base = ["compare", "--before", str(before_path), "--after", str(after_path)]
+    assert clankerprof_main([*base, "--focus-slices", "typo"]) == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Focus slices not present in either report: 'typo'."
+    assert clankerprof_main([*base, "--focus-slices", "zz,typo"]) == 2
+    envelope = _error_envelope(capsys)
+    assert (
+        envelope["error"] == "Focus slices not present in either report: 'typo', 'zz'."
+    )
+    # A row present in only one report is a legal focus target.
+    assert clankerprof_main([*base, "--focus-slices", "added"]) == 0
+    capsys.readouterr()
+
+    boundary_path = tmp_path / "focus-boundary.json"
+    boundary_path.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_boundaries",
+                "summary": {"total_time_ns": 100},
+                "boundaries": [
+                    {
+                        "name": "B",
+                        "pct_of_profile": 40.0,
+                        "buckets": [{"name": "X", "pct": 10.0}],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert (
+        clankerprof_main(
+            [
+                "compare",
+                "--before",
+                str(boundary_path),
+                "--after",
+                str(boundary_path),
+                "--focus-boundaries",
+                "typo",
+            ]
+        )
+        == 2
+    )
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Focus boundaries not present in either report: 'typo'."
+
+
+def test_clankerprof_repeated_scalar_options_keep_last_occurrence(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Pins argparse's native last-wins semantics as the shared repeated-option
+    # contract (Rust needs explicit overrides_with annotations to match).
+    empty = tmp_path / "empty.pb"
+    empty.write_bytes(b"")
+    exit_code = clankerprof_main(
+        ["facts", "--profile", str(tmp_path / "missing.pb"), "--profile", str(empty)]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["summary"]["sample_count"] == 0
+
+    report_path = tmp_path / "report.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "tool": "clankerprof_slices",
+                "summary": {"total_time_ns": 100},
+                "slices": [{"name": "hot", "pct": 10}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        [
+            "compare",
+            "--before",
+            str(report_path),
+            "--after",
+            str(report_path),
+            "--threshold-abs",
+            "1",
+            "--threshold-abs",
+            "2",
+        ]
+    )
+    assert exit_code == 0
+    capsys.readouterr()
+
+
 def test_clankerprof_yaml_inputs_reject_non_string_mapping_keys(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
