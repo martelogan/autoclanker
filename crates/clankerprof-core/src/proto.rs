@@ -1,4 +1,4 @@
-use crate::model::{Function, Location, Profile, Sample};
+use crate::model::{select_primary_value_index, Function, Location, Profile, Sample, ValueType};
 use flate2::read::GzDecoder;
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
@@ -57,16 +57,19 @@ impl<'a> Reader<'a> {
     }
 
     fn read_varint(&mut self) -> DecodeResult<u64> {
-        let mut shift = 0;
+        let mut shift = 0u32;
         let mut result = 0u64;
         loop {
             let byte = self.read_byte()?;
-            result |= u64::from(byte & 0x7f) << shift;
+            // Bits past 63 are dropped, matching protobuf's 64-bit varint
+            // wrap; the shift guard below caps varints at 10 bytes so this
+            // can never overflow-shift.
+            result |= u64::from(byte & 0x7f).wrapping_shl(shift);
             if byte < 0x80 {
                 return Ok(result);
             }
             shift += 7;
-            if shift > 70 {
+            if shift >= 70 {
                 return Err(PprofDecodeError::InvalidProtobuf(
                     "Invalid protobuf varint.".to_string(),
                 ));
@@ -129,6 +132,39 @@ impl<'a> Reader<'a> {
 }
 
 #[derive(Debug, Default)]
+struct RawValueType {
+    type_index: i64,
+    unit_index: i64,
+}
+
+fn parse_value_type(payload: &[u8]) -> DecodeResult<RawValueType> {
+    let mut reader = Reader::new(payload);
+    let mut result = RawValueType::default();
+    while !reader.eof() {
+        let (field, wire) = reader.read_key()?;
+        if wire != 0 {
+            reader.skip(wire)?;
+            continue;
+        }
+        let value = int64_from_varint(reader.read_varint()?);
+        match field {
+            1 => result.type_index = value,
+            2 => result.unit_index = value,
+            _ => {}
+        }
+    }
+    Ok(result)
+}
+
+fn string_at_signed(strings: &[String], index: i64) -> String {
+    usize::try_from(index)
+        .ok()
+        .and_then(|position| strings.get(position))
+        .cloned()
+        .unwrap_or_default()
+}
+
+#[derive(Debug, Default)]
 struct RawFunction {
     function_id: u64,
     name: usize,
@@ -158,6 +194,10 @@ pub fn decode_profile_bytes(data: &[u8]) -> DecodeResult<Profile> {
     let payload = maybe_gzip_decompress(data)?;
     let mut reader = Reader::new(&payload);
     let mut strings = Vec::new();
+    let mut raw_sample_types = Vec::new();
+    let mut raw_period_type: Option<RawValueType> = None;
+    let mut period = 0i64;
+    let mut default_sample_type_index = 0i64;
     let mut raw_functions = Vec::new();
     let mut raw_locations = Vec::new();
     let mut samples = Vec::new();
@@ -165,10 +205,14 @@ pub fn decode_profile_bytes(data: &[u8]) -> DecodeResult<Profile> {
     while !reader.eof() {
         let (field, wire) = reader.read_key()?;
         match (field, wire) {
+            (1, 2) => raw_sample_types.push(parse_value_type(reader.read_length_delimited()?)?),
             (2, 2) => samples.push(parse_sample(reader.read_length_delimited()?)?),
             (4, 2) => raw_locations.push(parse_location(reader.read_length_delimited()?)?),
             (5, 2) => raw_functions.push(parse_function(reader.read_length_delimited()?)?),
             (6, 2) => strings.push(decode_utf8_lossy(reader.read_length_delimited()?)),
+            (11, 2) => raw_period_type = Some(parse_value_type(reader.read_length_delimited()?)?),
+            (12, 0) => period = int64_from_varint(reader.read_varint()?),
+            (14, 0) => default_sample_type_index = int64_from_varint(reader.read_varint()?),
             _ => reader.skip(wire)?,
         }
     }
@@ -208,11 +252,33 @@ pub fn decode_profile_bytes(data: &[u8]) -> DecodeResult<Profile> {
         })
         .collect::<BTreeMap<_, _>>();
 
+    let sample_types: Vec<ValueType> = raw_sample_types
+        .into_iter()
+        .map(|raw| ValueType {
+            type_name: string_at_signed(&strings, raw.type_index),
+            unit: string_at_signed(&strings, raw.unit_index),
+        })
+        .collect();
+    let period_type = raw_period_type.map(|raw| ValueType {
+        type_name: string_at_signed(&strings, raw.type_index),
+        unit: string_at_signed(&strings, raw.unit_index),
+    });
+    let default_sample_type = string_at_signed(&strings, default_sample_type_index);
+    let primary_value_index = select_primary_value_index(&sample_types, &default_sample_type);
+    for sample in &mut samples {
+        sample.primary_index = primary_value_index;
+    }
+
     Ok(Profile {
         string_table: strings,
         functions,
         locations,
         samples,
+        sample_types,
+        period_type,
+        period,
+        default_sample_type,
+        primary_value_index,
     })
 }
 
@@ -311,6 +377,7 @@ fn parse_sample(payload: &[u8]) -> DecodeResult<Sample> {
     Ok(Sample {
         location_ids,
         values,
+        primary_index: 0,
     })
 }
 

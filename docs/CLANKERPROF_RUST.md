@@ -5,13 +5,12 @@ sample-facts core. Its first compatibility target is the versioned JSON schema
 documented in `docs/CLANKERPROF_SPEC.md`:
 
 ```text
-clankerprof.sample_facts.v1
+clankerprof.sample_facts.v2
 ```
 
 The crate intentionally builds every projection from the durable fact layer.
-That keeps tree, slice, target, boundary, opportunity, and comparison views
-tied to one decoded stack accounting model instead of separate ad hoc profile
-walkers.
+That keeps target, slice, scope/boundary, and comparison views tied to one
+decoded stack accounting model instead of separate ad hoc profile walkers.
 
 ## Run
 
@@ -20,7 +19,8 @@ cargo run -p clankerprof-core --bin clankerprof-rs -- \
   facts --profile profile.pb.gz --output sample-facts.json
 ```
 
-Without `--output`, the command writes pretty JSON to stdout.
+Without `--output`, the command writes compact JSON to stdout; `--pretty`
+opts in to indented output.
 
 Generic target attribution:
 
@@ -35,6 +35,14 @@ Generic slice attribution:
 cargo run -p clankerprof-core --bin clankerprof-rs -- \
   slices --profile profile.pb.gz --slices slices.yml \
   --collapse 'library:*' --unattributed-libraries
+```
+
+Single-pass multi-projection (decode once, emit several sections):
+
+```bash
+cargo run -p clankerprof-core --bin clankerprof-rs -- \
+  report --profile profile.pb.gz --config targets.json \
+  --slices slices.yml --scopes-config scopes.toml --include-facts
 ```
 
 Slice comparison:

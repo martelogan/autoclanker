@@ -1,5 +1,6 @@
 use crate::model::{Frame, ProfileFacts, TimeNs};
 use crate::targets::{extract_library_name, match_path_pattern, RuntimeRuleSet};
+use indexmap::IndexMap;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fs;
@@ -14,6 +15,14 @@ pub struct SliceDefinition {
     pub path_patterns: Vec<String>,
     pub is_default: bool,
     pub metadata: BTreeMap<String, Value>,
+}
+
+impl SliceDefinition {
+    pub fn matches_frame(&self, frame: &Frame, rules: &RuntimeRuleSet) -> bool {
+        self.path_patterns
+            .iter()
+            .any(|pattern| match_path_pattern(pattern, &frame.filename, rules))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,7 +59,7 @@ impl Default for SliceAnalysisOptions {
             show_paths: false,
             no_collapse_native: false,
             unattributed_libraries: None,
-            runtime_rules: RuntimeRuleSet::generic(),
+            runtime_rules: RuntimeRuleSet::generic().clone(),
         }
     }
 }
@@ -63,12 +72,14 @@ pub struct SliceFrameStats {
     pub time_ns: TimeNs,
 }
 
+// Ranked frame/library arrays break ties by first-seen order, matching the
+// Python reference; the accumulation maps must preserve insertion order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SliceStats {
     pub name: String,
     pub time_ns: TimeNs,
-    pub frames: BTreeMap<String, SliceFrameStats>,
-    pub unattributed_libraries: BTreeMap<String, TimeNs>,
+    pub frames: IndexMap<String, SliceFrameStats>,
+    pub unattributed_libraries: IndexMap<String, TimeNs>,
     pub is_default: bool,
 }
 
@@ -77,8 +88,8 @@ impl SliceStats {
         Self {
             name: name.into(),
             time_ns: 0,
-            frames: BTreeMap::new(),
-            unattributed_libraries: BTreeMap::new(),
+            frames: IndexMap::new(),
+            unattributed_libraries: IndexMap::new(),
             is_default: false,
         }
     }
@@ -133,12 +144,44 @@ pub fn load_slices_file(path: impl AsRef<Path>) -> Result<Vec<SliceDefinition>, 
             .get(serde_yaml::Value::String("default".to_string()))
             .and_then(serde_yaml::Value::as_bool)
             .unwrap_or(false);
+        let mut metadata: BTreeMap<String, Value> = BTreeMap::new();
+        for (raw_key, raw_value) in mapping {
+            let Some(key) = raw_key.as_str() else {
+                continue;
+            };
+            if matches!(key, "name" | "paths" | "default") {
+                continue;
+            }
+            let converted = serde_json::to_value(raw_value).map_err(|error| error.to_string())?;
+            if key == "metadata" {
+                if let Value::Object(nested) = converted {
+                    for (nested_key, nested_value) in nested {
+                        metadata.insert(nested_key, nested_value);
+                    }
+                    continue;
+                }
+                metadata.insert(key.to_string(), converted);
+                continue;
+            }
+            metadata.insert(key.to_string(), converted);
+        }
         slices.push(SliceDefinition {
             name: name.to_string(),
             path_patterns: paths,
             is_default,
-            metadata: BTreeMap::new(),
+            metadata,
         });
+    }
+    let default_names: Vec<&str> = slices
+        .iter()
+        .filter(|slice| slice.is_default)
+        .map(|slice| slice.name.as_str())
+        .collect();
+    if default_names.len() > 1 {
+        return Err(format!(
+            "Slice config declares multiple default slices: {}. Exactly one slice may set default.",
+            default_names.join(", ")
+        ));
     }
     Ok(slices)
 }
@@ -150,7 +193,7 @@ pub fn analyze_slice_facts(
     let mut total_time = 0;
     let mut matching_time = 0;
     let mut gc_time = 0;
-    let mut stats_by_slice: BTreeMap<String, SliceStats> = BTreeMap::new();
+    let mut stats_by_slice: IndexMap<String, SliceStats> = IndexMap::new();
     let mut uncollapsible_stats = SliceStats::new(UNCOLLAPSIBLE_PSEUDO_SLICE);
     let default_slice = options
         .slices
@@ -294,7 +337,7 @@ fn add_optional_slice_payloads(
 
 fn slice_payload(slice: &SliceStats, total: TimeNs, options: &SliceAnalysisOptions) -> Value {
     let library_limit = options.unattributed_libraries;
-    json!({
+    let mut payload = json!({
         "frames": rendered_frames(slice, total, options.top),
         "is_default": slice.is_default,
         "name": slice.name,
@@ -302,7 +345,19 @@ fn slice_payload(slice: &SliceStats, total: TimeNs, options: &SliceAnalysisOptio
         "time_ns": slice.time_ns,
         "unattributed_gems": rendered_libraries(slice, total, library_limit),
         "unattributed_libraries": rendered_libraries(slice, total, library_limit),
-    })
+    });
+    let metadata = options
+        .slices
+        .iter()
+        .find(|definition| definition.name == slice.name && !definition.metadata.is_empty())
+        .map(|definition| definition.metadata.clone());
+    if let (Some(metadata), Some(object)) = (metadata, payload.as_object_mut()) {
+        object.insert(
+            "metadata".to_string(),
+            Value::Object(metadata.into_iter().collect()),
+        );
+    }
+    payload
 }
 
 fn rendered_frames(slice: &SliceStats, total: TimeNs, top: Option<usize>) -> Vec<Value> {
@@ -561,14 +616,7 @@ fn slice_for_frame(
     default.to_string()
 }
 
-fn is_native_path(path: &str, rules: &RuntimeRuleSet) -> bool {
-    path.is_empty()
-        || path.starts_with('<')
-        || rules
-            .stdlib_path_markers
-            .iter()
-            .any(|marker| path.contains(marker))
-}
+use crate::categorize::is_native_path;
 
 fn is_gc_function(name: &str) -> bool {
     name == "(marking)" || name == "(sweeping)"

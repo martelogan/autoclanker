@@ -4,8 +4,9 @@ import argparse
 import json
 import sys
 import tomllib
+import zlib
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -45,8 +46,8 @@ from clankerprof.facts import (
     SampleFactsInput,
     read_sample_facts,
     sample_facts_to_jsonable,
+    write_sample_facts,
 )
-from clankerprof.model import CategoryStats
 from clankerprof.proto import load_profile
 from clankerprof.render import (
     render_boundary_json,
@@ -57,6 +58,28 @@ from clankerprof.render import (
     render_target_json,
     render_target_text,
 )
+from clankerprof.stats import CategoryStats
+
+
+def _contracted(
+    handler: Callable[[argparse.Namespace], dict[str, Any]],
+) -> Callable[[argparse.Namespace], dict[str, Any]]:
+    """Map environment failures onto the exit-2 validation contract.
+
+    Missing/corrupt inputs (files, gzip streams, YAML configs) must surface as
+    the JSON error envelope through both the standalone and umbrella CLIs,
+    never as tracebacks.
+    """
+
+    def wrapped(args: argparse.Namespace) -> dict[str, Any]:
+        try:
+            return handler(args)
+        except ValueError:
+            raise
+        except (OSError, EOFError, zlib.error, yaml.YAMLError) as exc:
+            raise ValueError(str(exc) or exc.__class__.__name__) from exc
+
+    return wrapped
 
 
 def _load_attributables(path: str | None) -> dict[str, dict[str, float]] | None:
@@ -222,7 +245,6 @@ def _validate_slice_options(options: SliceAnalysisOptions) -> None:
             for item in (*options.filters, *options.collapse)
         ):
             raise ValueError("slice:... requires --slices=<file>.")
-        return
     for raw_filter in (*options.filters, *options.collapse):
         body = _filter_body(raw_filter)
         key, _, value = body.partition(":")
@@ -269,7 +291,6 @@ def _valid_filter_keys(rules: RuntimeRuleSet) -> frozenset[str]:
 
 def _runtime_rules(args: argparse.Namespace) -> RuntimeRuleSet:
     runtime = str(getattr(args, "runtime", "generic"))
-    no_enhanced = bool(getattr(args, "no_enhanced", False))
     runtime_rules_path = getattr(args, "runtime_rules", None)
     core_classes: frozenset[str] = (
         load_ruby_core_classes(args.ruby_core_classes)
@@ -284,11 +305,9 @@ def _runtime_rules(args: argparse.Namespace) -> RuntimeRuleSet:
             core_classes=core_classes,
             verbose=bool(args.verbose_runtime_internals),
         )
-    if runtime == "generic" and not no_enhanced:
+    if runtime == "generic":
         return DEFAULT_RUNTIME_RULES
-    if runtime == "generic" and no_enhanced:
-        core_classes = load_default_ruby_core_classes()
-    elif runtime != "ruby":
+    if runtime != "ruby":
         raise ValueError(f"Unsupported runtime: {runtime}")
     return ruby_rules(
         core_classes,
@@ -908,6 +927,10 @@ def run_targets(args: argparse.Namespace) -> dict[str, Any]:
     attributables = _load_attributables(args.cpu_attributables)
     runtime_rules = _runtime_rules(args)
     compat_target_csv_layout = _use_compat_target_csv_layout(args)
+    if compat_target_csv_layout and (args.format != "csv" or not args.output):
+        raise ValueError(
+            "--target-csv-layout=compat requires --format csv and --output."
+        )
     results = analyze_target_facts(
         sample_facts,
         config,
@@ -938,10 +961,6 @@ def run_targets(args: argparse.Namespace) -> dict[str, Any]:
     if args.format == "json":
         return cast(dict[str, Any], render_target_json(results))
     if compat_target_csv_layout:
-        if args.format != "csv" or not args.output:
-            raise ValueError(
-                "--target-csv-layout=compat requires --format csv and --output."
-            )
         return _write_legacy_target_csv_artifacts(
             args.output,
             results,
@@ -963,8 +982,7 @@ def run_targets(args: argparse.Namespace) -> dict[str, Any]:
     if args.output:
         Path(args.output).write_text(rendered + "\n", encoding="utf-8")
         return {"tool": "clankerprof_targets", "ok": True, "output": args.output}
-    print(rendered)
-    return {"tool": "clankerprof_targets", "ok": True}
+    return {"tool": "clankerprof_targets", "ok": True, "raw_output": rendered}
 
 
 def run_slices(args: argparse.Namespace) -> dict[str, Any]:
@@ -1111,12 +1129,10 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
 
 def run_facts(args: argparse.Namespace) -> dict[str, Any]:
     profile = load_profile(args.profile)
-    payload = sample_facts_to_jsonable(profile.to_sample_facts())
+    facts = profile.to_sample_facts()
+    payload = sample_facts_to_jsonable(facts)
     if args.output:
-        Path(args.output).write_text(
-            render_json_payload(cast(dict[str, Any], payload)) + "\n",
-            encoding="utf-8",
-        )
+        write_sample_facts(args.output, facts, pretty=bool(args.pretty))
         return {
             "tool": "clankerprof_facts",
             "ok": True,
@@ -1222,7 +1238,7 @@ def register_commands(subparsers: Any) -> None:
             "output/verbose/<name> for compatibility with older target reports."
         ),
     )
-    targets.set_defaults(handler=run_targets)
+    targets.set_defaults(handler=_contracted(run_targets))
 
     boundary_help = "Run scope/cost-kind/rollup/owner decomposition over a profile."
 
@@ -1275,10 +1291,10 @@ def register_commands(subparsers: Any) -> None:
             action="store_true",
             dest="verbose_runtime_internals",
         )
-        parser.set_defaults(handler=run_boundaries)
+        parser.set_defaults(handler=_contracted(run_boundaries))
 
-    add_boundary_like_command("boundaries")
     add_boundary_like_command("scopes")
+    add_boundary_like_command("boundaries")
 
     slices = subparsers.add_parser(
         "slices",
@@ -1325,7 +1341,7 @@ def register_commands(subparsers: Any) -> None:
     )
     slices.add_argument("--allow-virtual-attribute-slices", action="store_true")
     slices.add_argument("--output")
-    slices.set_defaults(handler=run_slices)
+    slices.set_defaults(handler=_contracted(run_slices))
 
     compare = subparsers.add_parser(
         "compare",
@@ -1343,7 +1359,7 @@ def register_commands(subparsers: Any) -> None:
         nargs="*",
         default=[],
     )
-    compare.set_defaults(handler=run_compare)
+    compare.set_defaults(handler=_contracted(run_compare))
 
     facts = subparsers.add_parser(
         "facts",
@@ -1351,7 +1367,12 @@ def register_commands(subparsers: Any) -> None:
     )
     facts.add_argument("--profile", required=True)
     facts.add_argument("--output")
-    facts.set_defaults(handler=run_facts)
+    facts.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Indent the facts artifact for humans (default is compact JSON).",
+    )
+    facts.set_defaults(handler=_contracted(run_facts))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1368,16 +1389,48 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _emit_json(payload: dict[str, Any], output_path: str | None) -> None:
+    raw_output = payload.pop("raw_output", None)
+    if raw_output is not None:
+        print(raw_output)
+        return
     rendered = render_json_payload(payload)
     if output_path:
         Path(output_path).write_text(rendered + "\n", encoding="utf-8")
     print(rendered)
 
 
+def _hoist_global_output(argv: Sequence[str]) -> list[str]:
+    """Treat a global --output before the subcommand as the subcommand's own.
+
+    Every clankerprof subcommand defines a local --output; without this, the
+    subparser's default would silently overwrite the global value.
+    """
+    tokens = list(argv)
+    moved: list[str] = []
+    index = 0
+    while index < len(tokens):
+        item = tokens[index]
+        if not item.startswith("-"):
+            break
+        if item == "--output":
+            if index + 1 >= len(tokens):
+                raise ValueError("--output requires a path argument.")
+            moved = tokens[index : index + 2]
+            del tokens[index : index + 2]
+            continue
+        if item.startswith("--output="):
+            moved = [item]
+            del tokens[index]
+            continue
+        index += 1
+    return tokens + moved
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     try:
-        args = parser.parse_args(argv)
+        resolved_argv = list(sys.argv[1:]) if argv is None else list(argv)
+        args = parser.parse_args(_hoist_global_output(resolved_argv))
         payload = cast(dict[str, Any], args.handler(args))
         _emit_json(payload, None if payload.get("output") else args.output)
         if payload.get("tool") == "clankerprof_compare" and payload.get(

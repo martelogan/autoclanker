@@ -1,3 +1,4 @@
+schema_version: clankerprof.runtime_rules.v1
 name: ruby
 core_native_default_category: Ruby Core (Native)
 stdlib_category: Ruby Stdlib
@@ -22,7 +23,7 @@ stdlib_path_markers:
   - /opt/ruby/
 native_path_markers:
   - <cfunc>
-  - <internal:
+  - "<internal:"
 native_path_patterns:
   - regex:/ruby/[0-9][^/]*
 native_path_exclude_markers:
@@ -66,8 +67,6 @@ semantic_rules:
     native_category: StatsD (Native)
     name_contains:
       - StatsD
-    name_prefixes:
-      - StatsD
   - category: OpenTelemetry Gems
     native_category: OpenTelemetry (Native)
     name_contains:
@@ -81,21 +80,14 @@ semantic_rules:
   - category: I18n Gem
     name_contains:
       - I18n
-    name_prefixes:
-      - I18n.
-      - "I18n::"
   - category: Cache Client Gem
     native_category: Cache Client (Native)
     name_contains:
       - CacheClient
-    name_prefixes:
-      - "CacheClient::"
   - category: Dalli Gem
     native_category: Dalli (Native)
     name_contains:
       - Dalli
-    name_prefixes:
-      - "Dalli::"
   - category: Trilogy Gem
     name_contains:
       - Trilogy
@@ -105,8 +97,6 @@ semantic_rules:
     native_category: Serialization (Native)
     name_contains:
       - MessageCodec
-    name_prefixes:
-      - "MessageCodec::"
 native_rules:
   - category: Template Engine Native
     name_contains:
@@ -124,12 +114,15 @@ native_rules:
       - Zstd
     name_prefixes:
       - "Zlib::"
+      - Zlib.
   - category: Trilogy (Native)
     name_contains:
       - Trilogy
   - category: OpenSSL (Native)
     name_contains:
       - "OpenSSL::"
+    name_prefixes:
+      - OpenSSL.
   - category: JSON (Native)
     name_contains:
       - "JSON::"

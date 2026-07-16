@@ -7,7 +7,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, TypeAlias, cast
 
-from clankerprof.model import Frame, ProfileFacts, Sample, SampleFact, TimeNs
+from clankerprof.model import (
+    Frame,
+    ProfileFacts,
+    Sample,
+    SampleFact,
+    TimeNs,
+    ValueType,
+)
 
 JsonValue: TypeAlias = (
     str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
@@ -15,7 +22,8 @@ JsonValue: TypeAlias = (
 SampleFactsInput: TypeAlias = Iterable[SampleFact] | ProfileFacts
 JsonObject: TypeAlias = dict[str, Any]
 
-SAMPLE_FACTS_SCHEMA_VERSION: Final = "clankerprof.sample_facts.v1"
+SAMPLE_FACTS_SCHEMA_VERSION: Final = "clankerprof.sample_facts.v2"
+SAMPLE_FACTS_SCHEMA_VERSION_V1: Final = "clankerprof.sample_facts.v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,73 +140,112 @@ class ProfileFactIndex:
         )
 
 
-def sample_facts_to_jsonable(
-    facts: ProfileFacts,
-) -> dict[str, JsonValue]:
+def sample_facts_to_jsonable(facts: ProfileFacts) -> dict[str, JsonValue]:
+    """Export sample facts in the compact interned v2 layout.
+
+    Interning order is normative (mirrored by the Rust port): samples in
+    order, stack frames in order; each new frame interns its name, then its
+    filename, then appends its own row.
+    """
+    strings: list[str] = []
+    string_indexes: dict[str, int] = {}
+    frames: list[JsonValue] = []
+    frame_indexes: dict[Frame, int] = {}
+
+    def intern_string(value: str) -> int:
+        index = string_indexes.get(value)
+        if index is None:
+            index = len(strings)
+            strings.append(value)
+            string_indexes[value] = index
+        return index
+
+    def intern_frame(frame: Frame) -> int:
+        index = frame_indexes.get(frame)
+        if index is None:
+            row: list[JsonValue] = [
+                frame.location_id,
+                frame.function_id,
+                intern_string(frame.name),
+                intern_string(frame.filename),
+                frame.line,
+                frame.location_is_folded,
+            ]
+            index = len(frames)
+            frames.append(row)
+            frame_indexes[frame] = index
+        return index
+
+    samples_payload: list[JsonValue] = [
+        {
+            "sample_index": fact.sample_index,
+            "values": list(fact.sample.values),
+            "location_ids": list(fact.sample.location_ids),
+            "stack": [intern_frame(frame) for frame in fact.stack],
+        }
+        for fact in facts.samples
+    ]
+
     return {
         "schema_version": SAMPLE_FACTS_SCHEMA_VERSION,
         "tool": "clankerprof_facts",
+        "profile": {
+            "value_types": [
+                {"type": value_type.type_name, "unit": value_type.unit}
+                for value_type in facts.value_types
+            ],
+            "period_type": (
+                {
+                    "type": facts.period_type.type_name,
+                    "unit": facts.period_type.unit,
+                }
+                if facts.period_type is not None
+                else None
+            ),
+            "period": facts.period,
+            "default_sample_type": facts.default_sample_type,
+            "primary_value_index": facts.primary_value_index,
+        },
         "summary": {
             "sample_count": len(facts.samples),
             "empty_sample_count": facts.empty_sample_count,
             "non_empty_sample_count": facts.non_empty_sample_count,
             "total_primary_value": facts.total_primary_value,
         },
-        "samples": [_sample_fact_to_jsonable(fact) for fact in facts.samples],
+        "strings": list(strings),
+        "frames": frames,
+        "samples": samples_payload,
     }
 
 
 def sample_facts_from_jsonable(payload: JsonObject) -> ProfileFacts:
     schema_version = payload.get("schema_version")
-    if schema_version != SAMPLE_FACTS_SCHEMA_VERSION:
+    try:
+        if schema_version == SAMPLE_FACTS_SCHEMA_VERSION:
+            return _sample_facts_from_v2(payload)
+        if schema_version == SAMPLE_FACTS_SCHEMA_VERSION_V1:
+            return _sample_facts_from_v1(payload)
+    except KeyError as exc:
         raise ValueError(
-            "Unsupported sample facts schema version: "
-            f"{schema_version!r}; expected {SAMPLE_FACTS_SCHEMA_VERSION!r}."
-        )
-    raw_samples = payload.get("samples")
-    if not isinstance(raw_samples, list):
-        raise ValueError("Sample facts payload must contain a samples array.")
-    raw_sample_items = cast(list[object], raw_samples)
-    samples = tuple(
-        _sample_fact_from_jsonable(cast(JsonObject, item))
-        for item in raw_sample_items
-        if isinstance(item, dict)
-    )
-    if len(samples) != len(raw_sample_items):
-        raise ValueError("Each sample facts entry must be an object.")
-    total_primary_value = sum(fact.primary_value for fact in samples)
-    empty_sample_count = sum(1 for fact in samples if fact.is_empty)
-
-    summary = payload.get("summary", {})
-    if isinstance(summary, dict):
-        summary_payload = cast(JsonObject, summary)
-        expected_count = summary_payload.get("sample_count")
-        if expected_count is not None and int(expected_count) != len(samples):
-            raise ValueError(
-                "Sample facts summary sample count does not match samples."
-            )
-        expected_total = summary_payload.get("total_primary_value")
-        if expected_total is not None and int(expected_total) != total_primary_value:
-            raise ValueError("Sample facts summary total does not match samples.")
-        expected_empty = summary_payload.get("empty_sample_count")
-        if expected_empty is not None and int(expected_empty) != empty_sample_count:
-            raise ValueError("Sample facts empty count does not match samples.")
-        expected_non_empty = summary_payload.get("non_empty_sample_count")
-        if (
-            expected_non_empty is not None
-            and int(expected_non_empty) != len(samples) - empty_sample_count
-        ):
-            raise ValueError("Sample facts non-empty count does not match samples.")
-
-    return ProfileFacts(
-        samples=samples,
-        total_primary_value=total_primary_value,
-        empty_sample_count=empty_sample_count,
+            f"Sample facts payload missing required key: {exc.args[0]!r}."
+        ) from exc
+    raise ValueError(
+        "Unsupported sample facts schema version: "
+        f"{schema_version!r}; expected {SAMPLE_FACTS_SCHEMA_VERSION!r} "
+        f"or {SAMPLE_FACTS_SCHEMA_VERSION_V1!r}."
     )
 
 
-def dumps_sample_facts(facts: ProfileFacts) -> str:
-    return json.dumps(sample_facts_to_jsonable(facts), indent=2, sort_keys=True)
+def dumps_sample_facts(facts: ProfileFacts, *, pretty: bool = False) -> str:
+    payload = sample_facts_to_jsonable(facts)
+    if pretty:
+        return json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False)
+    return json.dumps(
+        payload,
+        separators=(",", ":"),
+        sort_keys=True,
+        ensure_ascii=False,
+    )
 
 
 def loads_sample_facts(payload: str) -> ProfileFacts:
@@ -208,26 +255,244 @@ def loads_sample_facts(payload: str) -> ProfileFacts:
     return sample_facts_from_jsonable(cast(JsonObject, raw))
 
 
-def write_sample_facts(path: str | Path, facts: ProfileFacts) -> None:
-    Path(path).write_text(dumps_sample_facts(facts) + "\n", encoding="utf-8")
+def write_sample_facts(
+    path: str | Path,
+    facts: ProfileFacts,
+    *,
+    pretty: bool = False,
+) -> None:
+    Path(path).write_text(
+        dumps_sample_facts(facts, pretty=pretty) + "\n",
+        encoding="utf-8",
+    )
 
 
 def read_sample_facts(path: str | Path) -> ProfileFacts:
     return loads_sample_facts(Path(path).read_text(encoding="utf-8"))
 
 
-def _sample_fact_to_jsonable(fact: SampleFact) -> dict[str, JsonValue]:
-    return {
-        "sample_index": fact.sample_index,
-        "primary_value": fact.primary_value,
-        "values": list(fact.sample.values),
-        "location_ids": list(fact.sample.location_ids),
-        "is_empty": fact.is_empty,
-        "stack": [_frame_to_jsonable(frame) for frame in fact.stack],
-    }
+def _sample_facts_from_v2(payload: JsonObject) -> ProfileFacts:
+    profile_meta = _validated_profile_meta(payload.get("profile"))
+    strings = _validated_strings(payload.get("strings"))
+    frames = _validated_frames(payload.get("frames"), strings)
+    raw_samples = payload.get("samples")
+    if not isinstance(raw_samples, list):
+        raise ValueError("Sample facts payload must contain a samples array.")
+
+    primary_value_index = profile_meta.primary_value_index
+    samples: list[SampleFact] = []
+    for item in cast(list[object], raw_samples):
+        if not isinstance(item, dict):
+            raise ValueError("Each sample facts entry must be an object.")
+        entry = cast(JsonObject, item)
+        raw_stack = entry.get("stack", [])
+        if not isinstance(raw_stack, list):
+            raise ValueError("Sample fact stack must be an array.")
+        stack: list[Frame] = []
+        for frame_index in cast(list[object], raw_stack):
+            if isinstance(frame_index, bool) or not isinstance(frame_index, int):
+                raise ValueError("Sample fact stack entries must be frame indexes.")
+            if frame_index < 0 or frame_index >= len(frames):
+                raise ValueError(
+                    f"Sample fact frame index {frame_index} is out of range."
+                )
+            stack.append(frames[frame_index])
+        samples.append(
+            SampleFact(
+                sample_index=int(entry["sample_index"]),
+                sample=Sample(
+                    location_ids=_int_tuple(
+                        entry.get("location_ids", []),
+                        field_name="location_ids",
+                    ),
+                    values=_int_tuple(entry.get("values", []), field_name="values"),
+                    primary_index=primary_value_index,
+                ),
+                stack=tuple(stack),
+            )
+        )
+
+    facts_samples = tuple(samples)
+    total_primary_value = sum(fact.primary_value for fact in facts_samples)
+    empty_sample_count = sum(1 for fact in facts_samples if fact.is_empty)
+    _validate_summary(
+        payload.get("summary"),
+        sample_count=len(facts_samples),
+        total_primary_value=total_primary_value,
+        empty_sample_count=empty_sample_count,
+    )
+    return ProfileFacts(
+        samples=facts_samples,
+        total_primary_value=total_primary_value,
+        empty_sample_count=empty_sample_count,
+        value_types=profile_meta.value_types,
+        period_type=profile_meta.period_type,
+        period=profile_meta.period,
+        default_sample_type=profile_meta.default_sample_type,
+        primary_value_index=profile_meta.primary_value_index,
+    )
 
 
-def _sample_fact_from_jsonable(payload: JsonObject) -> SampleFact:
+@dataclass(frozen=True, slots=True)
+class _ProfileMeta:
+    value_types: tuple[ValueType, ...]
+    period_type: ValueType | None
+    period: int
+    default_sample_type: str
+    primary_value_index: int
+
+
+def _validated_profile_meta(raw: object) -> _ProfileMeta:
+    if not isinstance(raw, dict):
+        raise ValueError("Sample facts payload must contain a profile object.")
+    payload = cast(JsonObject, raw)
+    raw_value_types = payload.get("value_types", [])
+    if not isinstance(raw_value_types, list):
+        raise ValueError("Sample facts profile value_types must be an array.")
+    value_types = tuple(
+        _value_type_from_jsonable(item) for item in cast(list[object], raw_value_types)
+    )
+    raw_period_type = payload.get("period_type")
+    period_type = (
+        _value_type_from_jsonable(raw_period_type)
+        if raw_period_type is not None
+        else None
+    )
+    primary_value_index = payload.get("primary_value_index", 0)
+    if isinstance(primary_value_index, bool) or not isinstance(
+        primary_value_index, int
+    ):
+        raise ValueError("Sample facts primary_value_index must be an integer.")
+    if primary_value_index < 0:
+        raise ValueError("Sample facts primary_value_index must be non-negative.")
+    return _ProfileMeta(
+        value_types=value_types,
+        period_type=period_type,
+        period=int(payload.get("period", 0)),
+        default_sample_type=str(payload.get("default_sample_type", "")),
+        primary_value_index=primary_value_index,
+    )
+
+
+def _value_type_from_jsonable(raw: object) -> ValueType:
+    if not isinstance(raw, dict):
+        raise ValueError("Sample facts value type must be an object.")
+    payload = cast(JsonObject, raw)
+    return ValueType(
+        type_name=str(payload.get("type", "")),
+        unit=str(payload.get("unit", "")),
+    )
+
+
+def _validated_strings(raw: object) -> list[str]:
+    if not isinstance(raw, list):
+        raise ValueError("Sample facts payload must contain a strings array.")
+    strings: list[str] = []
+    for item in cast(list[object], raw):
+        if not isinstance(item, str):
+            raise ValueError("Sample facts strings entries must be strings.")
+        strings.append(item)
+    return strings
+
+
+def _validated_frames(raw: object, strings: list[str]) -> list[Frame]:
+    if not isinstance(raw, list):
+        raise ValueError("Sample facts payload must contain a frames array.")
+    frames: list[Frame] = []
+    for item in cast(list[object], raw):
+        if not isinstance(item, list) or len(cast(list[object], item)) != 6:
+            raise ValueError(
+                "Each sample facts frame must be a six-element array of "
+                "[location_id, function_id, name, filename, line, folded]."
+            )
+        row = cast(list[object], item)
+        location_id, function_id, name_index, filename_index, line, folded = row
+        for label, value in (
+            ("location_id", location_id),
+            ("function_id", function_id),
+            ("name index", name_index),
+            ("filename index", filename_index),
+            ("line", line),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"Sample facts frame {label} must be an integer.")
+        if not isinstance(folded, bool):
+            raise ValueError("Sample facts frame folded flag must be a boolean.")
+        name_position = cast(int, name_index)
+        filename_position = cast(int, filename_index)
+        for position in (name_position, filename_position):
+            if position < 0 or position >= len(strings):
+                raise ValueError(
+                    f"Sample facts frame string index {position} is out of range."
+                )
+        frames.append(
+            Frame(
+                location_id=cast(int, location_id),
+                function_id=cast(int, function_id),
+                name=strings[name_position],
+                filename=strings[filename_position],
+                line=cast(int, line),
+                location_is_folded=folded,
+            )
+        )
+    return frames
+
+
+def _validate_summary(
+    raw: object,
+    *,
+    sample_count: int,
+    total_primary_value: TimeNs,
+    empty_sample_count: int,
+) -> None:
+    if not isinstance(raw, dict):
+        return
+    summary_payload = cast(JsonObject, raw)
+    expected_count = summary_payload.get("sample_count")
+    if expected_count is not None and int(expected_count) != sample_count:
+        raise ValueError("Sample facts summary sample count does not match samples.")
+    expected_total = summary_payload.get("total_primary_value")
+    if expected_total is not None and int(expected_total) != total_primary_value:
+        raise ValueError("Sample facts summary total does not match samples.")
+    expected_empty = summary_payload.get("empty_sample_count")
+    if expected_empty is not None and int(expected_empty) != empty_sample_count:
+        raise ValueError("Sample facts empty count does not match samples.")
+    expected_non_empty = summary_payload.get("non_empty_sample_count")
+    if (
+        expected_non_empty is not None
+        and int(expected_non_empty) != sample_count - empty_sample_count
+    ):
+        raise ValueError("Sample facts non-empty count does not match samples.")
+
+
+def _sample_facts_from_v1(payload: JsonObject) -> ProfileFacts:
+    raw_samples = payload.get("samples")
+    if not isinstance(raw_samples, list):
+        raise ValueError("Sample facts payload must contain a samples array.")
+    raw_sample_items = cast(list[object], raw_samples)
+    samples = tuple(
+        _sample_fact_from_v1_jsonable(cast(JsonObject, item))
+        for item in raw_sample_items
+        if isinstance(item, dict)
+    )
+    if len(samples) != len(raw_sample_items):
+        raise ValueError("Each sample facts entry must be an object.")
+    total_primary_value = sum(fact.primary_value for fact in samples)
+    empty_sample_count = sum(1 for fact in samples if fact.is_empty)
+    _validate_summary(
+        payload.get("summary"),
+        sample_count=len(samples),
+        total_primary_value=total_primary_value,
+        empty_sample_count=empty_sample_count,
+    )
+    return ProfileFacts(
+        samples=samples,
+        total_primary_value=total_primary_value,
+        empty_sample_count=empty_sample_count,
+    )
+
+
+def _sample_fact_from_v1_jsonable(payload: JsonObject) -> SampleFact:
     raw_stack = payload.get("stack", [])
     if not isinstance(raw_stack, list):
         raise ValueError("Sample fact stack must be an array.")
@@ -244,7 +509,7 @@ def _sample_fact_from_jsonable(payload: JsonObject) -> SampleFact:
             values=raw_values,
         ),
         stack=tuple(
-            _frame_from_jsonable(cast(JsonObject, item))
+            _frame_from_v1_jsonable(cast(JsonObject, item))
             for item in raw_stack_items
             if isinstance(item, dict)
         ),
@@ -260,18 +525,7 @@ def _sample_fact_from_jsonable(payload: JsonObject) -> SampleFact:
     return result
 
 
-def _frame_to_jsonable(frame: Frame) -> dict[str, JsonValue]:
-    return {
-        "location_id": frame.location_id,
-        "function_id": frame.function_id,
-        "name": frame.name,
-        "filename": frame.filename,
-        "line": frame.line,
-        "location_is_folded": frame.location_is_folded,
-    }
-
-
-def _frame_from_jsonable(payload: JsonObject) -> Frame:
+def _frame_from_v1_jsonable(payload: JsonObject) -> Frame:
     return Frame(
         location_id=int(payload["location_id"]),
         function_id=int(payload["function_id"]),

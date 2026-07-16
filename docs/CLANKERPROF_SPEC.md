@@ -23,11 +23,36 @@ must preserve:
 
 - sparse pprof function IDs and location IDs;
 - sample order and stable zero-based `sample_index`;
-- all sample values, with `values[0]` as the primary CPU value;
+- all sample values, plus the profile's declared `sample_type` value types,
+  `period_type`, `period`, and `default_sample_type`;
 - pprof leaf-to-root location order;
 - all inline frames from each location, in pprof line order;
 - function name, system name, filename, start line, sample line, and folded
   location marker when present.
+
+Signed pprof `int64` fields (sample values, line numbers, start lines,
+`period`) decode as two's-complement 64-bit integers; a varint encoding of
+`-1` must decode as `-1`, never as `2^64 - 1`.
+
+The decoder is strict about malformed input: varints longer than 10 bytes,
+length-delimited fields extending past the stream, and truncated fixed32/64
+fields (even in skipped unknown fields) are decode errors, never silently
+accepted. Varint bits past 63 drop, per protobuf 64-bit semantics.
+
+### Primary-value selection
+
+Projections aggregate exactly one value per sample, the *primary value*,
+selected once per profile:
+
+1. If `default_sample_type` is set and names a declared sample type, the
+   primary value index is that type's position.
+2. Otherwise the primary value index is the **last** declared sample type
+   (pprof convention — e.g. Go CPU profiles declare
+   `[samples/count, cpu/nanoseconds]` and mean nanoseconds).
+3. Profiles that declare no sample types use index 0.
+
+Samples missing a value at the selected index fall back to `values[0]`
+(or `0` when the sample has no values at all).
 
 The decoder must not assume IDs are contiguous array indexes. Optimized
 implementations can build indexes, but indexes must be derived from profile IDs
@@ -39,8 +64,11 @@ without changing visible facts.
 current schema version is:
 
 ```json
-"clankerprof.sample_facts.v1"
+"clankerprof.sample_facts.v2"
 ```
+
+The artifact is compact JSON with sorted keys by default; `--pretty` opts in
+to indented output. Both encodings parse identically.
 
 Top-level fields:
 
@@ -48,36 +76,57 @@ Top-level fields:
 | --- | --- |
 | `schema_version` | Exact schema identifier. Readers must reject unknown versions. |
 | `tool` | Producer identifier, currently `clankerprof_facts`. |
+| `profile.value_types` | Declared sample value types, each `{"type", "unit"}`. |
+| `profile.period_type` | Declared period type (`{"type", "unit"}`) or `null`. |
+| `profile.period` | Declared sampling period, `0` when absent. |
+| `profile.default_sample_type` | Declared default sample type name, `""` when absent. |
+| `profile.primary_value_index` | Selected primary value index (see primary-value selection). |
 | `summary.sample_count` | Number of decoded samples. |
 | `summary.empty_sample_count` | Samples whose stack could not be decoded. |
 | `summary.non_empty_sample_count` | Decoded samples with at least one frame. |
 | `summary.total_primary_value` | Sum of primary sample values. |
+| `strings` | Interned string table for frame names and filenames. |
+| `frames` | Interned frame table; stacks reference rows by index. |
 | `samples` | Ordered sample fact array. |
+
+Each `frames` row is a six-element array:
+
+```json
+[location_id, function_id, name_index, filename_index, line, location_is_folded]
+```
+
+where `name_index` and `filename_index` point into `strings`, `line` is the
+sample line number (otherwise `0`), and `location_is_folded` is the pprof
+folded-location marker. Interning order is normative so exports are
+byte-comparable across implementations: samples in order, stack frames in
+order; each new frame interns its name, then its filename, then appends its
+own row.
 
 Each sample contains:
 
 | Field | Meaning |
 | --- | --- |
 | `sample_index` | Stable zero-based index from the original profile order. |
-| `primary_value` | First sample value, used as CPU time by current projections. |
 | `values` | All raw sample values. |
 | `location_ids` | Raw pprof location IDs for the sample. |
-| `is_empty` | Whether the decoded stack is empty. |
-| `stack` | Leaf-to-root decoded frames. |
+| `stack` | Leaf-to-root frame indexes into `frames`. |
 
-Each frame contains:
-
-| Field | Meaning |
-| --- | --- |
-| `location_id` | Original pprof location ID. |
-| `function_id` | Original pprof function ID. |
-| `name` | Function name. |
-| `filename` | Source or pseudo path. |
-| `line` | Sample line number when available, otherwise `0`. |
-| `location_is_folded` | pprof folded-location marker. |
+Per-sample primary values and emptiness are derived on import:
+`primary_value = values[profile.primary_value_index]` (with the fallbacks from
+primary-value selection) and `is_empty = stack == []`. Importers must validate
+frame and string indexes, reject non-integer stack entries, and reject
+summaries that disagree with the reconstructed samples.
 
 Round-tripping this JSON through `loads_sample_facts` must preserve target and
 slice projection outputs.
+
+### Legacy v1 imports
+
+Readers must continue to accept `clankerprof.sample_facts.v1` payloads
+(denormalized per-sample `primary_value`/`is_empty`/frame objects). v1
+predates value-type metadata: v1 samples keep `values[0]` as their primary
+value, preserving the meaning the artifact had when it was produced. Writers
+always emit v2.
 
 ## Fact index contract
 
@@ -137,6 +186,41 @@ and `library_selector_path_patterns` for selector-specific dependency paths.
 Older alias keys may remain accepted for migration, but aliases must normalize
 to the same `RuntimeRuleSet` fields before analysis begins.
 
+Rule packs are strict and versioned: unknown top-level keys and unknown
+match-rule entry keys are validation errors (typos never silently disable a
+rule), and the optional `schema_version` field must be
+`clankerprof.runtime_rules.v1` when present (absent means v1).
+
+### Rule matching semantics
+
+Within one rule, `name_contains` entries match as substrings anywhere in the
+frame name, `name_prefixes` entries anchor at the start of the name, and
+`name_patterns` entries are regular expressions; a rule matches when any
+entry matches and the frame path is not in `except_paths`. Rules evaluate in
+pack order; the first matching rule wins.
+
+Semantic rules may only claim frames on **runtime-owned paths**: native
+pseudo-paths, runtime stdlib paths, runtime-internal paths, and
+dependency/library paths per the active pack. Frames on plain application
+paths are never claimed by semantic rules, no matter how their names read —
+an application class whose name happens to contain a dependency's name stays
+application code. A pack that declares no path-ownership configuration
+(no native/stdlib/library path keys) cannot distinguish application paths,
+so its semantic rules apply to every frame.
+
+The `special_namespace_prefixes` guard blocks qualified names
+(`OpenSSL::Cipher#encrypt`) from resolving through the core-class table. Bare
+module-function names on guarded namespaces (`Zlib.inflate`,
+`OpenSSL.fixed_length_secure_compare`) resolve through the pack's ordered
+native-name rules **before** the core-class table when they appear on native
+paths, so the core table's default category never swallows names the pack
+labels semantically; off native paths, the core category maps
+(`core_semantic_categories` and friends) keep their legacy claims.
+
+The `--no-enhanced` flag disables enhanced runtime categorization for the
+**active** runtime's rules; it never swaps rule packs. Under the generic
+runtime, `--no-enhanced` keeps the generic pack.
+
 ## Target projection contract
 
 `targets` answers: “inside this parent boundary, what leaf work consumed CPU,
@@ -145,10 +229,16 @@ and which higher-level caller made it matter?”
 For each sample:
 
 - find every configured parent frame contained in the stack;
-- attribute the full primary sample value to each matching parent;
+- attribute the full primary sample value **once per matching parent**: a
+  parent appearing multiple times in one stack (direct or indirect recursion)
+  still receives the sample value exactly once, so a parent's total can never
+  exceed the profile total;
 - start from the leaf frame as the self-time owner;
 - optionally label the leaf using runtime rules;
 - optionally fold runtime-internal leaves into the first meaningful caller;
+  the fold heuristic's caller window spans the next two **distinct locations**
+  below the leaf, so the outcome is independent of inline expansion of the
+  leaf's own location;
 - match configured target categories against the chosen frame path;
 - place unmatched time in `Other`;
 - track leaf functions, categorized files, folded-from totals, semantic callers,
@@ -179,7 +269,10 @@ Scope, cost-kind, owner, and exclusion selectors accept a plain selector,
 an OR list of selectors, or an expression table with `any`, `all`, and `not`.
 Supported selector keys are intentionally generic: function name contains,
 function name equality, path/glob, regex, native frame, dependency selectors,
-optional slice label, configured cost-kind label, and runtime-rule label. A
+optional slice label, configured cost-kind label, and runtime-rule label.
+The `native:` selector takes `true` (or a bare `native`) to match native
+frames and `false` to match non-native frames; any other value is a
+validation error. A
 `cost_kind:<label>` selector matches the configured `[cost_kind]` label for a
 frame and is valid for owners, scopes, and exclusions. A
 `runtime_label:<label>` selector matches labels produced by the selected
@@ -231,12 +324,24 @@ For each sample:
 - report unattributed dependency/library summaries for default-slice time when
   requested.
 
+Bottom `slice:<name>` filters evaluate the sample's **effective** attribution
+in both polarities: a sample rescued into a slice by a descendant attribute
+rule matches `slice:<name>` and is excluded by `!slice:<name>`. Collapse
+`slice:` rules intentionally do not use the descendant-attribute rescue.
+
+At most one slice may set `default: true`; declaring several is a validation
+error (previously attribution silently used the last while tracking used the
+first).
+
 Slice projection must not redefine target-boundary semantics.
 
 ## Compare contract
 
-`compare` consumes two slice JSON payloads or two boundary JSON payloads. It
-does not compare mixed projection types. For slice payloads, it reports:
+`compare` consumes two slice JSON payloads or two boundary JSON payloads,
+dispatching on their shared `tool` field. Both inputs must carry the same
+`tool`, and it must be `clankerprof_slices` or `clankerprof_boundaries`;
+anything else (including two facts exports) is a validation error, never a
+silent "no regression". For slice payloads, it reports:
 
 - total before/after primary time from summaries;
 - per-slice before percent, after percent, absolute delta, relative delta, and
@@ -250,8 +355,37 @@ For boundary payloads, it reports the same threshold semantics over stable
 boundary, bucket, category, and domain rows. Boundary compare is intentionally
 JSON-first; exact terminal prose is not part of the compatibility contract.
 
+Compare artifacts are strict JSON. A row that is new (`before_pct == 0`,
+`after_pct > 0`) has no finite relative delta; its `delta_rel` serializes as
+`null`, never as a bare `Infinity` token or a string. New rows still
+participate in regression gating: threshold math treats their relative delta
+as unbounded, so a new row whose absolute delta exceeds the absolute
+threshold gates. `top_regressions` orders rows by descending absolute delta;
+`top_improvements` orders rows by ascending (most negative first) delta.
+
 A slice is a regression only when it exceeds both the configured absolute and
-relative thresholds and is within the focus set when one is provided.
+relative thresholds and is within the focus set when one is provided. Focus
+sets come from `--focus-slices` for slice reports and `--focus-boundaries`
+(alias `--focus-scopes`) for scope reports; both take comma-delimited names
+and gate only the named rows while still reporting every row.
+
+## CLI stream and error contract
+
+Successful JSON commands print exactly one JSON document to stdout (the
+payload, or an `{"ok": true, "output": ...}` receipt when `--output` wrote the
+artifact). Non-JSON formats (`csv`, `simple-csv`, `text`) without `--output`
+print exactly the raw rendered payload to stdout — never mixed with a JSON
+envelope; with `--output` they write the artifact and print the JSON receipt.
+A global `--output` before the subcommand is equivalent to the subcommand's
+own `--output` through both the standalone and umbrella CLIs.
+
+Every contracted failure — decode errors (including truncated or corrupt
+gzip), missing or unreadable input files, malformed YAML/JSON/TOML configs and
+rule packs, invalid facts payloads (wrong schema version, missing keys, index
+or summary mismatches), and option validation — exits `2` and prints a single
+`{"ok": false, "error": ...}` JSON envelope to stderr, never a traceback.
+Filter and collapse shape validation always runs, with or without a slices
+config.
 
 ## Compatibility and validation
 
@@ -281,18 +415,21 @@ Python for the same caller-provided local inputs.
 ## Rust core parity
 
 `crates/clankerprof-core` is the Rust compatibility implementation for this
-spec. The crate must treat Python `clankerprof` as the reference until the Rust
-core has equivalent coverage for every public projection. Its stable surfaces
-currently include `clankerprof-rs facts`, generic `targets`, generic `slices`,
-and `compare`; Python scope decomposition is not yet a Rust parity surface.
-The facts command emits the same `clankerprof.sample_facts.v1` payload as
-Python for raw profiles, gzipped profiles, inline frames, folded locations, and
-sparse pprof IDs.
+spec, with Python `clankerprof` as the reference implementation. Its parity
+surfaces cover every public projection: `facts` (export and v1/v2 replay),
+`targets` (all formats and runtime flags), `slices` (filters, collapse,
+attributes, pseudo-slices), `scopes`/`boundaries` (full decomposition with
+TOML/YAML configs), `compare` (slice and boundary gates), and the single-pass
+`report` mode. Runtime rule packs load from the same packaged YAML files via
+`include_str!`, so the vocabularies cannot drift. The facts command emits the
+same `clankerprof.sample_facts.v2` payload byte-for-byte as Python for raw
+profiles, gzipped profiles, inline frames, folded locations, sparse pprof
+IDs, multi-value samples, and packed sample encoding.
 
 Projection work must build on the same Rust fact model rather than introducing
-separate tree or opportunity accounting. Any future Rust target, slice, compare,
-tree, or opportunity command must prove parity against Python fixtures before
-being used as an integration boundary by downstream tools. Runtime-specific
+separate ad hoc accounting. Any future Rust projection or comparison command
+must prove parity against Python fixtures before being used as an integration
+boundary by downstream tools. Runtime-specific
 rule-pack parity remains the expansion point after the generic projection
 surface; downstream integrations should keep calling this out explicitly when
 they depend on runtime-specific folding or semantic categorization.

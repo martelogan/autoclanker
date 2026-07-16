@@ -6,9 +6,54 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
-from typing import cast
+from typing import Final, cast
 
 import yaml
+
+RUNTIME_RULES_SCHEMA_VERSION: Final = "clankerprof.runtime_rules.v1"
+
+_KNOWN_RULE_PACK_KEYS: Final = frozenset(
+    {
+        "name",
+        "schema_version",
+        "semantic_rules",
+        "native_rules",
+        "simplification_map",
+        "main_simplified_categories",
+        "always_foldable_categories",
+        "verbose_only_foldable_categories",
+        "special_namespace_prefixes",
+        "stdlib_path_markers",
+        "native_path_markers",
+        "native_path_patterns",
+        "native_path_exclude_markers",
+        "native_path_exclude_patterns",
+        "library_path_patterns",
+        "library_selector_path_patterns",
+        "library_name_suffix_patterns",
+        "native_name_category_rules",
+        "caller_fallback_name_prefixes",
+        "legacy_caller_fallback_name_prefixes",
+        "core_native_categories",
+        "core_semantic_categories",
+        "core_stdlib_categories",
+        "core_internal_categories",
+        "core_native_default_category",
+        "stdlib_category",
+        "internals_category",
+    }
+)
+
+_KNOWN_MATCH_RULE_KEYS: Final = frozenset(
+    {
+        "category",
+        "native_category",
+        "name_contains",
+        "name_prefixes",
+        "name_patterns",
+        "except_paths",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +202,9 @@ def _load_match_rules(
         if not isinstance(item, dict):
             raise ValueError(f"Each {key} entry must be an object.")
         raw_item = cast(dict[str, object], item)
+        unknown_keys = sorted(set(raw_item) - _KNOWN_MATCH_RULE_KEYS)
+        if unknown_keys:
+            raise ValueError(f"Unknown {key} entry keys: {', '.join(unknown_keys)}.")
         if "category" not in raw_item:
             raise ValueError(f"Each {key} entry must include category.")
         rules.append(
@@ -183,6 +231,15 @@ def runtime_rules_from_mapping(
     core_classes: Iterable[str] = (),
     verbose: bool = False,
 ) -> RuntimeRuleSet:
+    unknown_keys = sorted(set(payload) - _KNOWN_RULE_PACK_KEYS)
+    if unknown_keys:
+        raise ValueError(f"Unknown runtime rule pack keys: {', '.join(unknown_keys)}.")
+    schema_version = payload.get("schema_version", RUNTIME_RULES_SCHEMA_VERSION)
+    if schema_version != RUNTIME_RULES_SCHEMA_VERSION:
+        raise ValueError(
+            "Unsupported runtime rules schema version: "
+            f"{schema_version!r}; expected {RUNTIME_RULES_SCHEMA_VERSION!r}."
+        )
     caller_fallback_name_prefixes = _aliased_string_tuple(
         payload,
         "caller_fallback_name_prefixes",

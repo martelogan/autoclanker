@@ -13,11 +13,27 @@ behavior must not define or override target-attribution semantics.
   preserving a useful `clankerprof` extension.
 - `not claimed`: not proven by the current self-contained suite.
 
+## Rust parity status
+
+`crates/clankerprof-core` reaches parity with every capability below through
+`tests/test_clankerprof_rust_parity.py`: byte-level artifact comparison across
+a per-subcommand flag matrix (facts compact/pretty, targets
+json/csv/simple-csv/text with runtime/fold/track/attributable/no-enhanced
+flags and the compat CSV pair, slices with filters/collapse/attributes/
+metadata/pseudo-slices, scopes with preferred and legacy configs and facts
+replay, compare gates, malformed-input rejection). Rows marked `not claimed`
+below are not claimed by either implementation (legacy prose formats). Any
+capability added to Python must land in the Rust core and this parity suite
+in the same change.
+
 ## Target attribution
 
 | Capability | Status | Test coverage |
 | --- | --- | --- |
 | Raw and gzipped pprof profile decoding without generated protobuf runtime files | covered | `test_clankerprof_decodes_raw_and_gzipped_pprof_profiles` |
+| Value-type metadata (`sample_type`, `period_type`, `period`, `default_sample_type`) selects the primary value per pprof convention | covered | `test_clankerprof_primary_value_defaults_to_last_value_type`, `test_clankerprof_primary_value_honors_default_sample_type`, `test_clankerprof_primary_value_unknown_default_falls_back_to_last` |
+| Packed varint sample encoding decodes identically to unpacked encoding | covered | `test_clankerprof_decodes_packed_sample_encoding_identically` |
+| Signed int64 protobuf fields (sample values, line numbers) decode as two's-complement | covered | `test_clankerprof_decodes_signed_int64_fields_as_twos_complement` |
 | Inline frames from repeated `Location.line` entries participate in leaf-to-root target traversal | covered | `test_clankerprof_expands_inline_location_frames_for_target_traversal` |
 | First-class sample-facts API exposes per-sample value, leaf-to-root stack, inline frames, and stable sample index | covered | `test_clankerprof_sample_facts_are_the_shared_projection_surface` |
 | Versioned sample-facts JSON export/import preserves projection behavior and rejects malformed frame entries | covered | `test_clankerprof_sample_facts_export_round_trips_projection_inputs`, `test_clankerprof_sample_facts_import_rejects_malformed_frames` |
@@ -25,10 +41,15 @@ behavior must not define or override target-attribution semantics.
 | Target projection can consume sample facts directly with identical output to profile-based analysis | covered | `test_clankerprof_target_projection_matches_sample_fact_projection` |
 | Target CLI can replay `clankerprof facts` JSON through standalone and umbrella command surfaces | covered | `test_clankerprof_cli_and_autoclanker_alias_generate_outputs` |
 | Target-contained sample self-time attribution by leaf frame | covered | `test_clankerprof_preserves_target_attribution_parity` |
+| Recursive parent frames attribute the sample value once per sample per parent | covered | `test_clankerprof_targets_recursive_frames_count_once_per_sample` |
+| Category precedence is first-match-wins in config order; ranked arrays break ties by first-seen order (Rust parity via insertion-ordered maps) | covered | `test_clankerprof_target_category_precedence_and_tie_order` |
 | Complete target accounting with `Other` catch-all | covered | `test_clankerprof_preserves_target_attribution_parity` |
 | Generic request/rendering boundary attribution outside a specific application domain | covered | `test_clankerprof_supports_generic_request_rendering_attribution` |
 | Packaged Ruby core class CSV is used by default for `--runtime ruby`, with explicit override still available | covered | `test_clankerprof_loads_packaged_ruby_core_classes_by_default` |
 | Ruby core/native semantic labels including OpenSSL false-positive avoidance | covered | `test_clankerprof_ruby_rule_pack_preserves_legacy_categorization_cases` |
+| Semantic rules never claim application-path frames by name substring (runtime-owned-path constraint) | covered | `test_clankerprof_semantic_rules_do_not_claim_app_frames_by_substring` |
+| Guarded bare module-function names (`Zlib.inflate`) resolve through native-name rules, not the core default | covered | `test_clankerprof_special_namespace_guard_covers_bare_module_names` |
+| `--no-enhanced` keeps the active runtime's pack; generic never silently loads ruby rules | covered | `test_clankerprof_no_enhanced_generic_runtime_keeps_generic_rules`, `test_clankerprof_no_enhanced_runtime_selection_is_observable` |
 | Four legacy Ruby flag combinations for verbose/non-verbose and folded/non-folded modes | covered | `test_clankerprof_preserves_legacy_ruby_flag_combinations` |
 | Main simplified categories and “main categories never fold” behavior | covered | `test_clankerprof_preserves_main_simplified_category_totals_and_never_folds` |
 | Proportional CPU attributables in CSV output | covered | `test_clankerprof_ruby_rules_support_simplification_folding_and_attributables` |
@@ -59,7 +80,7 @@ existing boundary JSON payloads, or slice ownership semantics.
 | Predicate expressions with `any`, `all`, and `not`, configured `cost_kind:<label>`/`category:<label>` selectors, runtime `runtime_label:<label>`/`runtime_category:<label>` selectors, and recursive cost-kind guardrails | covered | `test_clankerprof_boundary_config_supports_predicate_expressions_and_category_refs`, `test_clankerprof_scope_config_aliases_preserve_boundary_output`, `test_clankerprof_boundary_config_rejects_recursive_category_predicates` |
 | Nested predicate expressions remain cached by unique frame identity across repeated samples | covered | `test_clankerprof_boundary_expression_matching_stays_frame_cached` |
 | Configured category selectors remain cached by unique frame identity when used as owner-domain predicates | covered | `test_clankerprof_boundary_category_predicates_stay_frame_cached` |
-| Rust parity for scope decomposition | not claimed | Python is the reference implementation until `clankerprof-core` adds equivalent coverage. |
+| Rust parity for scope decomposition | covered | `test_clankerprof_rust_scopes_match_python_boundary_decomposition`, `test_clankerprof_rust_scopes_legacy_aliases_and_boundaries_subcommand`, `test_clankerprof_rust_scopes_replay_facts_identically` |
 
 ## Runtime rules
 
@@ -90,6 +111,10 @@ semantics.
 | Descendant filters such as `<name:RequestHandler#render_response`, including OR semantics across descendant filters | covered | `test_clankerprof_slice_descendant_filters_use_or_semantics` |
 | Repeated `!` and `<` filter prefixes in any order | covered | `test_clankerprof_slice_filter_prefixes_can_repeat_in_any_order` |
 | Bottom `slice:<name>` filters include descendant-attribute rescue behavior | covered | `test_clankerprof_slice_filter_honors_descendant_attribute_slice_matches` |
+| Negated `!slice:<name>` filters exclude descendant-attributed samples (rescue applies to both polarities) | covered | `test_clankerprof_slice_filter_negation_respects_descendant_attribution` |
+| Multiple `default: true` slices are rejected | covered | `test_clankerprof_duplicate_default_slices_rejected` |
+| `native:false` predicates match non-native frames; invalid values rejected | covered | `test_clankerprof_native_predicate_value_honored` |
+| Runtime-internal fold window spans distinct locations, invariant to leaf inline expansion | covered | `test_clankerprof_fold_heuristic_ignores_leaf_inline_expansion` |
 | `slice:<name>` collapse does not use descendant-attribute rescue | covered | `test_clankerprof_slice_collapse_does_not_use_descendant_attribute_rescue` |
 | Non-descendant filters apply to the selected bottom attribution frame after native/collapse handling | covered | `test_clankerprof_slice_filters_apply_to_bottom_frame_after_native_collapse` |
 | Unsupported filter keys, malformed filters, and collapse prefixes are rejected | covered | `test_clankerprof_slice_cli_validates_filter_and_collapse_contract` |
@@ -113,6 +138,9 @@ semantics.
 | Structured boundary comparison over boundary, bucket, category, and domain rows | covered | `test_clankerprof_compare_supports_boundary_outputs` |
 | Non-zero regression gate exit code | covered | `test_clankerprof_compare_exits_nonzero_for_regression_gate` |
 | Top per-function regressions and improvements in JSON | covered | `test_clankerprof_compare_exits_nonzero_for_regression_gate` |
+| Strict-JSON compare artifacts: new/removed rows serialize `delta_rel` as `null`, never `Infinity` | covered | `test_clankerprof_compare_new_rows_emit_finite_json` |
+| Boundary `top_improvements` ordered by magnitude, most negative first | covered | `test_clankerprof_boundary_compare_orders_top_improvements_by_magnitude` |
+| Compare dispatches on the shared `tool` field and rejects non-report payloads | covered | `test_clankerprof_compare_rejects_wrong_payload_types` |
 | Text compare report wording from older slice tools | not claimed | JSON gate compatibility is the stable contract. |
 
 ## Remaining confidence boundary
