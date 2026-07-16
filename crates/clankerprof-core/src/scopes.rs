@@ -1442,6 +1442,23 @@ pub fn load_boundary_options(
     let Value::Object(payload) = payload else {
         return Err("Boundary config file must be an object.".to_string());
     };
+    // Top-level scope configs are fixed-shape like their entries: a typo such
+    // as `owenr:` must never silently drop a whole section. Map iteration is
+    // sorted, matching Python's sorted() first-offender order.
+    const ALLOWED_TOP_LEVEL: [&str; 7] = [
+        "boundary",
+        "category",
+        "cost_kind",
+        "domain",
+        "owner",
+        "scope",
+        "slices",
+    ];
+    for key in payload.keys() {
+        if !ALLOWED_TOP_LEVEL.contains(&key.as_str()) {
+            return Err(format!("Unknown scope config field: {key}."));
+        }
+    }
     let mut slices: Vec<SliceDefinition> = Vec::new();
     if let Some(raw_slices) = payload.get("slices") {
         // as_str would silently treat a non-string as absent where Python

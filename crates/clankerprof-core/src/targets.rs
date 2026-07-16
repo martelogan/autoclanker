@@ -499,6 +499,15 @@ fn rewrite_numeric_backrefs_to_named(pattern: &str) -> Option<String> {
             '[' if !in_class => in_class = true,
             ']' if in_class => in_class = false,
             '(' if !in_class => {
+                if chars.get(i + 1) == Some(&'?') && chars.get(i + 2) == Some(&'#') {
+                    // CPython comment group: ends at the first ')' with no
+                    // escape processing; its contents never count as groups.
+                    let Some(close) = skip_regex_comment(&chars, i) else {
+                        return None;
+                    };
+                    i = close + 1;
+                    continue;
+                }
                 if chars.get(i + 1) == Some(&'?') {
                     if chars.get(i + 2) == Some(&'P') && chars.get(i + 3) == Some(&'<') {
                         group += 1;
@@ -556,6 +565,20 @@ fn rewrite_numeric_backrefs_to_named(pattern: &str) -> Option<String> {
             i += 2;
             continue;
         }
+        if ch == '('
+            && !in_class
+            && chars.get(i + 1) == Some(&'?')
+            && chars.get(i + 2) == Some(&'#')
+        {
+            // Copy comment groups verbatim so a literal \N inside a comment
+            // is never rewritten (group counting already skipped them).
+            let Some(close) = skip_regex_comment(&chars, i) else {
+                return None;
+            };
+            out.extend(&chars[i..=close]);
+            i = close + 1;
+            continue;
+        }
         if ch == '[' && !in_class {
             in_class = true;
         } else if ch == ']' && in_class {
@@ -565,6 +588,20 @@ fn rewrite_numeric_backrefs_to_named(pattern: &str) -> Option<String> {
         i += 1;
     }
     changed.then_some(out)
+}
+
+/// Index of the `)` closing a CPython `(?#...)` comment starting at `start`,
+/// or None when unterminated (the pattern is malformed; the caller lets the
+/// engine's own error stand).
+fn skip_regex_comment(chars: &[char], start: usize) -> Option<usize> {
+    let mut j = start + 3;
+    while j < chars.len() {
+        if chars[j] == ')' {
+            return Some(j);
+        }
+        j += 1;
+    }
+    None
 }
 
 /// Non-recording compile with the shared contract message; auto-mode needs
@@ -853,5 +890,36 @@ mod glob_tests {
                 "pattern {pattern:?} vs path {path:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod regex_comment_tests {
+    use super::rewrite_numeric_backrefs_to_named;
+
+    #[test]
+    fn comment_parentheses_do_not_count_as_groups() {
+        // The '(' inside the comment must not shift group numbering: \2 is
+        // the second real capture group (?P<b>...).
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?P<a>/srv)(?#()(?P<b>/app)\\2"),
+            Some("(?P<a>/srv)(?#()(?P<b>/app)\\k<b>".to_string())
+        );
+    }
+
+    #[test]
+    fn backrefs_inside_comments_are_never_rewritten() {
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?P<a>x)(?#\\1)\\1"),
+            Some("(?P<a>x)(?#\\1)\\k<a>".to_string())
+        );
+    }
+
+    #[test]
+    fn unterminated_comment_returns_none() {
+        assert_eq!(
+            rewrite_numeric_backrefs_to_named("(?P<a>x)(?#oops\\1"),
+            None
+        );
     }
 }

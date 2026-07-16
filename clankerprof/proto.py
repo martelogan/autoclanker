@@ -75,7 +75,7 @@ class _Reader:
         self.pos = end
         return payload
 
-    def skip(self, wire_type: int) -> None:
+    def skip(self, wire_type: int, field: int, depth: int = 0) -> None:
         if wire_type == 0:
             self.read_varint()
             return
@@ -85,6 +85,22 @@ class _Reader:
         if wire_type == 2:
             self.read_length_delimited()
             return
+        if wire_type == 3:
+            # Deprecated-but-legal group: skip balanced nested fields until
+            # the matching end-group key. Truncation/imbalance still errors.
+            if depth >= 128:
+                raise PprofDecodeError(
+                    "Protobuf group nesting exceeds the supported depth."
+                )
+            while True:
+                inner_field, inner_wire = self.read_key()
+                if inner_wire == 4:
+                    if inner_field != field:
+                        raise PprofDecodeError("Mismatched protobuf group end.")
+                    return
+                self.skip(inner_wire, inner_field, depth + 1)
+        if wire_type == 4:
+            raise PprofDecodeError("Unmatched protobuf group end.")
         if wire_type == 5:
             self._advance(4)
             return
@@ -123,7 +139,7 @@ def _parse_value_type(payload: bytes) -> _RawValueType:
     while not reader.eof():
         field, wire = reader.read_key()
         if wire != 0:
-            reader.skip(wire)
+            reader.skip(wire, field)
             continue
         value = _to_signed64(reader.read_varint())
         if field == 1:
@@ -165,7 +181,7 @@ def _parse_function(payload: bytes) -> _RawFunction:
     while not reader.eof():
         field, wire = reader.read_key()
         if wire != 0:
-            reader.skip(wire)
+            reader.skip(wire, field)
             continue
         value = reader.read_varint()
         if field == 1:
@@ -187,7 +203,7 @@ def _parse_line(payload: bytes) -> _RawLine:
     while not reader.eof():
         field, wire = reader.read_key()
         if wire != 0:
-            reader.skip(wire)
+            reader.skip(wire, field)
             continue
         value = reader.read_varint()
         if field == 1:
@@ -209,7 +225,7 @@ def _parse_location(payload: bytes) -> _RawLocation:
         elif field == 5 and wire == 0:
             result.is_folded = bool(reader.read_varint())
         else:
-            reader.skip(wire)
+            reader.skip(wire, field)
     return result
 
 
@@ -227,7 +243,7 @@ def _parse_sample(payload: bytes) -> Sample:
                     _read_packed_varints(reader.read_length_delimited())
                 )
             else:
-                reader.skip(wire)
+                reader.skip(wire, field)
         elif field == 2:
             if wire == 0:
                 values.append(_to_signed64(reader.read_varint()))
@@ -237,9 +253,9 @@ def _parse_sample(payload: bytes) -> Sample:
                     for value in _read_packed_varints(reader.read_length_delimited())
                 )
             else:
-                reader.skip(wire)
+                reader.skip(wire, field)
         else:
-            reader.skip(wire)
+            reader.skip(wire, field)
     return Sample(location_ids=tuple(location_ids), values=tuple(values))
 
 
@@ -255,7 +271,7 @@ def decode_profile_bytes(data: bytes) -> Profile:
     reader = _Reader(payload)
     strings: list[str] = []
     raw_sample_types: list[_RawValueType] = []
-    raw_period_type: _RawValueType | None = None
+    period_type_bytes: bytearray | None = None
     period = 0
     default_sample_type_index = 0
     raw_functions: list[_RawFunction] = []
@@ -279,13 +295,18 @@ def decode_profile_bytes(data: bytes) -> Profile:
             except UnicodeDecodeError as exc:
                 raise PprofDecodeError("Invalid UTF-8 in pprof string table.") from exc
         elif field == 11 and wire == 2:
-            raw_period_type = _parse_value_type(reader.read_length_delimited())
+            # Singular embedded-message fields merge across occurrences in
+            # protobuf; concatenating the payloads is exactly that merge for
+            # a scalar-field submessage (later set fields win on re-parse).
+            if period_type_bytes is None:
+                period_type_bytes = bytearray()
+            period_type_bytes += reader.read_length_delimited()
         elif field == 12 and wire == 0:
             period = _to_signed64(reader.read_varint())
         elif field == 14 and wire == 0:
             default_sample_type_index = _to_signed64(reader.read_varint())
         else:
-            reader.skip(wire)
+            reader.skip(wire, field)
 
     functions = {
         item.function_id: Function(
@@ -314,6 +335,11 @@ def decode_profile_bytes(data: bytes) -> Profile:
             unit=_decode_text_index(strings, raw.unit_index),
         )
         for raw in raw_sample_types
+    )
+    raw_period_type = (
+        _parse_value_type(bytes(period_type_bytes))
+        if period_type_bytes is not None
+        else None
     )
     period_type = (
         ValueType(

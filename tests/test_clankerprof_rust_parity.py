@@ -4926,7 +4926,13 @@ def test_clankerprof_rust_round8_cluster_w_matches_python(tmp_path: Path) -> Non
         encoding="utf-8",
     )
     output = _assert_identical_success(
-        ["scopes", "--profile", str(zero_sum_profile), "--config", str(zero_sum_config)],
+        [
+            "scopes",
+            "--profile",
+            str(zero_sum_profile),
+            "--config",
+            str(zero_sum_config),
+        ],
         "zero-sum-category",
     )
     boundary = json.loads(output)["boundaries"][0]
@@ -4996,8 +5002,7 @@ def test_clankerprof_rust_round8_cluster_w_matches_python(tmp_path: Path) -> Non
         ),
         (
             "multi-default",
-            "slices:\n  - name: A\n    default: true\n"
-            "  - name: B\n    default: true\n",
+            "slices:\n  - name: A\n    default: true\n  - name: B\n    default: true\n",
             "Slice config declares multiple default slices: A, B. "
             "Exactly one slice may set default.",
         ),
@@ -5078,3 +5083,148 @@ def test_clankerprof_rust_round8_cluster_w_matches_python(tmp_path: Path) -> Non
             "sample type selection (expected 1)."
         ),
     }
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_round8_cluster_x_matches_python(tmp_path: Path) -> None:
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.function("Leaf", "/srv/app/leaf.py")
+    parent = builder.function("T", "/srv/parent.py")
+    builder.sample((builder.location(leaf), builder.location(parent)), 7)
+    profile_bytes = builder.encode()
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(profile_bytes)
+
+    # R8-03: a slices file without a top-level `slices` array fails closed
+    # identically (missing key and explicit null alike).
+    for label, content in (
+        ("typo", "slice:\n  - name: app\n    paths: [/srv/app/**]\n"),
+        ("null", "slices: null\n"),
+    ):
+        slices_path = tmp_path / f"slices-{label}.yml"
+        slices_path.write_text(content, encoding="utf-8")
+        envelope = _assert_identical_envelope(
+            ["slices", "--profile", str(profile_path), "--slices", str(slices_path)],
+            f"slices-key-{label}",
+        )
+        assert json.loads(envelope) == {
+            "ok": False,
+            "error": "Slices file must contain a slices array.",
+        }
+
+    # R8-05: with both a global and a later local --output, the local wins
+    # (last occurrence in typed order); global-only still writes.
+    for lang, runner in (("py", _run_python_cli_raw), ("rs", _run_rust_cli_raw)):
+        local_path = tmp_path / f"local-{lang}.json"
+        global_path = tmp_path / f"global-{lang}.json"
+        run = runner(
+            [
+                "--output",
+                str(global_path),
+                "facts",
+                "--profile",
+                str(profile_path),
+                "--output",
+                str(local_path),
+            ]
+        )
+        assert run.returncode == 0, (lang, run.stderr)
+        assert local_path.exists() and not global_path.exists(), lang
+        only_global = runner(
+            ["--output", str(global_path), "facts", "--profile", str(profile_path)]
+        )
+        assert only_global.returncode == 0, (lang, only_global.stderr)
+        assert global_path.exists(), lang
+    assert (tmp_path / "local-py.json").read_bytes() == (
+        tmp_path / "local-rs.json"
+    ).read_bytes()
+
+    # R8-06: balanced unknown groups are skipped (facts identical to the
+    # unprefixed profile); a mismatched group end errors identically.
+    grouped_path = tmp_path / "grouped.pb"
+    grouped_path.write_bytes(b"\x7b\x8b\x01\x8c\x01\x7c" + profile_bytes)
+    plain_facts = _assert_identical_success(
+        ["facts", "--profile", str(profile_path)], "facts-plain"
+    )
+    grouped_facts = _assert_identical_success(
+        ["facts", "--profile", str(grouped_path)], "facts-grouped"
+    )
+    assert grouped_facts == plain_facts
+    mismatched_path = tmp_path / "mismatched.pb"
+    mismatched_path.write_bytes(b"\x7b\x84\x01")
+    envelope = _assert_identical_envelope(
+        ["facts", "--profile", str(mismatched_path)], "facts-mismatched-group"
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Mismatched protobuf group end.",
+    }
+
+    # R8-08: parentheses inside (?#...) comments never shift group numbering
+    # for the numeric-backref rewrite.
+    comment_profile = PprofFixtureBuilder.create()
+    comment_leaf = comment_profile.function("Leaf", "/srv/app/app")
+    comment_parent = comment_profile.function("T", "/srv/parent.py")
+    comment_profile.sample(
+        (
+            comment_profile.location(comment_leaf),
+            comment_profile.location(comment_parent),
+        ),
+        7,
+    )
+    comment_pb = tmp_path / "comment.pb"
+    comment_pb.write_bytes(comment_profile.encode())
+    comment_config = tmp_path / "comment-config.json"
+    comment_config.write_text(
+        json.dumps({"T": {"Matched": "regex:(?P<a>/srv)(?#()(?P<b>/app)\\2"}}),
+        encoding="utf-8",
+    )
+    matched = _assert_identical_success(
+        ["targets", "--profile", str(comment_pb), "--config", str(comment_config)],
+        "regex-comment-backref",
+    )
+    assert '"Matched"' in matched
+
+    # R8-10: an explicitly empty --output is rejected in both languages
+    # (message prose is engine-specific per the documented precedent).
+    for runner, lang in ((_run_python_cli_raw, "py"), (_run_rust_cli_raw, "rs")):
+        run = runner(["facts", "--profile", str(profile_path), "--output", ""])
+        assert run.returncode == 2, (lang, run.stdout)
+        payload = json.loads(run.stderr)
+        assert payload["ok"] is False and payload["error"], lang
+
+    # R8-11: --show-paths is the documented compatibility no-op — identical
+    # bytes with and without the flag, in and across both languages.
+    base_argv = ["slices", "--profile", str(profile_path)]
+    without_flag = _assert_identical_success(base_argv, "show-paths-absent")
+    with_flag = _assert_identical_success(
+        [*base_argv, "--show-paths"], "show-paths-present"
+    )
+    assert with_flag == without_flag
+
+    # R8-12: unknown top-level scope config keys fail closed identically.
+    owenr_config = tmp_path / "owenr.yml"
+    owenr_config.write_text(
+        'owenr:\n  Intended: "name:Leaf"\nscope:\n  - function: T\n',
+        encoding="utf-8",
+    )
+    envelope = _assert_identical_envelope(
+        ["scopes", "--profile", str(profile_path), "--config", str(owenr_config)],
+        "scope-top-level-typo",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Unknown scope config field: owenr.",
+    }
+
+    # R8-13: repeated singular period_type message fields merge per protobuf
+    # semantics instead of last-occurrence replacement.
+    split_path = tmp_path / "split-period-type.pb"
+    split_path.write_bytes(
+        b"\x32\x00\x32\x03cpu\x32\x0bnanoseconds\x5a\x02\x08\x01\x5a\x02\x10\x02"
+    )
+    facts_output = _assert_identical_success(
+        ["facts", "--profile", str(split_path), "--pretty"], "split-period-type"
+    )
+    payload = json.loads(facts_output)
+    assert payload["profile"]["period_type"] == {"type": "cpu", "unit": "nanoseconds"}

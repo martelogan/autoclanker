@@ -7443,7 +7443,7 @@ def test_clankerprof_scope_slice_predicates_use_effective_ownership(
     ):
         config_path = tmp_path / f"scopes-{owner}.yml"
         config_path.write_text(
-            f"slices: {slices_path}\nowner:\n  {owner}: \"{predicate}\"\n"
+            f'slices: {slices_path}\nowner:\n  {owner}: "{predicate}"\n'
             "scope:\n  - function: T\n",
             encoding="utf-8",
         )
@@ -7568,7 +7568,9 @@ def test_clankerprof_facts_primary_index_must_match_selection(
         sample_types=(("samples", "count"), ("cpu", "nanoseconds")),
         default_sample_type="cpu",
     )
-    builder.sample((builder.location(builder.function("Leaf", "/app/leaf.py")),), (1, 100))
+    builder.sample(
+        (builder.location(builder.function("Leaf", "/app/leaf.py")),), (1, 100)
+    )
     profile_path = tmp_path / "typed.pb"
     profile_path.write_bytes(builder.encode())
     facts_path = tmp_path / "facts.json"
@@ -7589,3 +7591,97 @@ def test_clankerprof_facts_primary_index_must_match_selection(
         "Sample facts primary_value_index 0 contradicts the declared default "
         "sample type selection (expected 1)."
     )
+
+
+def test_clankerprof_decoder_skips_balanced_unknown_groups() -> None:
+    base = b"\x32\x00\x12\x02\x10\x07"
+    plain = decode_profile_bytes(base)
+    empty_group = decode_profile_bytes(b"\x7b\x7c" + base)
+    nested_group = decode_profile_bytes(b"\x7b\x8b\x01\x8c\x01\x7c" + base)
+    assert empty_group.samples == plain.samples
+    assert nested_group.samples == plain.samples
+
+    with pytest.raises(PprofDecodeError, match="Unexpected end of protobuf stream"):
+        decode_profile_bytes(b"\x7b")
+    with pytest.raises(PprofDecodeError, match="Unmatched protobuf group end"):
+        decode_profile_bytes(b"\x7c")
+    with pytest.raises(PprofDecodeError, match="Mismatched protobuf group end"):
+        decode_profile_bytes(b"\x7b\x84\x01")
+    with pytest.raises(
+        PprofDecodeError, match="group nesting exceeds the supported depth"
+    ):
+        decode_profile_bytes(b"\x7b" * 200 + b"\x7c")
+
+
+def test_clankerprof_decoder_merges_repeated_period_type_fields() -> None:
+    # period_type split across two field-11 occurrences: {type: 1}, {unit: 2}.
+    profile = decode_profile_bytes(
+        b"\x32\x00\x32\x03cpu\x32\x0bnanoseconds\x5a\x02\x08\x01\x5a\x02\x10\x02"
+    )
+    assert profile.period_type is not None
+    assert profile.period_type.type_name == "cpu"
+    assert profile.period_type.unit == "nanoseconds"
+
+
+def test_clankerprof_slices_file_requires_top_level_slices_key(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.function("work", "/srv/app/leaf.py")
+    builder.sample((builder.location(leaf),), 7)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+
+    for content in (
+        "slice:\n  - name: app\n    paths: [/srv/app/**]\n",
+        "slices: null\n",
+    ):
+        slices_path = tmp_path / "slices.yml"
+        slices_path.write_text(content, encoding="utf-8")
+        exit_code = clankerprof_main(
+            ["slices", "--profile", str(profile_path), "--slices", str(slices_path)]
+        )
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == "Slices file must contain a slices array."
+
+
+def test_clankerprof_empty_path_option_values_are_rejected(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Rust's clap PathBuf parser rejects explicitly-empty values; truthiness
+    # guards previously treated them as absent in Python.
+    exit_code = clankerprof_main(["slices", "--facts", "x.json", "--output", ""])
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "--output requires a non-empty path."
+
+    exit_code = clankerprof_main(["targets", "--profile", "", "--target", "T"])
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "--profile requires a non-empty path."
+
+
+def test_clankerprof_scope_config_rejects_unknown_top_level_keys(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.function("Leaf", "/srv/app/leaf.py")
+    parent = builder.function("T", "/srv/parent.py")
+    builder.sample((builder.location(leaf), builder.location(parent)), 7)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    config_path = tmp_path / "scopes.yml"
+    config_path.write_text(
+        'owenr:\n  Intended: "name:Leaf"\nscope:\n  - function: T\n',
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == "Unknown scope config field: owenr."

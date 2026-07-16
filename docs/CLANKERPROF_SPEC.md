@@ -45,7 +45,15 @@ fields (even in skipped unknown fields), illegal field number zero in any
 message, and invalid UTF-8 in the string table are decode errors, never
 silently accepted (shared errors: "Illegal protobuf field number 0.",
 "Invalid UTF-8 in pprof string table."). Varint bits past 63 drop, per
-protobuf 64-bit semantics.
+protobuf 64-bit semantics. Deprecated group fields (wire types 3/4) in
+unknown fields are legal protobuf: both decoders skip a balanced group,
+nested fields included, while a mismatched or unmatched group end, a
+truncated group, or nesting past 128 levels is a decode error (shared
+errors: "Mismatched protobuf group end.", "Unmatched protobuf group
+end.", "Protobuf group nesting exceeds the supported depth."). Repeated
+occurrences of the singular `period_type` message field merge per
+protobuf semantics — a later occurrence's set fields override and its
+unset fields keep earlier values — never last-occurrence replacement.
 
 ### Primary-value selection
 
@@ -419,6 +427,11 @@ never-matching predicate. A scope's `count` must be the string `occurrence`
 or `once_per_sample`; any other value (including non-strings) is a validation
 error, never a silent occurrence default. An owner's `fallback` flag follows
 Python truthiness over the parsed value in both implementations.
+Top-level scope configs are fixed-shape like their entries: any key
+outside `slices`/`cost_kind`/`category`/`owner`/`domain`/`scope`/
+`boundary` is a validation error naming the key (`Unknown scope config
+field: <key>.`), so a misspelled section can never silently disable
+attribution or exclusions.
 Configured cost-kind and owner definitions are evaluated in declaration
 order and the first matching definition wins, in YAML and TOML alike; a
 sorted-map reordering of these tables is a correctness bug. A scope's
@@ -528,7 +541,10 @@ Python's regular-expression dialect, including lookaround and
 backreferences; the Rust implementation compiles them with an engine
 (fancy-regex) that accepts the overwhelming majority of that dialect —
 numeric backreferences to named groups are rewritten to named backrefs so
-Python's mixed spelling (`(?P<x>…)\1`) compiles identically, and any
+Python's mixed spelling (`(?P<x>…)\1`) compiles identically (the rewrite
+understands CPython `(?#…)` comment groups: parentheses inside comments
+never count toward group numbering and comment bodies are never
+rewritten), and any
 residual pattern fancy-regex cannot compile fails closed with exit `2`.
 Patterns that compile in both engines agree on the overwhelmingly common
 constructs, but MATCHING semantics follow each engine's own rules at these
@@ -648,6 +664,12 @@ and `--by-slice` `%`-threshold selection compares against those rendered
 `0` percentages (thresholds `<= 0` keep every row; positive thresholds drop
 them all), never against the unrelated whole-profile total.
 
+A slices file must contain a top-level `slices` array: a missing key is
+the same validation error as a wrong-typed value ("Slices file must
+contain a slices array.") in both languages, never an empty default —
+a `slice:` typo must not silently discard the supplied ownership
+configuration.
+
 At most one slice may set `default: true`; declaring several is a validation
 error (previously attribution silently used the last while tracking used the
 first). Slice names must be unique: duplicates are a validation error in
@@ -766,7 +788,10 @@ default. These are byte contracts verified by the parity suite. Non-JSON formats
 print exactly the raw rendered payload to stdout — never mixed with a JSON
 envelope; with `--output` they write the artifact and print the JSON receipt.
 A global `--output` before the subcommand is equivalent to the subcommand's
-own `--output` through both the standalone and umbrella CLIs.
+own `--output` through both the standalone and umbrella CLIs; when both
+are supplied, the last occurrence in the user's typed order wins — the
+hoist inserts the global just after the subcommand, so a later local
+`--output` overrides it in both implementations.
 
 Every subcommand, including `compare`, accepts `--output`. Receipts name the
 writing tool in a `tool` key; the `facts` receipt additionally carries
@@ -800,6 +825,13 @@ collapse shape validation always runs, with or without a slices config.
 signed 64-bit integers (negative limits drop slices from the tail,
 Python-slice style) and `%`-suffixed thresholds must be finite numbers —
 unparsable or non-finite values are validation errors, never ignored.
+Explicitly empty path values (`--output ''` and every other path-valued
+option) are rejected in both implementations — never silently treated as
+absent; the rejection message is engine-specific prose behind the shared
+behavior. `--show-paths` (and config `show_paths`) is an accepted
+compatibility no-op in both implementations: v2 slice artifacts always
+carry frame filenames, and the flag changes no bytes (pinned by the
+parity suite).
 Every integer-valued CLI flag (`--top`, `--unattributed-libraries`,
 `--by-slice` bare values) shares one strict grammar in both implementations:
 an optional sign followed by ASCII digits, within the signed 64-bit range.

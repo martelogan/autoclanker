@@ -506,7 +506,11 @@ def _load_slices(path: str | None) -> tuple[SliceDefinition, ...]:
     if not isinstance(payload, dict):
         raise ValueError("Slices file must be a YAML object.")
     raw_payload = cast(dict[object, object], payload)
-    raw_slices = raw_payload.get("slices", [])
+    if "slices" not in raw_payload:
+        # Rust requires the key; defaulting it to [] let a `slice:` typo
+        # silently discard the entire supplied ownership configuration.
+        raise ValueError("Slices file must contain a slices array.")
+    raw_slices = raw_payload["slices"]
     if not isinstance(raw_slices, list):
         raise ValueError("Slices file must contain a slices array.")
     slices: list[SliceDefinition] = []
@@ -1042,6 +1046,20 @@ def _load_boundary_options(
     runtime_rules: RuntimeRuleSet,
 ) -> BoundaryAnalysisOptions:
     payload = _load_config_payload(path, description="Boundary")
+    # Top-level scope configs are fixed-shape like their entries: a typo such
+    # as `owenr:` must never silently drop a whole section.
+    allowed_top_level = {
+        "boundary",
+        "category",
+        "cost_kind",
+        "domain",
+        "owner",
+        "scope",
+        "slices",
+    }
+    for key in sorted(payload):
+        if key not in allowed_top_level:
+            raise ValueError(f"Unknown scope config field: {key}.")
     slices_path = payload.get("slices")
     slices: tuple[SliceDefinition, ...] = ()
     if slices_path is not None:
@@ -1674,7 +1692,39 @@ def _hoist_global_output(argv: Sequence[str]) -> list[str]:
             del tokens[index]
             continue
         index += 1
-    return tokens + moved
+    # Insert right after the subcommand token (not at the end) so a local
+    # --output typed later still wins per the last-wins option rule.
+    insert_at = index + 1 if index < len(tokens) else len(tokens)
+    return tokens[:insert_at] + moved + tokens[insert_at:]
+
+
+# Options whose values are filesystem paths. Rust's clap PathBuf parser
+# rejects an explicitly-supplied empty value; Python's argparse accepts it and
+# truthiness guards then treated it as absent — validate centrally instead
+# (message text is engine-specific per the documented usage-error precedent).
+_PATH_OPTION_DESTS = frozenset(
+    {
+        "after",
+        "before",
+        "config",
+        "cpu_attributables",
+        "facts",
+        "output",
+        "profile",
+        "ruby_core_classes",
+        "runtime_rules",
+        "semantic_callers_csv",
+        "slices",
+    }
+)
+
+
+def _reject_empty_path_options(args: argparse.Namespace) -> None:
+    for dest in sorted(_PATH_OPTION_DESTS):
+        value = getattr(args, dest, None)
+        if isinstance(value, str) and not value:
+            flag = "--" + dest.replace("_", "-")
+            raise ValueError(f"{flag} requires a non-empty path.")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1682,6 +1732,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         resolved_argv = list(sys.argv[1:]) if argv is None else list(argv)
         args = parser.parse_args(_hoist_global_output(resolved_argv))
+        _reject_empty_path_options(args)
         payload = cast(dict[str, Any], args.handler(args))
         _emit_json(payload)
         if payload.get("tool") == "clankerprof_compare" and payload.get(

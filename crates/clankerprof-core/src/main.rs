@@ -389,7 +389,14 @@ fn hoist_global_output(argv: Vec<String>) -> Result<Vec<String>, String> {
         }
         index += 1;
     }
-    tokens.extend(moved);
+    // Insert right after the subcommand token (not at the end) so a local
+    // --output typed later still wins per the last-wins option rule.
+    let insert_at = if index < tokens.len() {
+        index + 1
+    } else {
+        tokens.len()
+    };
+    tokens.splice(insert_at..insert_at, moved);
     Ok(tokens)
 }
 
@@ -1431,13 +1438,39 @@ mod tests {
 
     #[test]
     fn hoist_moves_leading_global_output_after_the_subcommand() {
+        // Inserted directly after the subcommand (not at the end) so a local
+        // --output typed later still wins per the last-wins option rule.
         let hoisted = hoist_global_output(args(&[
             "bin", "--output", "out.json", "targets", "--target", "T",
         ]))
         .expect("hoist");
         assert_eq!(
             hoisted,
-            args(&["bin", "targets", "--target", "T", "--output", "out.json"])
+            args(&["bin", "targets", "--output", "out.json", "--target", "T"])
+        );
+    }
+
+    #[test]
+    fn hoist_keeps_a_later_local_output_winning() {
+        let hoisted = hoist_global_output(args(&[
+            "bin",
+            "--output",
+            "global.json",
+            "targets",
+            "--output",
+            "local.json",
+        ]))
+        .expect("hoist");
+        assert_eq!(
+            hoisted,
+            args(&[
+                "bin",
+                "targets",
+                "--output",
+                "global.json",
+                "--output",
+                "local.json"
+            ])
         );
     }
 
@@ -1456,9 +1489,9 @@ mod tests {
             args(&[
                 "bin",
                 "compare",
+                "--output=global.json",
                 "--before",
-                "b.json",
-                "--output=global.json"
+                "b.json"
             ])
         );
         let untouched = hoist_global_output(args(&["bin", "targets", "--output", "local.json"]))

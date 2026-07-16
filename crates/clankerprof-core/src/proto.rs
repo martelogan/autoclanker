@@ -108,7 +108,11 @@ impl<'a> Reader<'a> {
         Ok(payload)
     }
 
-    fn skip(&mut self, wire_type: u8) -> DecodeResult<()> {
+    fn skip(&mut self, wire_type: u8, field: u64) -> DecodeResult<()> {
+        self.skip_with_depth(wire_type, field, 0)
+    }
+
+    fn skip_with_depth(&mut self, wire_type: u8, field: u64, depth: u32) -> DecodeResult<()> {
         match wire_type {
             0 => {
                 self.read_varint()?;
@@ -119,6 +123,30 @@ impl<'a> Reader<'a> {
                 self.read_length_delimited()?;
                 Ok(())
             }
+            // Deprecated-but-legal group: skip balanced nested fields until
+            // the matching end-group key. Truncation/imbalance still errors.
+            3 => {
+                if depth >= 128 {
+                    return Err(PprofDecodeError::InvalidProtobuf(
+                        "Protobuf group nesting exceeds the supported depth.".to_string(),
+                    ));
+                }
+                loop {
+                    let (inner_field, inner_wire) = self.read_key()?;
+                    if inner_wire == 4 {
+                        if inner_field != field {
+                            return Err(PprofDecodeError::InvalidProtobuf(
+                                "Mismatched protobuf group end.".to_string(),
+                            ));
+                        }
+                        return Ok(());
+                    }
+                    self.skip_with_depth(inner_wire, inner_field, depth + 1)?;
+                }
+            }
+            4 => Err(PprofDecodeError::InvalidProtobuf(
+                "Unmatched protobuf group end.".to_string(),
+            )),
             5 => self.advance(4),
             _ => Err(PprofDecodeError::InvalidProtobuf(format!(
                 "Unsupported protobuf wire type: {wire_type}"
@@ -152,7 +180,7 @@ fn parse_value_type(payload: &[u8]) -> DecodeResult<RawValueType> {
     while !reader.eof() {
         let (field, wire) = reader.read_key()?;
         if wire != 0 {
-            reader.skip(wire)?;
+            reader.skip(wire, field)?;
             continue;
         }
         let value = int64_from_varint(reader.read_varint()?);
@@ -204,7 +232,7 @@ pub fn decode_profile_bytes(data: &[u8]) -> DecodeResult<Profile> {
     let mut reader = Reader::new(&payload);
     let mut strings = Vec::new();
     let mut raw_sample_types = Vec::new();
-    let mut raw_period_type: Option<RawValueType> = None;
+    let mut period_type_bytes: Option<Vec<u8>> = None;
     let mut period = 0i64;
     let mut default_sample_type_index = 0i64;
     let mut raw_functions = Vec::new();
@@ -219,10 +247,15 @@ pub fn decode_profile_bytes(data: &[u8]) -> DecodeResult<Profile> {
             (4, 2) => raw_locations.push(parse_location(reader.read_length_delimited()?)?),
             (5, 2) => raw_functions.push(parse_function(reader.read_length_delimited()?)?),
             (6, 2) => strings.push(decode_utf8_strict(reader.read_length_delimited()?)?),
-            (11, 2) => raw_period_type = Some(parse_value_type(reader.read_length_delimited()?)?),
+            // Singular embedded-message fields merge across occurrences in
+            // protobuf; concatenating the payloads is exactly that merge for
+            // a scalar-field submessage (later set fields win on re-parse).
+            (11, 2) => period_type_bytes
+                .get_or_insert_with(Vec::new)
+                .extend_from_slice(reader.read_length_delimited()?),
             (12, 0) => period = int64_from_varint(reader.read_varint()?),
             (14, 0) => default_sample_type_index = int64_from_varint(reader.read_varint()?),
-            _ => reader.skip(wire)?,
+            _ => reader.skip(wire, field)?,
         }
     }
 
@@ -268,6 +301,10 @@ pub fn decode_profile_bytes(data: &[u8]) -> DecodeResult<Profile> {
             unit: string_at_signed(&strings, raw.unit_index),
         })
         .collect();
+    let raw_period_type = match period_type_bytes {
+        Some(bytes) => Some(parse_value_type(&bytes)?),
+        None => None,
+    };
     let period_type = raw_period_type.map(|raw| ValueType {
         type_name: string_at_signed(&strings, raw.type_index),
         unit: string_at_signed(&strings, raw.unit_index),
@@ -325,7 +362,7 @@ fn parse_function(payload: &[u8]) -> DecodeResult<RawFunction> {
     while !reader.eof() {
         let (field, wire) = reader.read_key()?;
         if wire != 0 {
-            reader.skip(wire)?;
+            reader.skip(wire, field)?;
             continue;
         }
         let value = reader.read_varint()?;
@@ -347,7 +384,7 @@ fn parse_line(payload: &[u8]) -> DecodeResult<RawLine> {
     while !reader.eof() {
         let (field, wire) = reader.read_key()?;
         if wire != 0 {
-            reader.skip(wire)?;
+            reader.skip(wire, field)?;
             continue;
         }
         let value = reader.read_varint()?;
@@ -371,7 +408,7 @@ fn parse_location(payload: &[u8]) -> DecodeResult<RawLocation> {
                 .lines
                 .push(parse_line(reader.read_length_delimited()?)?),
             (5, 0) => result.is_folded = reader.read_varint()? != 0,
-            _ => reader.skip(wire)?,
+            _ => reader.skip(wire, field)?,
         }
     }
     Ok(result)
@@ -387,7 +424,7 @@ fn parse_sample(payload: &[u8]) -> DecodeResult<Sample> {
             1 => match wire {
                 0 => location_ids.push(reader.read_varint()?),
                 2 => location_ids.extend(read_packed_varints(reader.read_length_delimited()?)?),
-                _ => reader.skip(wire)?,
+                _ => reader.skip(wire, field)?,
             },
             2 => match wire {
                 0 => values.push(TimeNs::from(int64_from_varint(reader.read_varint()?))),
@@ -396,9 +433,9 @@ fn parse_sample(payload: &[u8]) -> DecodeResult<Sample> {
                         .into_iter()
                         .map(|raw| TimeNs::from(int64_from_varint(raw))),
                 ),
-                _ => reader.skip(wire)?,
+                _ => reader.skip(wire, field)?,
             },
-            _ => reader.skip(wire)?,
+            _ => reader.skip(wire, field)?,
         }
     }
     Ok(Sample {
@@ -491,5 +528,67 @@ mod gzip_tests {
         let mut stream = gzip_member(&[0x32, 0x00]);
         stream.extend([0x01, 0x02, 0x03]);
         assert_eq!(maybe_gzip_decompress(&stream).expect("fallback"), stream);
+    }
+}
+
+#[cfg(test)]
+mod group_skip_tests {
+    use super::*;
+
+    fn base_profile() -> Vec<u8> {
+        // string table [""], one sample value 7
+        vec![0x32, 0x00, 0x12, 0x02, 0x10, 0x07]
+    }
+
+    #[test]
+    fn balanced_unknown_groups_are_skipped() {
+        // field 15: SGROUP (0x7b) ... EGROUP (0x7c); empty and nested forms.
+        let mut empty = vec![0x7b, 0x7c];
+        empty.extend(base_profile());
+        let profile = decode_profile_bytes(&empty).expect("empty group skips");
+        assert_eq!(profile.samples.len(), 1);
+
+        // field 17 group nested inside the field 15 group.
+        let mut nested = vec![0x7b, 0x8b, 0x01, 0x8c, 0x01, 0x7c];
+        nested.extend(base_profile());
+        let profile = decode_profile_bytes(&nested).expect("nested group skips");
+        assert_eq!(profile.samples.len(), 1);
+    }
+
+    #[test]
+    fn unbalanced_groups_are_decode_errors() {
+        let truncated = decode_profile_bytes(&[0x7b]).expect_err("truncated group");
+        assert_eq!(truncated.to_string(), "Unexpected end of protobuf stream.");
+
+        let stray = decode_profile_bytes(&[0x7c]).expect_err("stray group end");
+        assert_eq!(stray.to_string(), "Unmatched protobuf group end.");
+
+        // field 15 group closed by a field 16 end key (0x84 0x01).
+        let mismatched =
+            decode_profile_bytes(&[0x7b, 0x84, 0x01]).expect_err("mismatched group end");
+        assert_eq!(mismatched.to_string(), "Mismatched protobuf group end.");
+
+        // 200 nested opens exceed the 128-level cap before any end key.
+        let mut deep = vec![0x7b; 200];
+        deep.push(0x7c);
+        let capped = decode_profile_bytes(&deep).expect_err("depth cap");
+        assert_eq!(
+            capped.to_string(),
+            "Protobuf group nesting exceeds the supported depth."
+        );
+    }
+
+    #[test]
+    fn repeated_period_type_occurrences_merge() {
+        // strings ["", "cpu", "nanoseconds"], then period_type split across
+        // two field-11 occurrences: {type: 1} and {unit: 2}.
+        let bytes = [
+            0x32, 0x00, 0x32, 0x03, b'c', b'p', b'u', 0x32, 0x0b, b'n', b'a', b'n', b'o', b's',
+            b'e', b'c', b'o', b'n', b'd', b's', 0x5a, 0x02, 0x08, 0x01, 0x5a, 0x02, 0x10, 0x02,
+        ];
+        let profile = decode_profile_bytes(&bytes).expect("merged period_type");
+        let period_type = profile.period_type.expect("period_type present");
+        assert_eq!(period_type.type_name, "cpu");
+        assert_eq!(period_type.unit, "nanoseconds");
     }
 }
