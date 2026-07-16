@@ -100,6 +100,52 @@ def _json_depth_message(text: str) -> str:
     return "recursion limit exceeded"
 
 
+_JSON_HEX_RE = re.compile(r"[0-9a-fA-F]{4}")
+
+
+def _check_json_surrogates(text: str) -> None:
+    """Mirror serde_json's unpaired-surrogate rejection.
+
+    Rust strings cannot represent an unpaired UTF-16 surrogate, so serde
+    fails the parse; Python's json module accepts the escape and produces a
+    string no Rust reader can ever load. Escapes are the only ingress (a
+    strict-UTF-8 file read can't contain raw surrogates), so a lexical scan
+    of string literals suffices. Message cores match serde byte-for-byte;
+    its "at line N column M" suffix is engine-specific detail. Malformed
+    hex escapes are left for json.loads to report as it always has.
+    """
+    for match in _JSON_STRING_RE.finditer(text):
+        literal = match.group(0)
+        end = len(literal) - 1
+        i = 1
+        while i < end:
+            if literal[i] != "\\":
+                i += 1
+                continue
+            if literal[i + 1] != "u":
+                i += 2
+                continue
+            hexed = _JSON_HEX_RE.fullmatch(literal, i + 2, min(i + 6, end))
+            if hexed is None:
+                i += 2
+                continue
+            code = int(hexed.group(0), 16)
+            i += 6
+            if 0xDC00 <= code <= 0xDFFF:
+                raise ValueError("lone leading surrogate in hex escape")
+            if not 0xD800 <= code <= 0xDBFF:
+                continue
+            # Leading surrogate: serde requires exactly `\uYYYY` next with a
+            # low surrogate; end-of-string / plain char / other escape all
+            # report the end-of-hex-escape core.
+            if not literal.startswith("\\u", i, end):
+                raise ValueError("unexpected end of hex escape")
+            low = _JSON_HEX_RE.fullmatch(literal, i + 2, min(i + 6, end))
+            if low is None or not 0xDC00 <= int(low.group(0), 16) <= 0xDFFF:
+                raise ValueError("lone leading surrogate in hex escape")
+            i += 6
+
+
 def parse_strict_json(text: str) -> Any:
     # Integer literals outside [i64::MIN, u64::MAX] need no guard here:
     # serde_json parses them as f64, and Python's unbounded int coerces to
@@ -107,6 +153,7 @@ def parse_strict_json(text: str) -> Any:
     # reject both representations with the same messages (pinned by the
     # parity suite).
     _check_json_depth(text)
+    _check_json_surrogates(text)
     return json.loads(
         text,
         parse_constant=_reject_constant,
@@ -115,6 +162,7 @@ def parse_strict_json(text: str) -> Any:
 
 
 YAML_KEY_MESSAGE = "YAML mapping keys must be strings."
+YAML_MERGE_KEY_MESSAGE = "YAML merge keys are not supported in clankerprof inputs."
 
 
 class _StrictYamlLoader(yaml.SafeLoader):
@@ -145,6 +193,15 @@ class _StrictYamlLoader(yaml.SafeLoader):
       tags are rejected with the shared message both engines emit.
     """
 
+    def flatten_mapping(self, node: yaml.MappingNode) -> None:
+        # With the merge implicit resolver removed, a plain `<<` key is an
+        # ordinary string caught below; an explicit `!!merge`-tagged key is
+        # the one spelling that would still reach PyYAML's expansion here.
+        for key_node, _value_node in node.value:
+            if key_node.tag == "tag:yaml.org,2002:merge":
+                raise ValueError(YAML_MERGE_KEY_MESSAGE)
+        super().flatten_mapping(node)
+
     def construct_mapping(
         self, node: yaml.MappingNode, deep: bool = False
     ) -> dict[Any, Any]:
@@ -161,6 +218,13 @@ class _StrictYamlLoader(yaml.SafeLoader):
                 # bool/None/number key objects have no shared spelling with
                 # serde_yaml, so neither implementation coerces them.
                 raise ValueError(YAML_KEY_MESSAGE)
+            if key == "<<":
+                # PyYAML would expand merge keys while serde_yaml keeps `<<`
+                # as an ordinary key — the same accepted file would change
+                # slice ownership. Post-parse, serde cannot distinguish a
+                # plain merge key from a quoted "<<" literal, so both
+                # spellings fail closed in both engines.
+                raise ValueError(YAML_MERGE_KEY_MESSAGE)
             if key in seen:
                 # Matches serde_yaml's duplicate-key error text so the two
                 # implementations emit the same envelope.
@@ -171,7 +235,7 @@ class _StrictYamlLoader(yaml.SafeLoader):
 
 _REPLACED_RESOLVER_TAGS = frozenset(
     f"tag:yaml.org,2002:{name}"
-    for name in ("timestamp", "value", "bool", "int", "float")
+    for name in ("timestamp", "value", "bool", "int", "float", "merge")
 )
 
 _StrictYamlLoader.yaml_implicit_resolvers = {
@@ -342,7 +406,13 @@ _StrictYamlLoader.add_constructor("tag:yaml.org,2002:null", _construct_serde_nul
 # the aligned recursion-limit guard instead of PyYAML's own
 # "unconstructable recursive node" error.
 for _generic_tag_name in (
-    "binary", "set", "omap", "pairs", "timestamp", "value", "str"
+    "binary",
+    "set",
+    "omap",
+    "pairs",
+    "timestamp",
+    "value",
+    "str",
 ):
     _StrictYamlLoader.add_constructor(
         f"tag:yaml.org,2002:{_generic_tag_name}", _construct_ignoring_global_tag
@@ -365,6 +435,43 @@ _add_constructor_untyped = cast(
 _add_constructor_untyped(None, _reject_local_tag)
 
 
+_SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
+
+
+def _check_yaml_surrogates(value: Any) -> None:
+    """Reject strings carrying UTF-16 surrogate code points.
+
+    PyYAML's double-quoted ``\\uXXXX`` escapes are the only ingress (strict
+    UTF-8 file reads cannot contain raw surrogates); serde_yaml fails the
+    parse with this message core because Rust strings cannot represent
+    them. Iterative walk with a visited set: parsed configs can be deep
+    (must not recurse) and YAML aliases can be cyclic (must not loop —
+    cycles are left for the downstream recursion-limit guard to reject).
+    """
+    stack = [value]
+    visited: set[int] = set()
+    while stack:
+        item = stack.pop()
+        if isinstance(item, str):
+            if _SURROGATE_RE.search(item):
+                raise ValueError("found invalid Unicode character escape code")
+        elif isinstance(item, dict):
+            mapping = cast("dict[Any, Any]", item)
+            if id(mapping) in visited:
+                continue
+            visited.add(id(mapping))
+            stack.extend(mapping.keys())
+            stack.extend(mapping.values())
+        elif isinstance(item, list):
+            items = cast("list[Any]", item)
+            if id(items) in visited:
+                continue
+            visited.add(id(items))
+            stack.extend(items)
+
+
 def parse_strict_yaml(text: str) -> Any:
     """`yaml.safe_load` with duplicate or non-string mapping keys rejected."""
-    return yaml.load(text, Loader=_StrictYamlLoader)
+    value = yaml.load(text, Loader=_StrictYamlLoader)
+    _check_yaml_surrogates(value)
+    return value

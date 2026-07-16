@@ -225,9 +225,7 @@ def compare_slice_json(
         # languages report the same first offender when several overflow.
         frame_deltas: list[dict[str, Any]] = []
         for function in sorted(set(before_frames) | set(after_frames)):
-            before_frame_pct = _finite_value(
-                before_frames.get(function, 0.0), function
-            )
+            before_frame_pct = _finite_value(before_frames.get(function, 0.0), function)
             after_frame_pct = _finite_value(after_frames.get(function, 0.0), function)
             frame_deltas.append(
                 {

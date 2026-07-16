@@ -187,7 +187,9 @@ def _render_boundary(
         buckets.append(_render_boundary_bucket(boundary, "Other", leftover))
     # A bucket is kept while any category row rendered: signed categories can
     # cancel to a zero bucket total without being omittable zero rows.
-    buckets = [bucket for bucket in buckets if cast("list[object]", bucket["categories"])]
+    buckets = [
+        bucket for bucket in buckets if cast("list[object]", bucket["categories"])
+    ]
     buckets.sort(key=lambda bucket: cast(int, bucket["time_ns"]), reverse=True)
     return {
         "name": boundary.name,

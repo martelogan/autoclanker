@@ -1370,7 +1370,12 @@ pub fn load_boundary_options(
         return Err("Boundary config file must be an object.".to_string());
     };
     let mut slices: Vec<SliceDefinition> = Vec::new();
-    if let Some(slices_path) = payload.get("slices").and_then(Value::as_str) {
+    if let Some(raw_slices) = payload.get("slices") {
+        // as_str would silently treat a non-string as absent where Python
+        // str()-coerced it into a bogus path; both now fail closed.
+        let slices_path = raw_slices
+            .as_str()
+            .ok_or_else(|| "Boundary config slices must be a string path.".to_string())?;
         let mut resolved = std::path::PathBuf::from(slices_path);
         if resolved.is_relative() {
             if let Some(parent) = path.parent() {

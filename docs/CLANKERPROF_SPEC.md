@@ -154,7 +154,17 @@ and duplicate object member names are validation errors on every JSON input
 surface — never silent last-wins, which would make the same multiset of
 members change meaning with ordering (shared message core
 `duplicate entry with key "<key>"`; the location suffix is engine-specific,
-exactly like the YAML duplicate-key rule).
+exactly like the YAML duplicate-key rule). Unpaired UTF-16 surrogate escapes
+(`\uD800`-family without a matching low half) are validation errors on every
+JSON and YAML input surface in both languages: Rust strings cannot represent
+them, and Python rejects to match (JSON message cores mirror serde_json —
+`unexpected end of hex escape` when a leading surrogate is not followed by
+another `\u` escape, `lone leading surrogate in hex escape` otherwise). In
+JSON a valid surrogate pair composes the astral code point and parses
+normally. YAML never combines surrogate halves — any `\uXXXX` escape in the
+surrogate range (paired or not) is a validation error in both languages
+(serde_yaml's `found invalid Unicode character escape code` core); astral
+code points in YAML use the 8-hex `\UXXXXXXXX` escape, which parses in both.
 JSON integer literals outside `[i64::MIN, u64::MAX]` are representation-
 divergent internally (serde_json falls back to `f64`; Python keeps an
 unbounded `int`) but behaviorally identical by contract: float-domain fields
@@ -342,7 +352,10 @@ Rendering rules shared by both implementations:
   quoted fields unwrap, doubled quotes unescape, quoted commas stay in the
   field, and quoted fields may span newlines (records are scanned across the
   whole payload, never split at line boundaries first) — identical class
-  sets in both implementations.
+  sets in both implementations. Fields of any length are accepted: neither
+  implementation imposes the csv module's 131072-byte default field limit,
+  and any residual csv-module error is a contracted validation failure
+  (exit-2 envelope), never a traceback.
 
 Parents emit in first-seen encounter order (the order the analysis first
 attributed a sample to them) in every row-oriented format — `csv`,
@@ -390,7 +403,11 @@ sorted-map reordering of these tables is a correctness bug. A scope's
 `label` and `name` values must be strings (`scope.label must be a string.`),
 and `function` must be a string or an array of strings; other shapes are
 validation errors in both implementations, because Python `str()` and Rust
-`Display` spell non-string scalars differently. YAML inputs (configs and
+`Display` spell non-string scalars differently. A scope config's top-level
+`slices` value must be a string path
+(`Boundary config slices must be a string path.`); other shapes are
+validation errors in both implementations, never a silent no-slices default
+or a coerced bogus path. YAML inputs (configs and
 rule packs) reject duplicate mapping keys in both implementations — never
 silent last-wins. The envelope message contains
 `duplicate entry with key "<key>"`; surrounding context or line/column
@@ -411,6 +428,14 @@ the mapping, deterministically, never a constructed native object with
 engine-specific (or hash-randomized) rendering; and local `!name` tags are
 rejected on every YAML surface with the shared message
 `YAML local tags are not supported in clankerprof inputs.`.
+
+YAML merge keys are not supported: a `<<` mapping key is a validation error
+on every YAML surface in both implementations (shared message
+`YAML merge keys are not supported in clankerprof inputs.`). PyYAML would
+expand the merge while serde_yaml keeps `<<` as an ordinary key, so the same
+accepted file would silently change attribution. Because serde cannot
+distinguish a plain merge key from a quoted `"<<"` literal after parsing,
+both spellings are rejected — no legitimate clankerprof input uses that key.
 
 Plain-scalar resolution follows serde_yaml's dialect in both implementations
 (the shared table is pinned empirically by

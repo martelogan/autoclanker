@@ -22,16 +22,25 @@ from clankerprof.rules import (
     load_runtime_rules_file,
 )
 
+# The csv module's default 131072-byte field cap is a Python-side guard, not
+# a CSV dialect property; the Rust scanner is unbounded, so fields of any
+# length must parse identically. Portable C-long bound for 32-bit platforms.
+_CSV_FIELD_LIMIT = 2**31 - 1
+
 
 def load_ruby_core_classes(path: str | Path) -> frozenset[str]:
     values: set[str] = set()
-    with Path(path).open(newline="", encoding="utf-8") as handle:
-        for row in csv.reader(handle):
-            if not row:
-                continue
-            value = row[0].strip()
-            if value and not value.startswith("#"):
-                values.add(value)
+    old_limit = csv.field_size_limit(_CSV_FIELD_LIMIT)
+    try:
+        with Path(path).open(newline="", encoding="utf-8") as handle:
+            for row in csv.reader(handle):
+                if not row:
+                    continue
+                value = row[0].strip()
+                if value and not value.startswith("#"):
+                    values.add(value)
+    finally:
+        csv.field_size_limit(old_limit)
     return frozenset(values)
 
 
@@ -40,12 +49,16 @@ def load_default_ruby_core_classes() -> frozenset[str]:
     resource = resources.files("clankerprof.runtime_rules").joinpath(
         "ruby_core_classes.csv"
     )
-    for row in csv.reader(io.StringIO(resource.read_text(encoding="utf-8"))):
-        if not row:
-            continue
-        value = row[0].strip()
-        if value and not value.startswith("#"):
-            values.add(value)
+    old_limit = csv.field_size_limit(_CSV_FIELD_LIMIT)
+    try:
+        for row in csv.reader(io.StringIO(resource.read_text(encoding="utf-8"))):
+            if not row:
+                continue
+            value = row[0].strip()
+            if value and not value.startswith("#"):
+                values.add(value)
+    finally:
+        csv.field_size_limit(old_limit)
     return frozenset(values)
 
 

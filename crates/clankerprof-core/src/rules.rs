@@ -441,6 +441,7 @@ pub const YAML_KEY_MESSAGE: &str = "YAML mapping keys must be strings.";
 /// global tags are resolved or ignored at parse. Python's strict loader
 /// mirrors that split and rejects local tags with this same message.
 pub const YAML_LOCAL_TAG_MESSAGE: &str = "YAML local tags are not supported in clankerprof inputs.";
+pub const YAML_MERGE_KEY_MESSAGE: &str = "YAML merge keys are not supported in clankerprof inputs.";
 
 /// Walk a parsed YAML tree and reject any non-string mapping key or
 /// local-tagged value.
@@ -450,6 +451,14 @@ pub fn require_string_keys(value: &Value) -> Result<(), String> {
             for (key, item) in mapping {
                 if !key.is_string() {
                     return Err(YAML_KEY_MESSAGE.to_string());
+                }
+                if key.as_str() == Some("<<") {
+                    // serde_yaml never applies merges, so `<<` arrives as an
+                    // ordinary key that would silently become metadata while
+                    // PyYAML would have expanded it. Post-parse the quoted
+                    // "<<" spelling is indistinguishable from a merge key;
+                    // both fail closed in both engines.
+                    return Err(YAML_MERGE_KEY_MESSAGE.to_string());
                 }
                 require_string_keys(item)?;
             }

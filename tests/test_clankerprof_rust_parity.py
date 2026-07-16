@@ -3591,9 +3591,7 @@ def test_clankerprof_rust_compare_fail_closed_matches_python(tmp_path: Path) -> 
     assert python_run.returncode == 2 and rust_run.returncode == 2
     assert core in json.loads(python_run.stderr)["error"]
     assert core in json.loads(rust_run.stderr)["error"]
-    dup_config = write(
-        "dup-config.json", '{"T": {"App": "path:/a", "App": "path:/b"}}'
-    )
+    dup_config = write("dup-config.json", '{"T": {"App": "path:/a", "App": "path:/b"}}')
     argv = [
         "targets",
         "--facts",
@@ -3754,7 +3752,15 @@ def test_clankerprof_rust_target_renderer_semantics_match_python(
     deep_profile = tmp_path / "deep_native.pb"
     deep_profile.write_bytes(deep_builder.encode())
     output = _assert_identical_success(
-        ["targets", "--profile", str(deep_profile), "--target", "T", "--format", "simple-csv"],
+        [
+            "targets",
+            "--profile",
+            str(deep_profile),
+            "--target",
+            "T",
+            "--format",
+            "simple-csv",
+        ],
         "deep-native-caller",
     )
     assert "AppCaller (100.0%)" in output
@@ -4277,7 +4283,7 @@ def test_clankerprof_rust_yaml_tags_match_python(tmp_path: Path) -> None:
     global_slices = tmp_path / "tagged-global.yml"
     global_slices.write_text(
         "slices:\n"
-        '  - name: app\n'
+        "  - name: app\n"
         '    paths: ["/srv/**"]\n'
         "    metadata:\n"
         "      blob: !!binary SGVsbG8=\n"
@@ -4423,7 +4429,9 @@ def test_clankerprof_rust_round6_cluster_s_matches_python(tmp_path: Path) -> Non
     )
     payload = json.loads(cancelled)
     assert payload["summary"]["matching_time_ns"] == 0
-    assert {item["name"]: (item["time_ns"], item["pct"]) for item in payload["slices"]} == {
+    assert {
+        item["name"]: (item["time_ns"], item["pct"]) for item in payload["slices"]
+    } == {
         "A": (10, 0),
         "B": (-10, 0),
     }
@@ -4433,11 +4441,17 @@ def test_clankerprof_rust_round6_cluster_s_matches_python(tmp_path: Path) -> Non
     bucket_builder = PprofFixtureBuilder.create()
     scope_loc = bucket_builder.location(bucket_builder.function("S", "/srv/app/s.py"))
     bucket_builder.sample(
-        (bucket_builder.location(bucket_builder.function("Pos", "/srv/app/pos.py")), scope_loc),
+        (
+            bucket_builder.location(bucket_builder.function("Pos", "/srv/app/pos.py")),
+            scope_loc,
+        ),
         10,
     )
     bucket_builder.sample(
-        (bucket_builder.location(bucket_builder.function("Neg", "/srv/app/neg.py")), scope_loc),
+        (
+            bucket_builder.location(bucket_builder.function("Neg", "/srv/app/neg.py")),
+            scope_loc,
+        ),
         -10,
     )
     bucket_builder.sample(
@@ -4479,4 +4493,110 @@ def test_clankerprof_rust_round6_cluster_s_matches_python(tmp_path: Path) -> Non
     assert json.loads(envelope) == {
         "ok": False,
         "error": "scope.rollup name 'Other' is reserved for unbucketed cost kinds.",
+    }
+
+
+@pytest.mark.skipif(shutil.which("cargo") is None, reason="cargo is not installed")
+def test_clankerprof_rust_round6_cluster_t_matches_python(tmp_path: Path) -> None:
+    facts_path = _order_scope_facts(tmp_path)
+
+    # R6-05: YAML merge keys fail closed with one shared message in both
+    # engines (plain and quoted spellings; serde cannot distinguish them
+    # post-parse) across the slices and scope-config surfaces.
+    merge_message = {
+        "ok": False,
+        "error": "YAML merge keys are not supported in clankerprof inputs.",
+    }
+    merge_slices = tmp_path / "merge-slices.yml"
+    merge_slices.write_text(
+        'defaults: &defaults\n  paths: ["/srv"]\nslices:\n  - name: A\n    <<: *defaults\n',
+        encoding="utf-8",
+    )
+    envelope = _assert_identical_envelope(
+        ["slices", "--facts", str(facts_path), "--slices", str(merge_slices)],
+        "merge-key-slices",
+    )
+    assert json.loads(envelope) == merge_message
+    quoted_scope = tmp_path / "merge-scope.yml"
+    quoted_scope.write_text(
+        'cost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - function: T\n    "<<": 1\n',
+        encoding="utf-8",
+    )
+    envelope = _assert_identical_envelope(
+        ["scopes", "--facts", str(facts_path), "--config", str(quoted_scope)],
+        "merge-key-scope-quoted",
+    )
+    assert json.loads(envelope) == merge_message
+
+    # R6-06: unpaired surrogate escapes fail the JSON parse in both engines
+    # with shared message cores (Rust adds its location suffix).
+    for label, literal, core in (
+        ("lead-end", '"\\ud800"', "unexpected end of hex escape"),
+        ("bare-low", '"\\udc00"', "lone leading surrogate in hex escape"),
+        ("double-lead", '"\\ud800\\ud800"', "lone leading surrogate in hex escape"),
+    ):
+        bad_facts = tmp_path / f"surrogate-{label}.json"
+        bad_facts.write_text(
+            facts_path.read_text(encoding="utf-8").replace('"Leaf"', literal, 1),
+            encoding="utf-8",
+        )
+        argv = ["slices", "--facts", str(bad_facts)]
+        python_run = _run_python_cli_raw(argv)
+        rust_run = _run_rust_cli_raw(argv)
+        assert python_run.returncode == 2, python_run.stderr
+        assert rust_run.returncode == 2, rust_run.stderr
+        assert core in json.loads(python_run.stderr)["error"]
+        assert core in json.loads(rust_run.stderr)["error"]
+    # Valid JSON astral pair keeps working byte-identically in both.
+    pair_facts = tmp_path / "surrogate-pair.json"
+    pair_facts.write_text(
+        facts_path.read_text(encoding="utf-8").replace('"Leaf"', '"\\ud83d\\ude00"', 1),
+        encoding="utf-8",
+    )
+    _assert_identical_success(["slices", "--facts", str(pair_facts)], "astral-pair")
+    # YAML surrogate escapes (even paired) share serde's rejection core.
+    surrogate_yaml = tmp_path / "surrogate-slices.yml"
+    surrogate_yaml.write_text('slices:\n  - name: "s\\ud800"\n', encoding="utf-8")
+    argv = ["slices", "--facts", str(facts_path), "--slices", str(surrogate_yaml)]
+    python_run = _run_python_cli_raw(argv)
+    rust_run = _run_rust_cli_raw(argv)
+    assert python_run.returncode == 2, python_run.stderr
+    assert rust_run.returncode == 2, rust_run.stderr
+    yaml_core = "found invalid Unicode character escape code"
+    assert yaml_core in json.loads(python_run.stderr)["error"]
+    assert yaml_core in json.loads(rust_run.stderr)["error"]
+
+    # R6-08: core-class CSV fields beyond the csv module's 131072-byte
+    # default limit parse identically (Rust's scanner was always unbounded).
+    big_csv = tmp_path / "big-core.csv"
+    big_csv.write_text("A" * 131073 + "\n", encoding="utf-8")
+    _assert_identical_success(
+        [
+            "targets",
+            "--facts",
+            str(facts_path),
+            "--target",
+            "T",
+            "--runtime",
+            "ruby",
+            "--core-classes",
+            str(big_csv),
+        ],
+        "big-core-class-field",
+    )
+
+    # R6-12: a non-string scope `slices` value fails closed identically
+    # (Rust silently ignored it; Python coerced it into a bogus path).
+    bad_slices_config = tmp_path / "bad-slices-scope.yml"
+    bad_slices_config.write_text(
+        'slices: 123\ncost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - function: T\n',
+        encoding="utf-8",
+    )
+    envelope = _assert_identical_envelope(
+        ["scopes", "--facts", str(facts_path), "--config", str(bad_slices_config)],
+        "non-string-scope-slices",
+    )
+    assert json.loads(envelope) == {
+        "ok": False,
+        "error": "Boundary config slices must be a string path.",
     }

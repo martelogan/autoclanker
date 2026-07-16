@@ -5503,7 +5503,10 @@ def test_clankerprof_scope_rollup_name_other_is_reserved(
     builder.sample((leaf, target), 10)
     profile_path = tmp_path / "other.pb"
     profile_path.write_bytes(builder.encode())
-    for rollup_key, expected_field in (("rollup", "scope.rollup"), ("bucket", "scope.bucket")):
+    for rollup_key, expected_field in (
+        ("rollup", "scope.rollup"),
+        ("bucket", "scope.bucket"),
+    ):
         config_path = tmp_path / "other.yml"
         config_path.write_text(
             'cost_kind:\n  A: "name:LeafA"\n'
@@ -6507,7 +6510,10 @@ def test_clankerprof_compare_threshold_flags_use_strict_grammar(
         )
         assert exit_code == 2, spelling
         envelope = _error_envelope(capsys)
-        assert envelope["error"] == "Compare thresholds must be finite, non-negative numbers."
+        assert (
+            envelope["error"]
+            == "Compare thresholds must be finite, non-negative numbers."
+        )
     # Negative thresholds would gate identical reports as regressions (0 > -1).
     exit_code = clankerprof_main(
         [
@@ -6521,7 +6527,9 @@ def test_clankerprof_compare_threshold_flags_use_strict_grammar(
     )
     assert exit_code == 2
     envelope = _error_envelope(capsys)
-    assert envelope["error"] == "Compare thresholds must be finite, non-negative numbers."
+    assert (
+        envelope["error"] == "Compare thresholds must be finite, non-negative numbers."
+    )
     exit_code = clankerprof_main(
         [
             "compare",
@@ -6548,7 +6556,9 @@ def test_clankerprof_compare_rejects_present_null_row_arrays() -> None:
         "summary": {"total_time_ns": 100},
         "boundaries": [{"name": "B", "pct_of_profile": 40.0, "buckets": None}],
     }
-    with pytest.raises(ValueError, match=r"Boundary field 'buckets' must be an array\."):
+    with pytest.raises(
+        ValueError, match=r"Boundary field 'buckets' must be an array\."
+    ):
         compare_boundary_json(boundary_nulled, boundary_nulled)
 
 
@@ -6660,7 +6670,9 @@ def test_clankerprof_recursion_limit_envelopes(
     # reported position exactly (pinned byte-for-byte by the parity suite).
     deep_path = tmp_path / "deep.json"
     deep_path.write_text("[" * 1100 + "]" * 1100, encoding="utf-8")
-    exit_code = clankerprof_main(["targets", "--facts", str(deep_path), "--target", "X"])
+    exit_code = clankerprof_main(
+        ["targets", "--facts", str(deep_path), "--target", "X"]
+    )
     assert exit_code == 2
     envelope = _error_envelope(capsys)
     assert envelope["error"] == "recursion limit exceeded at line 1 column 128"
@@ -6668,7 +6680,9 @@ def test_clankerprof_recursion_limit_envelopes(
     # 129..~1000 band: previously parsed in Python while Rust errored.
     band_path = tmp_path / "band.json"
     band_path.write_text("[" * 300 + "]" * 300, encoding="utf-8")
-    exit_code = clankerprof_main(["targets", "--facts", str(band_path), "--target", "X"])
+    exit_code = clankerprof_main(
+        ["targets", "--facts", str(band_path), "--target", "X"]
+    )
     assert exit_code == 2
     envelope = _error_envelope(capsys)
     assert envelope["error"] == "recursion limit exceeded at line 1 column 128"
@@ -6903,3 +6917,128 @@ def test_clankerprof_yaml_explicit_tags_follow_serde_semantics() -> None:
         parse_strict_yaml("x: !foo bar")
     with pytest.raises(ValueError, match='duplicate entry with key "a"'):
         parse_strict_yaml("x: !!set {a: null, a: null}")
+
+
+def test_clankerprof_yaml_merge_keys_rejected(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import re
+
+    from clankerprof.jsonio import YAML_MERGE_KEY_MESSAGE, parse_strict_yaml
+
+    # PyYAML would expand `<<` while serde_yaml keeps it as an ordinary key,
+    # silently changing slice ownership; both engines now fail closed. The
+    # quoted spelling is indistinguishable from a merge key after serde's
+    # parse, so it is rejected too, as is the explicit !!merge tag.
+    for doc in (
+        'defaults: &defaults\n  paths: ["/a"]\nslices:\n  - name: A\n    <<: *defaults\n',
+        'a: 1\n"<<": 2\n',
+        'defaults: &defaults\n  paths: ["/a"]\nslices:\n  - name: A\n    !!merge x: *defaults\n',
+    ):
+        with pytest.raises(ValueError, match=re.escape(YAML_MERGE_KEY_MESSAGE)):
+            parse_strict_yaml(doc)
+
+    builder = PprofFixtureBuilder.create()
+    builder.sample((builder.location(builder.function("work", "/a/x.py")),), 7)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    slices_path = tmp_path / "slices.yml"
+    slices_path.write_text(
+        'defaults: &defaults\n  paths: ["/a"]\nslices:\n  - name: A\n    <<: *defaults\n',
+        encoding="utf-8",
+    )
+    exit_code = clankerprof_main(
+        ["slices", "--profile", str(profile_path), "--slices", str(slices_path)]
+    )
+    assert exit_code == 2
+    envelope = _error_envelope(capsys)
+    assert envelope["error"] == YAML_MERGE_KEY_MESSAGE
+
+
+def test_clankerprof_json_and_yaml_inputs_reject_lone_surrogates() -> None:
+    import re
+
+    from clankerprof.jsonio import parse_strict_json, parse_strict_yaml
+
+    # serde_json cannot represent unpaired UTF-16 surrogates; message cores
+    # mirror serde's two distinct errors (probed empirically).
+    for doc, core in (
+        ('{"a": "\\ud800"}', "unexpected end of hex escape"),
+        ('{"a": "\\ud800x"}', "unexpected end of hex escape"),
+        ('{"a": "\\ud800\\n"}', "unexpected end of hex escape"),
+        ('{"a": "\\ud800\\u0041"}', "lone leading surrogate in hex escape"),
+        ('{"a": "\\ud800\\ud800"}', "lone leading surrogate in hex escape"),
+        ('{"a": "\\udc00"}', "lone leading surrogate in hex escape"),
+    ):
+        with pytest.raises(ValueError, match=re.escape(core)):
+            parse_strict_json(doc)
+    # Valid astral pairs keep parsing in both engines.
+    assert parse_strict_json('{"a": "\\ud83d\\ude00"}') == {"a": "\U0001f600"}
+
+    # YAML never combines surrogate halves: PyYAML constructs two lone
+    # surrogates from a "pair" of \u escapes and serde_yaml rejects any
+    # \u escape in the surrogate range, so BOTH spellings fail in both
+    # engines; the 8-hex \U form is the supported astral spelling.
+    for doc in ('name: "s\\ud800"', 'name: "s\\ud83d\\ude00"'):
+        with pytest.raises(
+            ValueError, match="found invalid Unicode character escape code"
+        ):
+            parse_strict_yaml(doc)
+    assert parse_strict_yaml('name: "s\\U0001F600"') == {"name": "s\U0001f600"}
+
+
+def test_clankerprof_core_class_csv_accepts_large_fields(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The csv module's default 131072-byte field cap is a Python-side guard,
+    # not a dialect property; Rust's scanner is unbounded.
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("child", "<cfunc>"))
+    parent = builder.location(builder.function("parent", "/srv/app/p.rb"))
+    builder.sample((leaf, parent), 1)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    core_path = tmp_path / "big.csv"
+    core_path.write_text("A" * 131073 + "\n", encoding="utf-8")
+    exit_code = clankerprof_main(
+        [
+            "targets",
+            "--profile",
+            str(profile_path),
+            "--target",
+            "parent",
+            "--runtime",
+            "ruby",
+            "--core-classes",
+            str(core_path),
+        ]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["tool"] == "clankerprof_targets"
+
+
+def test_clankerprof_scope_config_slices_must_be_string(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    builder = PprofFixtureBuilder.create()
+    leaf = builder.location(builder.function("Leaf", "/srv/app/leaf.py"))
+    parent = builder.location(builder.function("T", "/srv/app/t.py"))
+    builder.sample((leaf, parent), 7)
+    profile_path = tmp_path / "profile.pb"
+    profile_path.write_bytes(builder.encode())
+    for bad_slices in ("slices: 123", "slices: [a]"):
+        config_path = tmp_path / "scopes.yml"
+        config_path.write_text(
+            f'{bad_slices}\ncost_kind:\n  AppWork: "name:Leaf"\nscope:\n  - function: T\n',
+            encoding="utf-8",
+        )
+        exit_code = clankerprof_main(
+            ["scopes", "--profile", str(profile_path), "--config", str(config_path)]
+        )
+        assert exit_code == 2
+        envelope = _error_envelope(capsys)
+        assert envelope["error"] == "Boundary config slices must be a string path."

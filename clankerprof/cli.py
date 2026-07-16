@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import math
 import re
@@ -101,7 +102,14 @@ def _contracted(
             # matches serde's parse-time limit (location suffix is
             # engine-specific detail).
             raise ValueError("recursion limit exceeded") from exc
-        except (OSError, EOFError, zlib.error, yaml.YAMLError, OverflowError) as exc:
+        except (
+            OSError,
+            EOFError,
+            zlib.error,
+            yaml.YAMLError,
+            OverflowError,
+            csv.Error,
+        ) as exc:
             raise ValueError(str(exc) or exc.__class__.__name__) from exc
 
     return wrapped
@@ -129,9 +137,7 @@ def _load_attributables(path: str | None) -> dict[str, dict[str, float]] | None:
             # parse); Python's unbounded parse must fail closed at load so
             # both exit 2 before any estimate is scaled.
             if not math.isfinite(metric):
-                raise ValueError(
-                    f"Attributable estimate for '{name}' is not finite."
-                )
+                raise ValueError(f"Attributable estimate for '{name}' is not finite.")
             column[str(key)] = metric
         result[str(name)] = column
     return result
@@ -1005,7 +1011,11 @@ def _load_boundary_options(
     slices_path = payload.get("slices")
     slices: tuple[SliceDefinition, ...] = ()
     if slices_path is not None:
-        raw_slices_path = Path(str(slices_path))
+        if not isinstance(slices_path, str):
+            # Rust's as_str would silently treat non-strings as absent and
+            # Python's str() would leak an OS error for the spelled value.
+            raise ValueError("Boundary config slices must be a string path.")
+        raw_slices_path = Path(slices_path)
         if not raw_slices_path.is_absolute():
             raw_slices_path = Path(path).parent / raw_slices_path
         slices = _load_slices(str(raw_slices_path))
@@ -1052,7 +1062,9 @@ def _json_compatible(value: object, depth: int = 0) -> JsonValue:
     if isinstance(value, float) and not math.isfinite(value):
         # serde_json would silently null a non-finite number; neither
         # implementation can "preserve" it, so both fail closed.
-        raise ValueError("Slice metadata values must be finite JSON-compatible numbers.")
+        raise ValueError(
+            "Slice metadata values must be finite JSON-compatible numbers."
+        )
     if value is None or isinstance(value, str | int | float | bool):
         return value
     if isinstance(value, list):
