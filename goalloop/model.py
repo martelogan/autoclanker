@@ -139,7 +139,14 @@ def load_charter(paths: LoopPaths) -> Charter:
         raise ValueError(
             f"{CHARTER_FILENAME} frontmatter requires a non-empty gates list."
         )
-    gates = tuple(str(gate) for gate in cast(list[object], raw_gates))
+    for gate in cast(list[object], raw_gates):
+        if not isinstance(gate, str) or not gate.strip():
+            raise ValueError(
+                f"{CHARTER_FILENAME} gates must be non-empty strings, got "
+                f"{gate!r}. Quote YAML scalars that would parse as other "
+                "types (e.g. 'true', 'no', '1')."
+            )
+    gates = tuple(cast(list[str], raw_gates))
     raw_audit = payload.get("audit")
     auditor: str | None = None
     max_rounds = 10
@@ -157,7 +164,11 @@ def load_charter(paths: LoopPaths) -> Charter:
                 f"Known keys: {', '.join(sorted(_AUDIT_KEYS))}."
             )
         raw_auditor = audit_payload.get("auditor")
-        auditor = str(raw_auditor) if raw_auditor else None
+        if raw_auditor is not None and not isinstance(raw_auditor, str):
+            raise ValueError(
+                f"{CHARTER_FILENAME} audit.auditor must be a string command."
+            )
+        auditor = raw_auditor if raw_auditor else None
         raw_rounds = audit_payload.get("max_rounds", 10)
         if isinstance(raw_rounds, bool) or not isinstance(raw_rounds, int):
             raise ValueError(f"{CHARTER_FILENAME} audit.max_rounds must be an integer.")

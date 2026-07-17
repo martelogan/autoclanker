@@ -192,7 +192,7 @@ def test_goal_passes_only_when_rows_finish_and_gates_succeed(
 
     charter_path = tmp_path / "goalloop.charter.md"
     charter_path.write_text(
-        charter_path.read_text(encoding="utf-8").replace("exit 3", "true"),
+        charter_path.read_text(encoding="utf-8").replace("exit 3", "echo done"),
         encoding="utf-8",
     )
     # Changing the gates changes the contract: goal refuses until re-locked.
@@ -414,7 +414,7 @@ def test_charter_validation_rejects_malformed_frontmatter(tmp_path: Path) -> Non
     with pytest.raises(ValueError, match="must be a mapping"):
         load_charter(paths)
 
-    charter.write_text("---\ngates: [true]\n---\nbody\n", encoding="utf-8")
+    charter.write_text("---\ngates: ['true']\n---\nbody\n", encoding="utf-8")
     with pytest.raises(ValueError, match="requires a name"):
         load_charter(paths)
 
@@ -423,13 +423,13 @@ def test_charter_validation_rejects_malformed_frontmatter(tmp_path: Path) -> Non
         load_charter(paths)
 
     charter.write_text(
-        "---\nname: demo\ngates: [true]\naudit: nope\n---\nbody\n", encoding="utf-8"
+        "---\nname: demo\ngates: ['true']\naudit: nope\n---\nbody\n", encoding="utf-8"
     )
     with pytest.raises(ValueError, match="audit block must be a mapping"):
         load_charter(paths)
 
     charter.write_text(
-        "---\nname: demo\ngates: [true]\naudit:\n  auditor: codex\n"
+        "---\nname: demo\ngates: ['true']\naudit:\n  auditor: codex\n"
         "  max_rounds: soon\n---\nbody\n",
         encoding="utf-8",
     )
@@ -595,6 +595,26 @@ def test_assert_fails_on_unknown_selectors(
     assert payload["unknown"] == ["NOPE-99"]
     assert goalloop_main(["assert", "A-01", "--root", str(tmp_path)]) == 0
     assert _last_json(capsys)["unknown"] == []
+
+
+@covers("M10-001")
+def test_charter_rejects_non_string_gates_from_yaml_typing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # An unquoted YAML `true` parses as a boolean; silently coercing it to
+    # the shell command "True" is platform-dependent (case-insensitive macOS
+    # finds /bin/true, Linux exits 127). It must be a validation error.
+    _init_loop(tmp_path)
+    charter_path = tmp_path / "goalloop.charter.md"
+    charter_path.write_text(
+        charter_path.read_text(encoding="utf-8").replace("- 'true'", "- true"),
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+    assert goalloop_main(["status", "--root", str(tmp_path)]) == 2
+    error = capsys.readouterr().err
+    assert "gates must be non-empty strings" in error
+    assert "Quote YAML scalars" in error
 
 
 @covers("M10-001")
